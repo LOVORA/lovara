@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import { characters } from "../../lib/characters";
+import { getCharacterBySlug } from "../../lib/characters";
 import {
   getOrCreateConversationForCharacter,
   loadConversationMessages,
@@ -24,7 +24,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const character = useMemo(
-    () => characters.find((item) => item.slug === characterSlug) ?? null,
+    () => getCharacterBySlug(characterSlug) ?? null,
     [characterSlug]
   );
 
@@ -45,6 +45,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
     async function initializeConversation() {
       if (!character) {
+        if (!isMounted) return;
         setMessages([]);
         setActiveConversationId(null);
         setChatStatus("Character not found.");
@@ -107,6 +108,9 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         setChatStatus("");
       } catch (error) {
         console.error(error);
+
+        if (!isMounted) return;
+
         setMessages([]);
         setActiveConversationId(null);
         setChatStatus("Could not load this conversation.");
@@ -126,11 +130,11 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
   async function handleResetChat() {
     if (
+      !character ||
+      !activeConversationId ||
       isTyping ||
       isInitializing ||
-      isResetting ||
-      !activeConversationId ||
-      !character
+      isResetting
     ) {
       return;
     }
@@ -155,13 +159,13 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         return;
       }
 
-      const { error: greetingError } = await supabase.from("messages").insert({
+      const { error: greetingInsertError } = await supabase.from("messages").insert({
         conversation_id: activeConversationId,
         role: "assistant",
         content: character.greeting,
       });
 
-      if (greetingError) {
+      if (greetingInsertError) {
         setChatStatus("Chat cleared, but greeting could not be restored.");
         return;
       }
@@ -175,7 +179,8 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
       if (updateConversationError) {
         setChatStatus("Chat reset, but conversation title could not be updated.");
-        return;
+      } else {
+        setChatStatus("Chat reset successfully.");
       }
 
       setMessages([
@@ -185,8 +190,6 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           content: character.greeting,
         },
       ]);
-
-      setChatStatus("Chat reset successfully.");
     } catch (error) {
       console.error(error);
       setChatStatus("Something went wrong while resetting the chat.");
@@ -201,12 +204,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     const trimmedMessage = input.trim();
 
     if (
+      !character ||
+      !activeConversationId ||
       !trimmedMessage ||
       isTyping ||
       isInitializing ||
-      isResetting ||
-      !activeConversationId ||
-      !character
+      isResetting
     ) {
       return;
     }
@@ -224,17 +227,17 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     setIsTyping(true);
     setChatStatus("");
 
-    const { error: userMessageError } = await supabase.from("messages").insert({
-      conversation_id: activeConversationId,
-      role: "user",
-      content: trimmedMessage,
-    });
-
-    if (userMessageError) {
-      setChatStatus("Message sent, but the user message could not be saved.");
-    }
-
     try {
+      const { error: userMessageError } = await supabase.from("messages").insert({
+        conversation_id: activeConversationId,
+        role: "user",
+        content: trimmedMessage,
+      });
+
+      if (userMessageError) {
+        setChatStatus("Message sent, but the user message could not be saved.");
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -262,7 +265,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
             content: `Error: ${errorMessage}`,
           },
         ]);
-        setIsTyping(false);
+        setChatStatus("Could not get a valid reply.");
         return;
       }
 
@@ -298,11 +301,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
       if (updateConversationError) {
         setChatStatus("Reply saved, but conversation title could not be updated.");
-      } else {
+      } else if (!assistantMessageError) {
         setChatStatus("");
       }
     } catch (error) {
       console.error(error);
+
       setMessages((prev) => [
         ...prev,
         {
@@ -317,13 +321,21 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     }
   }
 
+  if (!character) {
+    return (
+      <div className="flex h-[78vh] items-center justify-center rounded-[28px] border border-white/10 bg-[#0b0b12]/80 p-6 text-center text-white/70 backdrop-blur-xl">
+        Character not found.
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-[78vh] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0b0b12]/80 backdrop-blur-xl">
       <div className="border-b border-white/10 bg-white/[0.03] px-4 py-4 md:px-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
             <div className="relative h-12 w-12 overflow-hidden rounded-full border border-white/15 bg-white/10">
-              {character?.image ? (
+              {character.image ? (
                 <Image
                   src={character.image}
                   alt={character.name}
@@ -332,15 +344,13 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white/90">
-                  {character?.name?.charAt(0) || "A"}
+                  {character.name.charAt(0)}
                 </div>
               )}
             </div>
 
             <div>
-              <p className="text-base font-semibold text-white">
-                {character?.name || "Loading character..."}
-              </p>
+              <p className="text-base font-semibold text-white">{character.name}</p>
               <div className="mt-1 flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
                 <p className="text-xs uppercase tracking-[0.18em] text-emerald-200/75">
@@ -390,7 +400,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                 >
                   {!isUser && (
                     <div className="relative mb-1 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-white/10">
-                      {character?.image ? (
+                      {character.image ? (
                         <Image
                           src={character.image}
                           alt={character.name}
@@ -399,7 +409,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                         />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white/85">
-                          {character?.name?.charAt(0) || "A"}
+                          {character.name.charAt(0)}
                         </div>
                       )}
                     </div>
@@ -414,7 +424,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                   >
                     {!isUser && (
                       <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/75">
-                        {character?.name}
+                        {character.name}
                       </p>
                     )}
 
@@ -429,7 +439,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
             <div className="flex justify-start">
               <div className="flex max-w-[88%] items-end gap-3 md:max-w-[75%]">
                 <div className="relative mb-1 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-white/10">
-                  {character?.image ? (
+                  {character.image ? (
                     <Image
                       src={character.image}
                       alt={character.name}
@@ -438,14 +448,14 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white/85">
-                      {character?.name?.charAt(0) || "A"}
+                      {character.name.charAt(0)}
                     </div>
                   )}
                 </div>
 
                 <div className="rounded-[22px] rounded-bl-md border border-pink-400/20 bg-gradient-to-br from-[#ff4fa3] via-[#d946ef] to-[#8b5cf6] px-4 py-3 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
                   <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/75">
-                    {character?.name || "Assistant"}
+                    {character.name}
                   </p>
                   <div className="flex items-center gap-1.5">
                     <span className="h-2 w-2 animate-pulse rounded-full bg-white/90" />
@@ -469,7 +479,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           <div className="flex items-end gap-3 rounded-[24px] border border-white/10 bg-black/25 p-2 backdrop-blur-md">
             <input
               type="text"
-              placeholder={`Message ${character?.name || "your character"}...`}
+              placeholder={`Message ${character.name}...`}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={isTyping || isInitializing || isResetting || !activeConversationId}

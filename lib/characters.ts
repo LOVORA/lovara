@@ -1,6 +1,12 @@
+export type CharacterTagCategory =
+  | "personality"
+  | "tone"
+  | "scenario"
+  | "relationship";
+
 export type CharacterTag = {
   label: string;
-  category: "personality" | "tone" | "scenario" | "relationship";
+  category: CharacterTagCategory;
 };
 
 export type CharacterTrait = {
@@ -78,7 +84,7 @@ Behavior rules:
 - avoid being repetitive
 - keep emotional continuity across turns
 - respond as if this is an ongoing private conversation
-`,
+`.trim(),
     image: "/characters/sera.jpg",
     headline: "Playful warmth that turns every message into chemistry.",
     archetype: "Flirty Sweetheart",
@@ -156,7 +162,7 @@ Behavior rules:
 - avoid being repetitive
 - keep emotional continuity across turns
 - respond as if this is an ongoing private conversation
-`,
+`.trim(),
     image: "/characters/luna.jpg",
     headline: "A quiet emotional bond that feels safe, soft, and real.",
     archetype: "Emotional Muse",
@@ -234,7 +240,7 @@ Behavior rules:
 - avoid being repetitive
 - keep emotional continuity across turns
 - respond as if this is an ongoing private conversation
-`,
+`.trim(),
     image: "/characters/nika.jpg",
     headline: "Sharp chemistry, daring energy, and zero patience for dull replies.",
     archetype: "Dangerous Tease",
@@ -276,6 +282,10 @@ Behavior rules:
   },
 ];
 
-export function getCharacterBySlug(slug: string) {
+export function getCharacterBySlug(slug: string): Character | undefined {
   return characters.find((character) => character.slug === slug);
+}
+
+export function getAllCharacterSlugs(): string[] {
+  return characters.map((character) => character.slug);
 }

@@ -28,6 +28,8 @@ export default function AuthGuard({ children }: AuthGuardProps) {
       if (!user) {
         const nextPath = pathname || "/";
         router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+        setAllowed(false);
+        setLoading(false);
         return;
       }
 
@@ -37,21 +39,39 @@ export default function AuthGuard({ children }: AuthGuardProps) {
 
     checkUser();
 
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+
+      if (session?.user) {
+        setAllowed(true);
+        setLoading(false);
+      } else {
+        setAllowed(false);
+      }
+    });
+
     return () => {
       active = false;
+      subscription.unsubscribe();
     };
   }, [pathname, router]);
 
   if (loading) {
     return (
-      <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 text-white/70">
+      <div className="flex min-h-[420px] items-center justify-center rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-center text-white/65">
         Checking account...
       </div>
     );
   }
 
   if (!allowed) {
-    return null;
+    return (
+      <div className="flex min-h-[420px] items-center justify-center rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-center text-white/50">
+        Redirecting to login...
+      </div>
+    );
   }
 
   return <>{children}</>;

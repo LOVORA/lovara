@@ -1,6 +1,8 @@
+import { notFound } from "next/navigation";
 import Navbar from "../../../components/landing/navbar";
 import ChatWindow from "../../../components/chat/chat-window";
 import AuthGuard from "../../../components/auth/auth-guard";
+import { getCharacterBySlug } from "../../../lib/characters";
 
 type ChatPageProps = {
   params: Promise<{
@@ -10,6 +12,11 @@ type ChatPageProps = {
 
 export default async function ChatPage({ params }: ChatPageProps) {
   const { slug } = await params;
+  const character = getCharacterBySlug(slug);
+
+  if (!character) {
+    notFound();
+  }
 
   return (
     <main className="min-h-screen bg-[#07070b] text-white">
@@ -25,7 +32,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
               Private Chat
             </span>
             <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.2em] text-white/70 backdrop-blur-md">
-              Immersive Experience
+              {character.archetype}
             </span>
             <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.2em] text-emerald-200/80 backdrop-blur-md">
               Live Session
@@ -40,25 +47,34 @@ export default async function ChatPage({ params }: ChatPageProps) {
                     Lovora Chat
                   </p>
                   <h1 className="mt-2 text-xl font-semibold tracking-tight text-white md:text-2xl">
-                    Private conversation
+                    {character.name}
                   </h1>
                   <p className="mt-2 text-sm leading-7 text-white/60">
-                    A more personal, premium one-on-one chat experience.
+                    {character.headline}
                   </p>
                 </div>
 
-                <div className="hidden md:flex items-center gap-2">
+                <div className="hidden items-center gap-2 md:flex">
                   <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
                   <span className="text-xs uppercase tracking-[0.18em] text-white/55">
-                    Connected
+                    Private session
                   </span>
                 </div>
               </div>
             </div>
 
+            <div className="border-b border-white/10 bg-white/[0.02] px-5 py-4 md:px-6">
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium text-white/90">{character.role}</p>
+                <p className="text-sm leading-7 text-white/60">
+                  {character.description}
+                </p>
+              </div>
+            </div>
+
             <div className="p-3 md:p-4">
               <AuthGuard>
-                <ChatWindow characterSlug={slug} />
+                <ChatWindow characterSlug={character.slug} />
               </AuthGuard>
             </div>
           </div>

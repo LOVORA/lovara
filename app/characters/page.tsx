@@ -6,87 +6,89 @@ import { characters } from "../../lib/characters";
 
 export default function CharactersPage() {
   return (
-    <main className="min-h-screen bg-[#0a0a0f] text-white">
+    <main className="min-h-screen bg-[#07070b] text-white">
       <Navbar />
 
-      <section className="mx-auto max-w-6xl px-6 py-16">
-        <div className="mb-12 max-w-2xl">
-          <p className="mb-3 text-sm uppercase tracking-[0.25em] text-pink-300/70">
-            Characters
-          </p>
-          <h1 className="mb-5 text-4xl font-bold md:text-5xl">
-            Explore all Lovora characters
-          </h1>
-          <p className="text-base leading-8 text-white/70">
-            Pick the personality, tone, and energy that fits your mood. Each
-            character has a different style, emotional dynamic, and chat
-            experience.
-          </p>
-        </div>
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,105,180,0.10),transparent_26%),linear-gradient(to_bottom,#07070b,#0a0a10)]" />
 
-        <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-3">
-          {characters.map((character) => (
-            <Link
-              key={character.slug}
-              href={`/characters/${character.slug}`}
-              className="group relative overflow-hidden rounded-[30px] border border-white/10 bg-white/5 transition duration-300 hover:-translate-y-1.5 hover:border-pink-400/30"
-            >
-              <div className="relative aspect-[3/4] w-full overflow-hidden">
-                <Image
-                  src={character.image}
-                  alt={character.name}
-                  fill
-                  className="object-cover transition duration-500 group-hover:scale-105"
-                  priority={false}
-                />
+        <div className="relative mx-auto max-w-7xl px-4 py-14 md:px-6 md:py-20">
+          <div className="mx-auto max-w-3xl text-center">
+            <span className="rounded-full border border-pink-300/20 bg-pink-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.22em] text-pink-200/85">
+              Characters
+            </span>
 
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/5" />
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,182,193,0.20),transparent_35%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.16),transparent_30%)]" />
+            <h1 className="mt-5 text-4xl font-semibold tracking-tight text-white md:text-6xl">
+              Explore all Lovora characters
+            </h1>
 
-                <div className="absolute left-4 top-4 z-10">
-                  <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.22em] text-white/80 backdrop-blur-md">
+            <p className="mt-5 text-base leading-8 text-white/60 md:text-lg">
+              Pick the personality, tone, and energy that fits your mood. Each
+              character has a different style, emotional dynamic, and chat
+              experience.
+            </p>
+          </div>
+
+          <div className="mt-12 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {characters.map((character) => (
+              <article
+                key={character.slug}
+                className="overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] shadow-[0_24px_100px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+              >
+                <div className="relative h-[300px] bg-black/30">
+                  {character.image ? (
+                    <Image
+                      src={character.image}
+                      alt={character.name}
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-5xl font-semibold text-white/80">
+                      {character.name.charAt(0)}
+                    </div>
+                  )}
+
+                  <div className="absolute left-4 top-4 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-white/80 backdrop-blur-md">
                     AI Companion
-                  </span>
-                </div>
-
-                <div className="absolute right-4 top-4 z-10">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-white/10 text-sm font-semibold text-white/90 backdrop-blur-md">
-                    {character.name.charAt(0)}
                   </div>
                 </div>
 
-                <div className="absolute inset-x-0 bottom-0 z-10 p-5">
-                  <p className="mb-2 text-[11px] uppercase tracking-[0.22em] text-pink-200/75">
-                    {character.role}
-                  </p>
+                <div className="p-6">
+                  <p className="text-sm text-pink-200/80">{character.role}</p>
 
-                  <h2 className="text-2xl font-semibold tracking-tight text-white">
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
                     {character.name}
                   </h2>
 
-                  <p className="mt-3 line-clamp-2 text-sm leading-6 text-white/80">
+                  <p className="mt-3 text-sm leading-7 text-white/60">
                     {character.description}
                   </p>
 
-                  <p className="mt-3 line-clamp-2 text-sm leading-6 text-white/60">
-                    <span className="font-medium text-white/75">
-                      Personality:
-                    </span>{" "}
+                  <p className="mt-4 text-sm leading-7 text-white/45">
+                    <span className="font-medium text-white/70">Personality:</span>{" "}
                     {character.personality}
                   </p>
 
-                  <div className="mt-5 flex items-center justify-between">
-                    <span className="text-sm font-medium text-white/90">
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <Link
+                      href={`/characters/${character.slug}`}
+                      className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
+                    >
                       View Character
-                    </span>
-                    <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs text-white/80 transition duration-300 group-hover:bg-white/15">
-                      Enter
-                    </span>
+                    </Link>
+
+                    <Link
+                      href={`/chat/${character.slug}`}
+                      className="inline-flex items-center justify-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition hover:scale-[1.02] hover:opacity-95"
+                    >
+                      Enter Chat
+                    </Link>
                   </div>
                 </div>
-              </div>
-            </Link>
-          ))}
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
