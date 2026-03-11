@@ -44,6 +44,40 @@ async function findExistingConversation(
   return rows[0] ?? null;
 }
 
+async function createConversation(
+  supabase: SupabaseClient,
+  userId: string,
+  character: CharacterChatConfig,
+  firstAssistantMessage: string
+): Promise<ConversationRow> {
+  const { data, error } = await supabase
+    .from("conversations")
+    .insert({
+      user_id: userId,
+      character_slug: character.slug,
+      title: `Chat with ${character.name}`,
+    })
+    .select("id, user_id, character_slug, title, updated_at, created_at");
+
+  const insertedConversation = ((data as ConversationRow[] | null) ?? [])[0] ?? null;
+
+  if (!insertedConversation) {
+    throw new Error(error?.message || "Could not create conversation.");
+  }
+
+  const { error: greetingError } = await supabase.from("messages").insert({
+    conversation_id: insertedConversation.id,
+    role: "assistant",
+    content: firstAssistantMessage,
+  });
+
+  if (greetingError) {
+    throw new Error(greetingError.message);
+  }
+
+  return insertedConversation;
+}
+
 export async function getOrCreateConversationForCharacter(
   supabase: SupabaseClient,
   userId: string,
@@ -59,42 +93,28 @@ export async function getOrCreateConversationForCharacter(
     return existingConversation;
   }
 
-  const { data, error } = await supabase
-    .from("conversations")
-    .insert({
-      user_id: userId,
-      character_slug: character.slug,
-      title: `Chat with ${character.name}`,
-    })
-    .select("id, user_id, character_slug, title, updated_at, created_at");
-
-  const insertedConversation = ((data as ConversationRow[] | null) ?? [])[0] ?? null;
-
-  if (insertedConversation) {
-    const { error: greetingError } = await supabase.from("messages").insert({
-      conversation_id: insertedConversation.id,
-      role: "assistant",
-      content: character.greeting,
-    });
-
-    if (greetingError) {
-      throw new Error(greetingError.message);
-    }
-
-    return insertedConversation;
-  }
-
-  const fallbackConversation = await findExistingConversation(
+  const createdConversation = await createConversation(
     supabase,
     userId,
-    character.slug
+    character,
+    character.greeting
   );
 
-  if (fallbackConversation) {
-    return fallbackConversation;
-  }
+  return createdConversation;
+}
 
-  throw new Error(error?.message || "Could not create conversation.");
+export async function createFreshConversationForCharacter(
+  supabase: SupabaseClient,
+  userId: string,
+  character: CharacterChatConfig,
+  firstAssistantMessage?: string
+): Promise<ConversationRow> {
+  return createConversation(
+    supabase,
+    userId,
+    character,
+    firstAssistantMessage?.trim() || character.greeting
+  );
 }
 
 export async function loadConversationMessages(

@@ -205,41 +205,6 @@ export default async function CharacterDetailPage({ params }: PageProps) {
 
               <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.35)] backdrop-blur-xl md:p-7">
                 <p className="text-[11px] uppercase tracking-[0.22em] text-pink-200/75">
-                  Conversation hooks
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                  Scenario starters
-                </h2>
-
-                <div className="mt-5 space-y-4">
-                  {character.scenarioStarters.map((starter) => (
-                    <div
-                      key={starter.title}
-                      className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5"
-                    >
-                      <h3 className="text-lg font-medium text-white">
-                        {starter.title}
-                      </h3>
-
-                      <p className="mt-3 text-sm leading-7 text-white/60">
-                        {starter.prompt}
-                      </p>
-
-                      <div className="mt-4 rounded-[18px] border border-pink-300/15 bg-pink-400/10 px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-pink-100/60">
-                          Example opening
-                        </p>
-                        <p className="mt-2 text-sm leading-7 text-pink-100/90">
-                          {starter.openingMessage}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.35)] backdrop-blur-xl md:p-7">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-pink-200/75">
                   Memory model
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
