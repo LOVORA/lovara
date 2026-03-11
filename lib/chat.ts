@@ -23,6 +23,10 @@ export type CharacterChatConfig = {
   greeting: string;
 };
 
+function buildConversationTitle(characterName: string): string {
+  return `Chat with ${characterName}`;
+}
+
 async function findExistingConversation(
   supabase: SupabaseClient,
   userId: string,
@@ -50,28 +54,36 @@ async function createConversation(
   character: CharacterChatConfig,
   firstAssistantMessage: string
 ): Promise<ConversationRow> {
+  const cleanedFirstMessage = firstAssistantMessage.trim() || character.greeting;
+
   const { data, error } = await supabase
     .from("conversations")
     .insert({
       user_id: userId,
       character_slug: character.slug,
-      title: `Chat with ${character.name}`,
+      title: buildConversationTitle(character.name),
     })
-    .select("id, user_id, character_slug, title, updated_at, created_at");
+    .select("id, user_id, character_slug, title, updated_at, created_at")
+    .single();
 
-  const insertedConversation = ((data as ConversationRow[] | null) ?? [])[0] ?? null;
-
-  if (!insertedConversation) {
+  if (error || !data) {
     throw new Error(error?.message || "Could not create conversation.");
   }
+
+  const insertedConversation = data as ConversationRow;
 
   const { error: greetingError } = await supabase.from("messages").insert({
     conversation_id: insertedConversation.id,
     role: "assistant",
-    content: firstAssistantMessage,
+    content: cleanedFirstMessage,
   });
 
   if (greetingError) {
+    await supabase
+      .from("conversations")
+      .delete()
+      .eq("id", insertedConversation.id);
+
     throw new Error(greetingError.message);
   }
 
@@ -93,14 +105,12 @@ export async function getOrCreateConversationForCharacter(
     return existingConversation;
   }
 
-  const createdConversation = await createConversation(
+  return createConversation(
     supabase,
     userId,
     character,
     character.greeting
   );
-
-  return createdConversation;
 }
 
 export async function createFreshConversationForCharacter(
@@ -140,22 +150,23 @@ export async function loadConversationMessages(
     return messages;
   }
 
-  const { data: greetingRows, error: greetingError } = await supabase
+  const cleanedFallbackGreeting = fallbackGreeting.trim();
+
+  const { data: greetingRow, error: greetingError } = await supabase
     .from("messages")
     .insert({
       conversation_id: conversationId,
       role: "assistant",
-      content: fallbackGreeting,
+      content: cleanedFallbackGreeting,
     })
-    .select("id, conversation_id, role, content, created_at");
+    .select("id, conversation_id, role, content, created_at")
+    .single();
 
-  const greeting = ((greetingRows as DbMessageRow[] | null) ?? [])[0] ?? null;
-
-  if (greetingError || !greeting) {
+  if (greetingError || !greetingRow) {
     throw new Error(
       greetingError?.message || "Could not restore the greeting message."
     );
   }
 
-  return [greeting];
+  return [greetingRow as DbMessageRow];
 }

@@ -22,6 +22,7 @@ type Message = {
 
 export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const requestIdRef = useRef(0);
 
   const character = useMemo(
     () => getCharacterBySlug(characterSlug) ?? null,
@@ -34,7 +35,9 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isResetting, setIsResetting] = useState(false);
   const [chatStatus, setChatStatus] = useState("");
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -42,6 +45,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
   useEffect(() => {
     let isMounted = true;
+    requestIdRef.current += 1;
 
     async function initializeConversation() {
       if (!character) {
@@ -54,6 +58,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       }
 
       setIsInitializing(true);
+      setIsTyping(false);
       setChatStatus("Loading chat...");
       setMessages([]);
       setActiveConversationId(null);
@@ -72,11 +77,15 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           return;
         }
 
-        const conversation = await getOrCreateConversationForCharacter(supabase, user.id, {
-          slug: character.slug,
-          name: character.name,
-          greeting: character.greeting,
-        });
+        const conversation = await getOrCreateConversationForCharacter(
+          supabase,
+          user.id,
+          {
+            slug: character.slug,
+            name: character.name,
+            greeting: character.greeting,
+          }
+        );
 
         if (!isMounted) return;
 
@@ -90,19 +99,21 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
         if (!isMounted) return;
 
-        const formattedMessages: Message[] = dbMessages.flatMap((message: DbMessageRow) => {
-          if (message.role !== "assistant" && message.role !== "user") {
-            return [];
-          }
+        const formattedMessages: Message[] = dbMessages.flatMap(
+          (message: DbMessageRow) => {
+            if (message.role !== "assistant" && message.role !== "user") {
+              return [];
+            }
 
-          return [
-            {
-              id: message.id,
-              role: message.role,
-              content: message.content,
-            },
-          ];
-        });
+            return [
+              {
+                id: message.id,
+                role: message.role,
+                content: message.content,
+              },
+            ];
+          }
+        );
 
         setMessages(formattedMessages);
         setChatStatus("");
@@ -155,7 +166,9 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         .eq("conversation_id", activeConversationId);
 
       if (deleteMessagesError) {
-        setChatStatus(`Could not clear chat messages: ${deleteMessagesError.message}`);
+        setChatStatus(
+          `Could not clear chat messages: ${deleteMessagesError.message}`
+        );
         return;
       }
 
@@ -177,12 +190,6 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         })
         .eq("id", activeConversationId);
 
-      if (updateConversationError) {
-        setChatStatus("Chat reset, but conversation title could not be updated.");
-      } else {
-        setChatStatus("Chat reset successfully.");
-      }
-
       setMessages([
         {
           id: crypto.randomUUID(),
@@ -190,6 +197,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           content: character.greeting,
         },
       ]);
+
+      if (updateConversationError) {
+        setChatStatus("Chat reset, but conversation title could not be updated.");
+      } else {
+        setChatStatus("Chat reset successfully.");
+      }
     } catch (error) {
       console.error(error);
       setChatStatus("Something went wrong while resetting the chat.");
@@ -214,15 +227,17 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       return;
     }
 
+    const currentRequestId = ++requestIdRef.current;
+
     const newUserMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content: trimmedMessage,
     };
 
-    const updatedMessages = [...messages, newUserMessage];
+    const nextMessages = [...messages, newUserMessage];
 
-    setMessages(updatedMessages);
+    setMessages(nextMessages);
     setInput("");
     setIsTyping(true);
     setChatStatus("");
@@ -245,34 +260,49 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         },
         body: JSON.stringify({
           slug: character.slug,
-          messages: updatedMessages.map((message) => ({
+          messages: nextMessages.map((message) => ({
             role: message.role,
             content: message.content,
           })),
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
+
+      if (requestIdRef.current !== currentRequestId) {
+        return;
+      }
 
       if (!response.ok) {
-        const errorMessage = data?.error || "Failed to get a reply from the AI.";
+        const errorMessage =
+          (data &&
+            typeof data === "object" &&
+            "error" in data &&
+            typeof data.error === "string" &&
+            data.error) ||
+          "Failed to get a reply from the AI.";
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: `Error: ${errorMessage}`,
-          },
-        ]);
-        setChatStatus("Could not get a valid reply.");
+        setChatStatus(errorMessage);
+        return;
+      }
+
+      const reply =
+        data &&
+        typeof data === "object" &&
+        "reply" in data &&
+        typeof data.reply === "string"
+          ? data.reply.trim()
+          : "";
+
+      if (!reply) {
+        setChatStatus("The AI returned an empty reply.");
         return;
       }
 
       const assistantReply: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: data.reply,
+        content: reply,
       };
 
       setMessages((prev) => [...prev, assistantReply]);
@@ -280,7 +310,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       const { error: assistantMessageError } = await supabase.from("messages").insert({
         conversation_id: activeConversationId,
         role: "assistant",
-        content: data.reply,
+        content: reply,
       });
 
       if (assistantMessageError) {
@@ -307,17 +337,15 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     } catch (error) {
       console.error(error);
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "Error: Something went wrong while contacting the server.",
-        },
-      ]);
+      if (requestIdRef.current !== currentRequestId) {
+        return;
+      }
+
       setChatStatus("Could not reach the chat server.");
     } finally {
-      setIsTyping(false);
+      if (requestIdRef.current === currentRequestId) {
+        setIsTyping(false);
+      }
     }
   }
 
@@ -488,7 +516,13 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
             <button
               type="submit"
-              disabled={isTyping || isInitializing || isResetting || !activeConversationId}
+              disabled={
+                isTyping ||
+                isInitializing ||
+                isResetting ||
+                !activeConversationId ||
+                !input.trim()
+              }
               className="inline-flex h-12 items-center justify-center rounded-[18px] bg-white px-5 text-sm font-semibold text-black transition hover:scale-[1.02] hover:opacity-95 disabled:opacity-60"
             >
               {isTyping ? "Waiting..." : "Send"}
@@ -503,4 +537,3 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     </div>
   );
 }
-

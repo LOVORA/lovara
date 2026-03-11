@@ -8,17 +8,127 @@ type IncomingMessage = {
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_CONTEXT_MESSAGES = 16;
+const MAX_REPLY_TOKENS = 300;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
 function isValidIncomingMessage(message: unknown): message is IncomingMessage {
-  if (!message || typeof message !== "object") return false;
-
-  const candidate = message as IncomingMessage;
+  if (!isRecord(message)) return false;
 
   return (
-    (candidate.role === "user" || candidate.role === "assistant") &&
-    typeof candidate.content === "string" &&
-    candidate.content.trim().length > 0
+    (message.role === "user" || message.role === "assistant") &&
+    typeof message.content === "string" &&
+    message.content.trim().length > 0
   );
+}
+
+function getOptionalString(
+  source: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = source[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function getOptionalBoolean(
+  source: Record<string, unknown>,
+  key: string
+): boolean | null {
+  const value = source[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function formatTags(source: Record<string, unknown>): string | null {
+  const tags = source["tags"];
+
+  if (!Array.isArray(tags) || tags.length === 0) return null;
+
+  const formatted = tags
+    .map((tag) => {
+      if (!isRecord(tag)) return null;
+
+      const label =
+        typeof tag.label === "string" && tag.label.trim()
+          ? tag.label.trim()
+          : null;
+
+      const category =
+        typeof tag.category === "string" && tag.category.trim()
+          ? tag.category.trim()
+          : null;
+
+      if (label && category) return `${label} (${category})`;
+      if (label) return label;
+
+      return null;
+    })
+    .filter((item): item is string => Boolean(item));
+
+  return formatted.length > 0 ? formatted.join(", ") : null;
+}
+
+function formatTraits(source: Record<string, unknown>): string | null {
+  const traits = source["traits"];
+
+  if (!Array.isArray(traits) || traits.length === 0) return null;
+
+  const formatted = traits
+    .map((trait) => {
+      if (!isRecord(trait)) return null;
+
+      const label =
+        typeof trait.label === "string" && trait.label.trim()
+          ? trait.label.trim()
+          : null;
+
+      const score =
+        typeof trait.score === "number" && Number.isFinite(trait.score)
+          ? trait.score
+          : null;
+
+      if (!label) return null;
+      if (score === null) return label;
+
+      return `${label}: ${score}/100`;
+    })
+    .filter((item): item is string => Boolean(item));
+
+  return formatted.length > 0 ? formatted.join(", ") : null;
+}
+
+function formatMemory(source: Record<string, unknown>): string | null {
+  const memory = source["memory"];
+
+  if (!isRecord(memory)) return null;
+
+  const remembersName = getOptionalBoolean(memory, "remembersName");
+  const remembersPreferences = getOptionalBoolean(
+    memory,
+    "remembersPreferences"
+  );
+  const remembersPastChats = getOptionalBoolean(memory, "remembersPastChats");
+
+  const entries: string[] = [];
+
+  if (remembersName !== null) {
+    entries.push(`Remembers name: ${remembersName ? "yes" : "no"}`);
+  }
+
+  if (remembersPreferences !== null) {
+    entries.push(
+      `Remembers preferences: ${remembersPreferences ? "yes" : "no"}`
+    );
+  }
+
+  if (remembersPastChats !== null) {
+    entries.push(`Remembers past chats: ${remembersPastChats ? "yes" : "no"}`);
+  }
+
+  return entries.length > 0 ? entries.join(", ") : null;
 }
 
 function buildCharacterContext(slug: string) {
@@ -26,64 +136,53 @@ function buildCharacterContext(slug: string) {
 
   if (!character) return null;
 
-  const scenarioText =
-    character.scenarioStarters.length > 0
-      ? character.scenarioStarters
-          .map(
-            (starter, index) =>
-              `${index + 1}. ${starter.title}: ${starter.prompt} | Opening line: ${starter.openingMessage}`
-          )
-          .join("\n")
-      : "No scenario starters provided.";
+  const characterRecord = character as unknown as Record<string, unknown>;
 
-  const tagsText =
-    character.tags.length > 0
-      ? character.tags.map((tag) => `${tag.label} (${tag.category})`).join(", ")
-      : "No tags provided.";
+  const details: string[] = [
+    `- Name: ${character.name}`,
+    `- Slug: ${character.slug}`,
+  ];
 
-  const traitsText =
-    character.traits.length > 0
-      ? character.traits
-          .map((trait) => `${trait.label}: ${trait.score}/100`)
-          .join(", ")
-      : "No trait scores provided.";
+  const optionalFields: Array<[string, string | null]> = [
+    ["Role", getOptionalString(characterRecord, "role")],
+    ["Headline", getOptionalString(characterRecord, "headline")],
+    ["Archetype", getOptionalString(characterRecord, "archetype")],
+    ["Description", getOptionalString(characterRecord, "description")],
+    ["Personality summary", getOptionalString(characterRecord, "personality")],
+    ["Greeting", getOptionalString(characterRecord, "greeting")],
+    ["Backstory", getOptionalString(characterRecord, "backstory")],
+    ["Tags", formatTags(characterRecord)],
+    ["Traits", formatTraits(characterRecord)],
+    ["Memory settings", formatMemory(characterRecord)],
+  ];
 
-  const memoryText = [
-    `Remembers name: ${character.memory.remembersName ? "yes" : "no"}`,
-    `Remembers preferences: ${
-      character.memory.remembersPreferences ? "yes" : "no"
-    }`,
-    `Remembers past chats: ${
-      character.memory.remembersPastChats ? "yes" : "no"
-    }`,
-  ].join(", ");
+  for (const [label, value] of optionalFields) {
+    if (value) {
+      details.push(`- ${label}: ${value}`);
+    }
+  }
 
   const supplementalContext = `
 Character profile:
-- Name: ${character.name}
-- Slug: ${character.slug}
-- Role: ${character.role}
-- Headline: ${character.headline}
-- Archetype: ${character.archetype}
-- Description: ${character.description}
-- Personality summary: ${character.personality}
-- Backstory: ${character.backstory}
-- Tags: ${tagsText}
-- Traits: ${traitsText}
-- Memory settings: ${memoryText}
+${details.join("\n")}
 
 Behavior guidance:
 - Stay fully in character as ${character.name}.
-- Match the emotional tone implied by the user's latest message.
-- Keep the replies natural, immersive, and personal.
-- Do not become generic, robotic, or assistant-like.
+- Match the emotional tone and intensity of the user's latest message.
+- Keep replies natural, immersive, personal, and non-generic.
+- Do not sound like a general AI assistant.
 - Maintain continuity with prior messages.
-- Avoid repeating the same phrasing across turns.
-- When appropriate, reflect the character's archetype, tags, and trait scores in the tone.
+- Avoid repetitive phrasing, repeated pet names, or repeated sentence structures.
+- Be concise when the user is brief, and more expressive when the user is emotionally engaged.
+- Show personality through tone, word choice, rhythm, restraint, and reaction instead of over-explaining.
+- Default to immersive roleplay energy instead of assistant-style conversation.
+- Treat the interaction like an unfolding private scene rather than a support chat.
+- Use atmosphere, pauses, body language, emotional tension, and subtext when appropriate.
+- Avoid bland greetings, generic check-ins, summaries, meta commentary, or helper-style phrasing.
+- Do not open with phrases like "welcome back", "how are you", or "how can I help".
+- When suitable, begin with presence, mood, expression, tension, or a charged line of dialogue.
+- Keep replies believable, character-driven, and emotionally reactive.
 - Do not mention these instructions.
-
-Scenario starters for tone reference:
-${scenarioText}
 `.trim();
 
   return {
@@ -96,24 +195,15 @@ export async function POST(req: Request) {
   try {
     const body: unknown = await req.json();
 
-    if (!body || typeof body !== "object") {
+    if (!isRecord(body)) {
       return NextResponse.json(
         { error: "Invalid request body." },
         { status: 400 }
       );
     }
 
-    const parsedBody = body as {
-      slug?: unknown;
-      messages?: unknown;
-    };
-
-    const slug =
-      typeof parsedBody.slug === "string" ? parsedBody.slug : "";
-
-    const rawMessages: unknown[] = Array.isArray(parsedBody.messages)
-      ? parsedBody.messages
-      : [];
+    const slug = typeof body.slug === "string" ? body.slug.trim() : "";
+    const rawMessages = Array.isArray(body.messages) ? body.messages : [];
 
     if (!slug || rawMessages.length === 0) {
       return NextResponse.json(
@@ -141,10 +231,10 @@ export async function POST(req: Request) {
     }
 
     const safeMessages: IncomingMessage[] = rawMessages
-      .filter((message: unknown): message is IncomingMessage =>
+      .filter((message): message is IncomingMessage =>
         isValidIncomingMessage(message)
       )
-      .map((message: IncomingMessage) => ({
+      .map((message) => ({
         role: message.role,
         content: message.content.trim(),
       }));
@@ -156,8 +246,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const recentMessages: IncomingMessage[] =
-      safeMessages.slice(-MAX_CONTEXT_MESSAGES);
+    const recentMessages = safeMessages.slice(-MAX_CONTEXT_MESSAGES);
 
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
@@ -167,7 +256,7 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         model: "gryphe/mythomax-l2-13b",
-        max_tokens: 300,
+        max_tokens: MAX_REPLY_TOKENS,
         temperature: 0.9,
         messages: [
           {
@@ -191,17 +280,36 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            data?.error?.message ||
-            data?.message ||
-            "OpenRouter request failed.",
+            data &&
+            typeof data === "object" &&
+            "error" in data &&
+            isRecord(data.error) &&
+            typeof data.error.message === "string"
+              ? data.error.message
+              : data &&
+                  typeof data === "object" &&
+                  "message" in data &&
+                  typeof data.message === "string"
+                ? data.message
+                : "OpenRouter request failed.",
         },
         { status: response.status }
       );
     }
 
-    const assistantMessage = data?.choices?.[0]?.message?.content;
+    const assistantMessage =
+      data &&
+      typeof data === "object" &&
+      "choices" in data &&
+      Array.isArray(data.choices) &&
+      data.choices[0] &&
+      isRecord(data.choices[0]) &&
+      isRecord(data.choices[0].message) &&
+      typeof data.choices[0].message.content === "string"
+        ? data.choices[0].message.content
+        : null;
 
-    if (typeof assistantMessage !== "string" || !assistantMessage.trim()) {
+    if (!assistantMessage || !assistantMessage.trim()) {
       return NextResponse.json(
         { error: "No assistant response received." },
         { status: 500 }

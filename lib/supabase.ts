@@ -11,5 +11,10 @@ if (!supabaseAnonKey) {
   throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY is missing.");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
