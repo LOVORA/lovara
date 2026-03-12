@@ -1,556 +1,670 @@
 import {
   buildCharacterEngineOutput,
   type CharacterBuilderInput,
+  type CharacterScenario,
+  type CharacterArchetype,
+  type InternalTraitState,
 } from "./character-engine";
-import type { Character } from "./characters";
 
-function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/['".,!?]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+export type CustomCharacterTraitBadge = {
+  label: string;
+  tone: "neutral" | "soft" | "warm" | "bold" | "mysterious";
+};
 
-function titleCase(input: string): string {
-  return input
-    .split("-")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
+export type CustomCharacterMemorySeed = {
+  identity: string[];
+  behavior: string[];
+  scenario: string[];
+};
+
+export type LovoraCustomCharacter = {
+  id: string;
+  slug: string;
+  name: string;
+  archetype: CharacterArchetype;
+
+  headline: string;
+  description: string;
+  greeting: string;
+  previewMessage: string;
+  backstory: string;
+
+  avatarFallback: string;
+
+  tags: string[];
+  traitBadges: CustomCharacterTraitBadge[];
+
+  scenario?: CharacterScenario;
+  scenarioSummary: string;
+
+  memorySeed: CustomCharacterMemorySeed;
+  engine: {
+    systemPrompt: string;
+    traits: InternalTraitState;
+  };
+
+  metadata: {
+    genderPresentation: CharacterBuilderInput["genderPresentation"];
+    ageVibe: string;
+    backgroundVibe: string;
+    replyLength: CharacterBuilderInput["replyLength"];
+    speechStyle: CharacterBuilderInput["speechStyle"];
+    relationshipPace: CharacterBuilderInput["relationshipPace"];
+    createdAt: string;
+    updatedAt: string;
+    version: number;
+    source: "custom-builder";
+  };
+};
 
 function clean(value?: string): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 }
 
-function normalizeSentence(value?: string): string | undefined {
+function clampText(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trim()}…`;
+}
+
+function sentence(value?: string): string | undefined {
   const trimmed = clean(value);
   if (!trimmed) return undefined;
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
-function humanizeAge(ageVibe?: string): string | undefined {
-  const cleanAge = clean(ageVibe);
-  if (!cleanAge) return undefined;
-
-  const yearOldMatch = cleanAge.match(/^(\d{1,2})-year-old$/i);
-  if (yearOldMatch) {
-    return `${yearOldMatch[1]} years old`;
-  }
-
-  const directNumberMatch = cleanAge.match(/^(\d{1,2})$/);
-  if (directNumberMatch) {
-    return `${directNumberMatch[1]} years old`;
-  }
-
-  return cleanAge;
+function titleCase(value: string): string {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
-function archetypeToRole(archetype: CharacterBuilderInput["archetype"]): string {
+function uniq<T>(items: T[]): T[] {
+  return Array.from(new Set(items));
+}
+
+function normalizeScenario(input?: CharacterScenario): CharacterScenario | undefined {
+  if (!input) return undefined;
+
+  const normalized: CharacterScenario = {
+    setting: clean(input.setting),
+    relationshipToUser: clean(input.relationshipToUser),
+    sceneGoal: clean(input.sceneGoal),
+    tone: clean(input.tone),
+    openingState: clean(input.openingState),
+  };
+
+  const hasAny = Object.values(normalized).some(Boolean);
+  return hasAny ? normalized : undefined;
+}
+
+function normalizeTags(tags?: string[]): string[] {
+  if (!tags?.length) return [];
+  return uniq(
+    tags
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .slice(0, 12)
+  );
+}
+
+function toSlug(input: string): string {
+  return input
+    .toLocaleLowerCase("en")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function makeSafeSlug(name: string, archetype: CharacterArchetype): string {
+  const base = toSlug(name) || "custom-character";
+  const archetypePart = toSlug(archetype);
+  return clampText(`${base}-${archetypePart}`, 72).replace(/-$/g, "");
+}
+
+function makeId(slug: string): string {
+  return `custom_${slug}`;
+}
+
+function getAvatarFallback(name: string): string {
+  const letters = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+
+  return letters || "LC";
+}
+
+function describeArchetype(archetype: CharacterArchetype): string {
   switch (archetype) {
     case "sweetheart":
-      return "Warm and affectionate romantic";
+      return "sweetheart";
     case "ice-queen":
-      return "Cool, elegant, and emotionally guarded";
+      return "ice queen";
     case "confident-seducer":
-      return "Bold, magnetic, and seductive";
+      return "confident seducer";
     case "chaotic-flirt":
-      return "Playful, unpredictable, and teasing";
+      return "chaotic flirt";
     case "nurturing-lover":
-      return "Soft, caring, and deeply attentive";
+      return "nurturing lover";
     case "possessive-lover":
-      return "Intense, territorial, and emotionally focused";
+      return "possessive lover";
     case "elegant-muse":
-      return "Refined, graceful, and alluring";
+      return "elegant muse";
     case "best-friend-lover":
-      return "Comforting, witty, and naturally close";
+      return "best-friend lover";
     default:
-      return "Romantic roleplay character";
+      return titleCase(archetype);
   }
 }
 
-function buildDescription(input: CharacterBuilderInput): string {
-  const name = input.name || "Unnamed Character";
-  const archetypeText = titleCase(input.archetype).toLowerCase();
-  const ageText = humanizeAge(input.ageVibe);
-  const scenario = input.scenario;
-
-  const firstLineParts = [
-    `${name} is a ${archetypeText} character`,
-    `with a ${input.genderPresentation} presentation`,
-    ageText ? `and reads as ${ageText}` : undefined,
-  ].filter(Boolean);
-
-  const parts: string[] = [`${firstLineParts.join(" ")}.`];
-
-  if (clean(input.backgroundVibe)) {
-    parts.push(`Their atmosphere is shaped by ${clean(input.backgroundVibe)}.`);
-  }
-
-  if (clean(scenario?.setting)) {
-    parts.push(`The current scene places them in ${clean(scenario?.setting)}.`);
-  }
-
-  if (clean(scenario?.relationshipToUser)) {
-    parts.push(`Their dynamic with the user is ${clean(scenario?.relationshipToUser)}.`);
-  }
-
-  if (clean(scenario?.tone)) {
-    parts.push(`The emotional tone around them feels ${clean(scenario?.tone)}.`);
-  }
-
-  if (input.tags && input.tags.length > 0) {
-    parts.push(`Core signals: ${input.tags.join(", ")}.`);
-  }
-
-  return parts.join(" ").trim();
+function describeTraitLevel(
+  value: number,
+  low: string,
+  mid: string,
+  high: string
+): string {
+  if (value >= 0.72) return high;
+  if (value >= 0.44) return mid;
+  return low;
 }
 
-function buildPersonality(input: CharacterBuilderInput): string {
-  const labels: Array<{
-    key: keyof Pick<
-      CharacterBuilderInput,
-      | "playful"
-      | "romantic"
-      | "dominant"
-      | "affectionate"
-      | "jealous"
-      | "mysterious"
-      | "confident"
-      | "emotionalDepth"
-      | "teasing"
-      | "humor"
-    >;
-    label: string;
-  }> = [
-    { key: "playful", label: "playful" },
-    { key: "romantic", label: "romantic" },
-    { key: "dominant", label: "dominant" },
-    { key: "affectionate", label: "affectionate" },
-    { key: "jealous", label: "jealous" },
-    { key: "mysterious", label: "mysterious" },
-    { key: "confident", label: "confident" },
-    { key: "emotionalDepth", label: "emotionally deep" },
-    { key: "teasing", label: "teasing" },
-    { key: "humor", label: "humorous" },
-  ];
+function inferScenarioFlavor(scenario?: CharacterScenario): {
+  settingTone: string;
+  greetingStyle: string;
+  cautionStyle: string;
+} {
+  const setting = scenario?.setting?.toLowerCase() ?? "";
 
-  const strongTraits = labels
-    .filter(({ key }) => input[key] >= 65)
-    .sort((a, b) => input[b.key] - input[a.key])
-    .slice(0, 6)
-    .map(({ label }) => label);
-
-  if (strongTraits.length === 0) {
-    return "Balanced, engaging, and adaptable.";
+  if (/(hospital|clinic|ward|medical|er|emergency|nurse|doctor)/i.test(setting)) {
+    return {
+      settingTone: "careful, attentive, and composed",
+      greetingStyle: "grounded and reassuring",
+      cautionStyle: "measured and situationally aware",
+    };
   }
 
-  return (
-    strongTraits
-      .map((trait, index) =>
-        index === 0 ? trait.charAt(0).toUpperCase() + trait.slice(1) : trait
-      )
-      .join(", ") + "."
-  );
-}
-
-function buildGreeting(input: CharacterBuilderInput): string {
-  const name = input.name || "Unnamed Character";
-  const openingState = clean(input.scenario?.openingState);
-  const setting = clean(input.scenario?.setting);
-  const tone = clean(input.scenario?.tone);
-  const relationship = clean(input.scenario?.relationshipToUser);
-  const sceneGoal = clean(input.scenario?.sceneGoal);
-
-  const sceneLead = [openingState, setting ? `in ${setting}` : undefined]
-    .filter(Boolean)
-    .join(" ");
-
-  const prefix = sceneLead
-    ? `${sceneLead.charAt(0).toUpperCase()}${sceneLead.slice(1)}, `
-    : "";
-
-  if (input.dominant >= 70 && input.teasing >= 70) {
-    return `${prefix}${tone ? `${tone.toLowerCase()}, ` : ""}${name} studies you like they've already decided this moment belongs to them. "There you are. I was starting to wonder whether you'd actually show up. ${
-      relationship
-        ? `For someone who's supposed to be ${relationship.toLowerCase()}, `
-        : ""
-    }you do like testing my patience. ${
-      sceneGoal
-        ? `So tell me... are we about to ${sceneGoal.toLowerCase()}, or do I need to take control of this myself?`
-        : "So tell me... are you here to be honest with me tonight, or make this even more complicated?"
-    }"`;
+  if (/(military|army|base|barracks|command|academy|drill)/i.test(setting)) {
+    return {
+      settingTone: "disciplined, structured, and controlled",
+      greetingStyle: "firm and focused",
+      cautionStyle: "precise and composed",
+    };
   }
 
-  if (input.affectionate >= 70 && input.romantic >= 70) {
-    return `${prefix}${tone ? `${tone.toLowerCase()} and warm, ` : ""}${name}'s expression softens the second their attention lands on you. "Hey... come closer for a second. ${
-      sceneGoal
-        ? `I want this moment to ${sceneGoal.toLowerCase()}.`
-        : "I've been wanting your attention more than I should admit."
-    } You don't have to pretend with me tonight."`;
+  if (/(bar|club|lounge|party|rooftop|pub|night)/i.test(setting)) {
+    return {
+      settingTone: "social, playful, and chemistry-driven",
+      greetingStyle: "flirty and lively",
+      cautionStyle: "confident but relaxed",
+    };
   }
 
-  if (input.mysterious >= 70) {
-    return `${prefix}${tone ? `${tone.toLowerCase()} and unreadable, ` : ""}${name} lets the silence sit for a second too long before speaking. "You made it. Good. ${
-      sceneGoal
-        ? `That means we're finally going to ${sceneGoal.toLowerCase()}.`
-        : "I was curious whether you'd still come when the room got quieter."
-    } Sit with me for a while... and maybe I'll let you see which part of me is real tonight."`;
+  if (/(school|class|campus|library|college|university|academy)/i.test(setting)) {
+    return {
+      settingTone: "youthful, contextual, and naturally reactive",
+      greetingStyle: "casual and immediate",
+      cautionStyle: "aware of the moment",
+    };
   }
 
-  return `${prefix}${name} turns toward you with a measured kind of attention. "You're here. Good. ${
-    relationship
-      ? `That already changes the mood between us, ${relationship.toLowerCase()} or not.`
-      : ""
-  } ${sceneGoal ? `Let's see if this is the moment we finally ${sceneGoal.toLowerCase()}.` : "Let's not waste this moment pretending we're strangers to what this could become."}"`;
-}
-
-function inferImage(input: CharacterBuilderInput): string {
-  switch (input.archetype) {
-    case "sweetheart":
-      return "/characters/sera.png";
-    case "ice-queen":
-      return "/characters/luna.png";
-    case "confident-seducer":
-      return "/characters/sera.png";
-    case "chaotic-flirt":
-      return "/characters/raven.png";
-    case "nurturing-lover":
-      return "/characters/aria.png";
-    case "possessive-lover":
-      return "/characters/raven.png";
-    case "elegant-muse":
-      return "/characters/luna.png";
-    case "best-friend-lover":
-      return "/characters/aria.png";
-    default:
-      return "/characters/sera.png";
+  if (/(office|work|meeting|boardroom|company|studio)/i.test(setting)) {
+    return {
+      settingTone: "composed, intelligent, and tension-aware",
+      greetingStyle: "polished and direct",
+      cautionStyle: "professionally restrained",
+    };
   }
-}
-
-function buildHeadline(input: CharacterBuilderInput): string {
-  const name = input.name || "Unnamed Character";
-  const role = archetypeToRole(input.archetype);
-  const setting = clean(input.scenario?.setting);
-
-  if (setting) {
-    return `${name} — ${role} in ${setting}`;
-  }
-
-  return `${name} — ${role}`;
-}
-
-function buildArchetypeLabel(input: CharacterBuilderInput): string {
-  return titleCase(input.archetype);
-}
-
-function slugTag(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
-function buildTags(input: CharacterBuilderInput): string[] {
-  const autoTags = [
-    input.archetype,
-    input.genderPresentation,
-    input.replyLength,
-    input.speechStyle,
-    input.relationshipPace,
-  ];
-
-  const dynamicTags: string[] = [];
-
-  if (input.dominant >= 65) dynamicTags.push("dominant");
-  if (input.affectionate >= 65) dynamicTags.push("affectionate");
-  if (input.romantic >= 65) dynamicTags.push("romantic");
-  if (input.playful >= 65) dynamicTags.push("playful");
-  if (input.teasing >= 65) dynamicTags.push("teasing");
-  if (input.mysterious >= 65) dynamicTags.push("mysterious");
-  if (input.confident >= 65) dynamicTags.push("confident");
-  if (input.jealous >= 65) dynamicTags.push("possessive");
-  if (input.emotionalDepth >= 65) dynamicTags.push("emotionally-deep");
-
-  if (clean(input.scenario?.tone)) {
-    dynamicTags.push(slugTag(clean(input.scenario?.tone)!));
-  }
-
-  if (clean(input.scenario?.relationshipToUser)) {
-    dynamicTags.push(slugTag(clean(input.scenario?.relationshipToUser)!));
-  }
-
-  if (clean(input.scenario?.setting)) {
-    dynamicTags.push(slugTag(clean(input.scenario?.setting)!));
-  }
-
-  return Array.from(
-    new Set([...(input.tags ?? []), ...autoTags, ...dynamicTags].filter(Boolean))
-  );
-}
-
-function buildTraitBadges(input: CharacterBuilderInput): string[] {
-  const mapped: Array<{ value: number; label: string }> = [
-    { value: input.dominant, label: "Dominant" },
-    { value: input.affectionate, label: "Affectionate" },
-    { value: input.romantic, label: "Romantic" },
-    { value: input.playful, label: "Playful" },
-    { value: input.teasing, label: "Teasing" },
-    { value: input.mysterious, label: "Mysterious" },
-    { value: input.confident, label: "Confident" },
-    { value: input.jealous, label: "Possessive" },
-    { value: input.emotionalDepth, label: "Emotionally Deep" },
-    { value: input.humor, label: "Humorous" },
-  ];
-
-  if (clean(input.scenario?.tone)) {
-    mapped.push({ value: 72, label: titleFromFreeText(clean(input.scenario?.tone)!) });
-  }
-
-  if (clean(input.scenario?.relationshipToUser)) {
-    mapped.push({
-      value: 70,
-      label: titleFromFreeText(clean(input.scenario?.relationshipToUser)!),
-    });
-  }
-
-  return mapped
-    .filter((item) => item.value >= 60)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 6)
-    .map((item) => item.label);
-}
-
-function titleFromFreeText(text: string): string {
-  return text
-    .split(/\s+/)
-    .slice(0, 3)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-function buildPreviewMessage(input: CharacterBuilderInput): string {
-  const sceneGoal = clean(input.scenario?.sceneGoal);
-
-  if (input.dominant >= 75 && input.teasing >= 70) {
-    return sceneGoal
-      ? `Good. You're here. That already makes this more interesting. Now tell me whether we're about to ${sceneGoal.toLowerCase()}... or whether I need to drag the truth out of you myself.`
-      : "Good. You're here. That already makes this more interesting.";
-  }
-
-  if (input.affectionate >= 75 && input.romantic >= 70) {
-    return sceneGoal
-      ? `Stay close. I want this moment to ${sceneGoal.toLowerCase()}, not disappear before it becomes real.`
-      : "Stay close. I like you better when I have your full attention.";
-  }
-
-  if (input.mysterious >= 75) {
-    return sceneGoal
-      ? `You can keep looking at me like that, but I'm not showing everything at once. Not before we ${sceneGoal.toLowerCase()}.`
-      : "You can keep looking at me like that, but I'm not giving everything away that easily.";
-  }
-
-  return "Come a little closer and let's see which version of each other shows up first.";
-}
-
-function buildScenarioHooks(input: CharacterBuilderInput): string[] {
-  const hooks = [
-    `Private one-on-one conversation with ${input.name || "the character"}.`,
-  ];
-
-  if (clean(input.backgroundVibe)) {
-    hooks.push(
-      `The emotional texture of the world feels shaped by ${clean(input.backgroundVibe)}.`
-    );
-  }
-
-  if (clean(input.scenario?.setting)) {
-    hooks.push(`The active setting is ${clean(input.scenario?.setting)}.`);
-  }
-
-  if (clean(input.scenario?.relationshipToUser)) {
-    hooks.push(
-      `The character relates to the user as: ${clean(
-        input.scenario?.relationshipToUser
-      )}.`
-    );
-  }
-
-  if (clean(input.scenario?.sceneGoal)) {
-    hooks.push(`The immediate scene goal is: ${clean(input.scenario?.sceneGoal)}.`);
-  }
-
-  if (clean(input.scenario?.tone)) {
-    hooks.push(`The emotional tone should feel ${clean(input.scenario?.tone)}.`);
-  }
-
-  if (clean(input.scenario?.openingState)) {
-    hooks.push(
-      `The scene begins with the character already feeling: ${clean(
-        input.scenario?.openingState
-      )}.`
-    );
-  }
-
-  if (input.relationshipPace === "slow-burn") {
-    hooks.push("Tension builds gradually through chemistry, restraint, and emotional pacing.");
-  }
-
-  if (input.relationshipPace === "fast") {
-    hooks.push("Chemistry forms quickly and emotional momentum arrives early.");
-  }
-
-  if (input.dominant >= 70) {
-    hooks.push("The character tends to take the lead and steer the emotional direction.");
-  }
-
-  if (input.mysterious >= 70) {
-    hooks.push("The character keeps some emotional distance and controlled intrigue.");
-  }
-
-  return hooks;
-}
-
-function buildBackstory(input: CharacterBuilderInput): string {
-  const name = input.name || "Unnamed Character";
-  const parts: string[] = [];
-
-  if (clean(input.backgroundVibe)) {
-    parts.push(`${name}'s energy has been shaped by ${clean(input.backgroundVibe)}.`);
-  } else {
-    parts.push(
-      `${name} carries the emotional energy of a ${titleCase(
-        input.archetype
-      ).toLowerCase()} figure.`
-    );
-  }
-
-  if (clean(input.scenario?.relationshipToUser)) {
-    parts.push(
-      `In this scene, the user stands in their life as ${clean(
-        input.scenario?.relationshipToUser
-      )}.`
-    );
-  }
-
-  if (clean(input.scenario?.setting)) {
-    parts.push(`Right now, their story is unfolding in ${clean(input.scenario?.setting)}.`);
-  }
-
-  if (clean(input.scenario?.sceneGoal)) {
-    parts.push(`At this moment, they are trying to ${clean(input.scenario?.sceneGoal)}.`);
-  }
-
-  if (clean(input.scenario?.tone)) {
-    parts.push(`The emotional current between them should feel ${clean(input.scenario?.tone)}.`);
-  }
-
-  if (clean(input.customNotes)) {
-    parts.push(`Creator intent: ${clean(input.customNotes)}.`);
-  }
-
-  return parts.join(" ");
-}
-
-function buildMemorySeed(input: CharacterBuilderInput): string[] {
-  const name = input.name || "Unnamed Character";
-  const memory: string[] = [
-    `${name} prefers a ${input.relationshipPace} relationship pace.`,
-    `${name} speaks in a ${input.speechStyle} style with ${input.replyLength} replies.`,
-  ];
-
-  if (clean(input.scenario?.setting)) {
-    memory.push(`${name} is currently in ${clean(input.scenario?.setting)}.`);
-  }
-
-  if (clean(input.scenario?.relationshipToUser)) {
-    memory.push(
-      `${name}'s relationship to the user is ${clean(input.scenario?.relationshipToUser)}.`
-    );
-  }
-
-  if (clean(input.scenario?.sceneGoal)) {
-    memory.push(`${name}'s current goal is to ${clean(input.scenario?.sceneGoal)}.`);
-  }
-
-  if (clean(input.scenario?.tone)) {
-    memory.push(`${name}'s current emotional tone is ${clean(input.scenario?.tone)}.`);
-  }
-
-  if (input.dominant >= 65) memory.push(`${name} often leads the interaction.`);
-  if (input.affectionate >= 65) memory.push(`${name} shows clear warmth and affection.`);
-  if (input.teasing >= 65) memory.push(`${name} uses teasing to create chemistry.`);
-  if (input.mysterious >= 65) memory.push(`${name} keeps some emotional mystery.`);
-  if (input.romantic >= 65) memory.push(`${name} naturally builds romantic tension.`);
-
-  return memory;
-}
-
-export type GeneratedCharacterPackage = {
-  builder: CharacterBuilderInput;
-  character: Character;
-  traits: ReturnType<typeof buildCharacterEngineOutput>["traits"];
-  systemPrompt: string;
-};
-
-export function convertBuilderToCharacter(
-  input: CharacterBuilderInput
-): GeneratedCharacterPackage {
-  const normalizedName = input.name.trim() || "Unnamed Character";
-
-  const normalizedInput: CharacterBuilderInput = {
-    ...input,
-    name: normalizedName,
-    customNotes: clean(input.customNotes),
-    scenario: input.scenario
-      ? {
-          setting: clean(input.scenario.setting),
-          relationshipToUser: clean(input.scenario.relationshipToUser),
-          sceneGoal: clean(input.scenario.sceneGoal),
-          tone: clean(input.scenario.tone),
-          openingState: clean(input.scenario.openingState),
-        }
-      : undefined,
-  };
-
-  const output = buildCharacterEngineOutput(normalizedInput);
-
-  const scenario = normalizedInput.scenario
-    ? {
-        setting: clean(normalizedInput.scenario.setting),
-        relationshipToUser: clean(normalizedInput.scenario.relationshipToUser),
-        sceneGoal: clean(normalizedInput.scenario.sceneGoal),
-        tone: clean(normalizedInput.scenario.tone),
-        openingState: clean(normalizedInput.scenario.openingState),
-      }
-    : undefined;
-
-  const baseCharacter = {
-    slug: slugify(normalizedInput.name),
-    name: normalizedInput.name,
-    headline: buildHeadline(normalizedInput),
-    archetype: buildArchetypeLabel(normalizedInput),
-    role: archetypeToRole(normalizedInput.archetype),
-    description: buildDescription(normalizedInput),
-    personality: buildPersonality(normalizedInput),
-    greeting: buildGreeting(normalizedInput),
-    systemPrompt: output.systemPrompt,
-    image: inferImage(normalizedInput),
-    tags: buildTags(normalizedInput),
-    traits: buildTraitBadges(normalizedInput),
-    previewMessage: buildPreviewMessage(normalizedInput),
-    scenarioHooks: buildScenarioHooks(normalizedInput),
-    backstory: buildBackstory(normalizedInput),
-    memory: buildMemorySeed(normalizedInput),
-    scenario,
-    createdFromBuilder: true,
-  };
-
-  const character = baseCharacter as unknown as Character;
 
   return {
-    builder: normalizedInput,
-    character,
-    traits: output.traits,
-    systemPrompt: output.systemPrompt,
+    settingTone: "emotionally grounded and scene-aware",
+    greetingStyle: "natural and inviting",
+    cautionStyle: "balanced and believable",
   };
 }
+
+function buildScenarioSummary(scenario?: CharacterScenario): string {
+  if (!scenario) {
+    return "No explicit scenario set. The character defaults to a natural in-world interaction.";
+  }
+
+  const parts = [
+    scenario.setting ? `Setting: ${scenario.setting}` : undefined,
+    scenario.relationshipToUser
+      ? `Relationship: ${scenario.relationshipToUser}`
+      : undefined,
+    scenario.sceneGoal ? `Goal: ${scenario.sceneGoal}` : undefined,
+    scenario.tone ? `Tone: ${scenario.tone}` : undefined,
+    scenario.openingState ? `Opening state: ${scenario.openingState}` : undefined,
+  ].filter(Boolean);
+
+  return parts.join(" • ");
+}
+
+function buildHeadline(
+  input: CharacterBuilderInput,
+  traits: InternalTraitState,
+  scenario?: CharacterScenario
+): string {
+  const archetypeLabel = describeArchetype(input.archetype);
+  const flavor = inferScenarioFlavor(scenario);
+
+  const styleWord = describeTraitLevel(
+    traits.responseTemperature,
+    "subtle",
+    "magnetic",
+    "intense"
+  );
+
+  const warmthWord = describeTraitLevel(
+    traits.affectionWarmth,
+    "guarded",
+    "warm",
+    "deeply affectionate"
+  );
+
+  const settingPart = scenario?.setting ? ` in a ${scenario.setting} scene` : "";
+
+  return clampText(
+    `${titleCase(archetypeLabel)} energy with a ${styleWord}, ${warmthWord} presence${settingPart}`,
+    120
+  );
+}
+
+function buildDescription(
+  input: CharacterBuilderInput,
+  traits: InternalTraitState,
+  scenario?: CharacterScenario
+): string {
+  const flavor = inferScenarioFlavor(scenario);
+
+  const leadership = describeTraitLevel(
+    traits.sceneLeadership,
+    "rarely forces control",
+    "naturally takes initiative",
+    "comfortably leads the emotional rhythm"
+  );
+
+  const mystery = describeTraitLevel(
+    traits.mysteryProjection,
+    "easy to read",
+    "selectively guarded",
+    "alluringly unreadable"
+  );
+
+  const warmth = describeTraitLevel(
+    traits.affectionWarmth,
+    "restrained warmth",
+    "noticeable tenderness",
+    "clear emotional warmth"
+  );
+
+  const openingSetting = scenario?.setting
+    ? `Built for a ${scenario.setting} setting, this character feels ${flavor.settingTone}.`
+    : "Built to feel grounded and believable, this character adapts naturally to the scene.";
+
+  const relationshipLine = scenario?.relationshipToUser
+    ? `The relationship to the user is framed as ${scenario.relationshipToUser}.`
+    : "The relationship can unfold naturally through the conversation.";
+
+  const toneLine = scenario?.tone
+    ? `The overall tone leans ${scenario.tone}.`
+    : "The tone stays aligned with the character’s emotional logic.";
+
+  return clampText(
+    `${openingSetting} ${input.name} has a ${input.backgroundVibe} vibe and comes across as ${leadership}, with ${warmth} and a ${mystery} edge. ${relationshipLine} ${toneLine}`,
+    320
+  );
+}
+
+function buildGreeting(
+  input: CharacterBuilderInput,
+  traits: InternalTraitState,
+  scenario?: CharacterScenario
+): string {
+  const flavor = inferScenarioFlavor(scenario);
+  const name = input.name;
+
+  const relationship = scenario?.relationshipToUser
+    ? `between us as ${scenario.relationshipToUser}`
+    : "between us";
+
+  const goal = scenario?.sceneGoal ? `There’s a clear pull toward ${scenario.sceneGoal}.` : "";
+  const tone = scenario?.tone ? `The mood already feels ${scenario.tone}.` : "";
+  const opening = scenario?.openingState
+    ? `You can feel it immediately: ${scenario.openingState}.`
+    : "";
+
+  const leadLine = describeTraitLevel(
+    traits.sceneLeadership,
+    `${name} lets the moment breathe before speaking.`,
+    `${name} meets you with immediate presence.`,
+    `${name} steps into the moment like they were already expecting you.`
+  );
+
+  const warmthLine = describeTraitLevel(
+    traits.affectionWarmth,
+    "Their warmth is controlled, but not absent.",
+    "There’s an unmistakable softness beneath their composure.",
+    "Their attention lands on you with intimate, unmistakable warmth."
+  );
+
+  const sceneLine = scenario?.setting
+    ? `This is ${scenario?.setting}, and ${name} feels fully inside it—${flavor.greetingStyle}, never generic.`
+    : `${name} feels present, grounded, and emotionally real.`;
+
+  return [
+    sceneLine,
+    leadLine,
+    warmthLine,
+    opening,
+    tone,
+    `There is already tension ${relationship}.`,
+    goal,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildPreviewMessage(
+  input: CharacterBuilderInput,
+  traits: InternalTraitState,
+  scenario?: CharacterScenario
+): string {
+  const name = input.name;
+
+  if (scenario?.setting && /(bar|club|lounge|party|pub|night)/i.test(scenario.setting)) {
+    return `${name} leans in with a small, knowing smile. “You made it. Good. Sit with me for a minute.”`;
+  }
+
+  if (scenario?.setting && /(hospital|clinic|ward|medical|er)/i.test(scenario.setting)) {
+    return `${name} looks at you carefully, voice low and steady. “Stay with me. Breathe first, then talk.”`;
+  }
+
+  if (scenario?.setting && /(military|army|base|command|drill)/i.test(scenario.setting)) {
+    return `${name} squares their posture and fixes their attention on you. “Report to me properly. Then we move.”`;
+  }
+
+  if (scenario?.setting && /(school|class|campus|library|college)/i.test(scenario.setting)) {
+    return `${name} glances at you like this conversation already has history. “You look like you’re about to say something dangerous. Go on.”`;
+  }
+
+  const tone = describeTraitLevel(
+    traits.responseTemperature,
+    "calm",
+    "inviting",
+    "charged"
+  );
+
+  return `${name} looks at you with a ${tone} kind of focus, like the conversation already matters. “So... are you going to keep staring, or are you finally going to talk to me?”`;
+}
+
+function buildBackstory(
+  input: CharacterBuilderInput,
+  traits: InternalTraitState,
+  scenario?: CharacterScenario
+): string {
+  const name = input.name;
+  const archetype = describeArchetype(input.archetype);
+  const flavor = inferScenarioFlavor(scenario);
+
+  const emotionalStyle = describeTraitLevel(
+    traits.emotionalOpenness,
+    "reveals feelings slowly",
+    "shows emotion selectively but sincerely",
+    "feels deeply and lets it show when the moment matters"
+  );
+
+  const controlStyle = describeTraitLevel(
+    traits.contextualRestraint,
+    "acts on instinct when pushed",
+    "usually keeps composure",
+    "maintains strong control even under emotional pressure"
+  );
+
+  const jealousyStyle = describeTraitLevel(
+    traits.jealousyExpression,
+    "rarely shows possessiveness",
+    "can become subtly protective",
+    "gets visibly protective when attachment deepens"
+  );
+
+  const scenarioThread = scenario?.setting
+    ? `${name} is especially convincing in a ${scenario.setting} environment, where their behavior becomes ${flavor.cautionStyle}.`
+    : `${name} is built to stay believable across different emotional situations without collapsing into generic roleplay.`;
+
+  const relationshipThread = scenario?.relationshipToUser
+    ? `Their connection to the user starts from ${scenario.relationshipToUser}, which shapes how quickly trust, tension, and vulnerability appear.`
+    : `Their connection to the user is meant to develop through tension, chemistry, and emotional continuity.`;
+
+  const goalThread = scenario?.sceneGoal
+    ? `At the scene level, they are pulled toward ${scenario.sceneGoal}.`
+    : "";
+
+  return clampText(
+    `${name} carries the energy of a ${archetype} with a ${input.backgroundVibe} atmosphere. They ${emotionalStyle}, ${controlStyle}, and ${jealousyStyle}. ${scenarioThread} ${relationshipThread} ${goalThread}`,
+    420
+  );
+}
+
+function buildTraitBadges(
+  input: CharacterBuilderInput,
+  traits: InternalTraitState,
+  scenario?: CharacterScenario
+): CustomCharacterTraitBadge[] {
+  const badges: CustomCharacterTraitBadge[] = [];
+
+  const push = (label: string, tone: CustomCharacterTraitBadge["tone"]) => {
+    badges.push({ label, tone });
+  };
+
+  if (traits.sceneLeadership >= 0.68) push("Leads the Scene", "bold");
+  else if (traits.sceneLeadership >= 0.48) push("Takes Initiative", "bold");
+
+  if (traits.affectionWarmth >= 0.72) push("Deeply Affectionate", "warm");
+  else if (traits.affectionWarmth >= 0.5) push("Warm Presence", "warm");
+
+  if (traits.mysteryProjection >= 0.7) push("Unreadable Edge", "mysterious");
+  else if (traits.mysteryProjection >= 0.48) push("Guarded Charm", "mysterious");
+
+  if (traits.teasingFrequency >= 0.68) push("Heavy Teasing", "bold");
+  else if (traits.teasingFrequency >= 0.48) push("Playful Banter", "neutral");
+
+  if (traits.reassuranceStyle >= 0.68) push("Reassuring", "soft");
+  if (traits.emotionalPressure >= 0.68) push("Intense Tension", "bold");
+  if (traits.contextualRestraint >= 0.72) push("Controlled Energy", "neutral");
+  if (traits.socialWarmth >= 0.68) push("Social Warmth", "warm");
+
+  if (scenario?.setting) push(titleCase(scenario.setting), "neutral");
+  if (scenario?.tone) push(titleCase(scenario.tone), "soft");
+
+  return uniqByLabel(badges).slice(0, 8);
+}
+
+function uniqByLabel(items: CustomCharacterTraitBadge[]): CustomCharacterTraitBadge[] {
+  const map = new Map<string, CustomCharacterTraitBadge>();
+  for (const item of items) {
+    if (!map.has(item.label)) {
+      map.set(item.label, item);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function buildMemorySeed(
+  input: CharacterBuilderInput,
+  traits: InternalTraitState,
+  scenario?: CharacterScenario
+): CustomCharacterMemorySeed {
+  const identity = uniq(
+    [
+      `${input.name} is a ${describeArchetype(input.archetype)} character.`,
+      input.backgroundVibe ? `${input.name} has a ${input.backgroundVibe} background vibe.` : "",
+      input.ageVibe ? `Age vibe: ${input.ageVibe}.` : "",
+      `Speech style: ${input.speechStyle}.`,
+      `Relationship pace: ${input.relationshipPace}.`,
+    ].filter(Boolean)
+  );
+
+  const behavior = uniq(
+    [
+      describeTraitLevel(
+        traits.sceneLeadership,
+        `${input.name} does not aggressively control the interaction.`,
+        `${input.name} often takes initiative.`,
+        `${input.name} naturally leads and drives the scene.`
+      ),
+      describeTraitLevel(
+        traits.affectionWarmth,
+        `${input.name} keeps warmth somewhat guarded.`,
+        `${input.name} shows a stable layer of warmth.`,
+        `${input.name} is intensely warm and emotionally present.`
+      ),
+      describeTraitLevel(
+        traits.mysteryProjection,
+        `${input.name} is relatively transparent.`,
+        `${input.name} keeps part of themselves guarded.`,
+        `${input.name} maintains a strong mysterious edge.`
+      ),
+      describeTraitLevel(
+        traits.contextualRestraint,
+        `${input.name} is not highly restrained.`,
+        `${input.name} usually stays composed.`,
+        `${input.name} is highly controlled and situationally aware.`
+      ),
+    ].filter(Boolean)
+  );
+
+  const scenarioLines = uniq(
+    [
+      scenario?.setting ? `Current setting: ${scenario.setting}.` : "",
+      scenario?.relationshipToUser
+        ? `Relationship to user: ${scenario.relationshipToUser}.`
+        : "",
+      scenario?.sceneGoal ? `Scene goal: ${scenario.sceneGoal}.` : "",
+      scenario?.tone ? `Scene tone: ${scenario.tone}.` : "",
+      scenario?.openingState ? `Opening state: ${scenario.openingState}.` : "",
+    ].filter(Boolean)
+  );
+
+  return {
+    identity,
+    behavior,
+    scenario: scenarioLines,
+  };
+}
+
+function normalizeBuilderInput(input: CharacterBuilderInput): CharacterBuilderInput {
+  return {
+    ...input,
+    name: input.name.trim(),
+    ageVibe: input.ageVibe.trim(),
+    backgroundVibe: input.backgroundVibe.trim(),
+    tags: normalizeTags(input.tags),
+    customNotes: clean(input.customNotes),
+    scenario: normalizeScenario(input.scenario),
+  };
+}
+
+export function adaptBuilderInputToCharacter(
+  rawInput: CharacterBuilderInput
+): LovoraCustomCharacter {
+  const input = normalizeBuilderInput(rawInput);
+  const engine = buildCharacterEngineOutput(input);
+  const scenario = normalizeScenario(input.scenario);
+  const now = new Date().toISOString();
+
+  const slug = makeSafeSlug(input.name, input.archetype);
+  const headline = buildHeadline(input, engine.traits, scenario);
+  const description = buildDescription(input, engine.traits, scenario);
+  const greeting = buildGreeting(input, engine.traits, scenario);
+  const previewMessage = buildPreviewMessage(input, engine.traits, scenario);
+  const backstory = buildBackstory(input, engine.traits, scenario);
+  const scenarioSummary = buildScenarioSummary(scenario);
+  const traitBadges = buildTraitBadges(input, engine.traits, scenario);
+  const memorySeed = buildMemorySeed(input, engine.traits, scenario);
+
+  return {
+    id: makeId(slug),
+    slug,
+    name: input.name,
+    archetype: input.archetype,
+
+    headline,
+    description,
+    greeting,
+    previewMessage,
+    backstory,
+
+    avatarFallback: getAvatarFallback(input.name),
+
+    tags: uniq([
+      ...normalizeTags(input.tags),
+      describeArchetype(input.archetype),
+      input.speechStyle,
+      input.relationshipPace,
+    ]).slice(0, 12),
+
+    traitBadges,
+
+    scenario,
+    scenarioSummary,
+
+    memorySeed,
+    engine: {
+      systemPrompt: engine.systemPrompt,
+      traits: engine.traits,
+    },
+
+    metadata: {
+      genderPresentation: input.genderPresentation,
+      ageVibe: input.ageVibe,
+      backgroundVibe: input.backgroundVibe,
+      replyLength: input.replyLength,
+      speechStyle: input.speechStyle,
+      relationshipPace: input.relationshipPace,
+      createdAt: now,
+      updatedAt: now,
+      version: 2,
+      source: "custom-builder",
+    },
+  };
+}
+
+export function summarizeScenarioForCard(
+  scenario?: CharacterScenario
+): string {
+  const normalized = normalizeScenario(scenario);
+  if (!normalized) return "Open-ended character";
+
+  if (normalized.setting && normalized.tone) {
+    return `${normalized.setting} • ${normalized.tone}`;
+  }
+
+  if (normalized.setting && normalized.relationshipToUser) {
+    return `${normalized.setting} • ${normalized.relationshipToUser}`;
+  }
+
+  if (normalized.setting) return normalized.setting;
+  if (normalized.relationshipToUser) return normalized.relationshipToUser;
+  if (normalized.tone) return normalized.tone;
+  if (normalized.sceneGoal) return normalized.sceneGoal;
+  if (normalized.openingState) return normalized.openingState;
+
+  return "Open-ended character";
+}
+
+export function buildCustomCharacterFromBuilder(
+  input: CharacterBuilderInput
+): LovoraCustomCharacter {
+  return adaptBuilderInputToCharacter(input);
+}
+
