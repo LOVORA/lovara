@@ -36,28 +36,48 @@ const speechStyles: SpeechStyle[] = ["natural", "poetic", "witty", "bold", "soft
 const relationshipPaces: RelationshipPace[] = ["slow-burn", "balanced", "fast"];
 
 const initialInput: CharacterBuilderInput = {
-  name: "Sable",
-  archetype: "confident-seducer",
+  name: "",
+  archetype: "sweetheart",
   genderPresentation: "feminine",
-  ageVibe: "mid-20s",
-  backgroundVibe:
-    "luxury nightlife, private parties, expensive taste, magnetic social presence",
-  playful: 72,
-  romantic: 68,
-  dominant: 81,
-  affectionate: 63,
-  jealous: 38,
-  mysterious: 59,
-  confident: 88,
-  emotionalDepth: 61,
-  teasing: 84,
-  humor: 54,
-  replyLength: "detailed",
-  speechStyle: "bold",
+  ageVibe: "",
+  backgroundVibe: "",
+
+  playful: 50,
+  romantic: 50,
+  dominant: 50,
+  affectionate: 50,
+  jealous: 20,
+  mysterious: 40,
+  confident: 50,
+  emotionalDepth: 50,
+  teasing: 45,
+  humor: 45,
+
+  replyLength: "balanced",
+  speechStyle: "natural",
   relationshipPace: "balanced",
-  tags: ["flirty", "dominant", "luxury", "confident"],
-  customNotes:
-    "She should feel expensive, emotionally controlled, seductive, and highly memorable.",
+
+  tags: [],
+  customNotes: "",
+
+  scenario: {
+    setting: "",
+    relationshipToUser: "",
+    sceneGoal: "",
+    tone: "",
+    openingState: "",
+  },
+
+  history: {
+    origin: "",
+    occupation: "",
+    publicMask: "",
+    privateSelf: "",
+    definingDesire: "",
+    emotionalWound: "",
+    secret: "",
+    manualBackstory: "",
+  },
 };
 
 type SliderKey =
@@ -108,17 +128,7 @@ function toDisplayText(value: unknown): string {
 
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
-
-    const preferredKeys = [
-      "label",
-      "name",
-      "title",
-      "value",
-      "text",
-      "slug",
-      "id",
-      "key",
-    ];
+    const preferredKeys = ["label", "name", "title", "value", "text", "slug", "id", "key"];
 
     for (const key of preferredKeys) {
       const candidate = record[key];
@@ -146,7 +156,6 @@ function toDisplayList(value: unknown): string[] {
 
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
-
     const candidateArrays = [
       record.items,
       record.entries,
@@ -171,7 +180,7 @@ function toDisplayList(value: unknown): string[] {
 }
 
 export default function CreateCharacterPage() {
-  const [form, setForm] = useState<CharacterBuilderInput>(initialInput);
+  const [form, setForm] = useState(initialInput);
   const [saveMessage, setSaveMessage] = useState("");
 
   const output = useMemo(() => buildCharacterEngineOutput(form), [form]);
@@ -195,47 +204,82 @@ export default function CreateCharacterPage() {
     }));
   }
 
+  function updateScenarioField(
+    key: keyof NonNullable<CharacterBuilderInput["scenario"]>,
+    value: string
+  ) {
+    setForm((prev) => ({
+      ...prev,
+      scenario: {
+        ...(prev.scenario ?? {}),
+        [key]: value,
+      },
+    }));
+  }
+
+  function updateHistoryField(
+    key: keyof NonNullable<CharacterBuilderInput["history"]>,
+    value: string
+  ) {
+    setForm((prev) => ({
+      ...prev,
+      history: {
+        ...(prev.history ?? {}),
+        [key]: value,
+      },
+    }));
+  }
+
   function handleSaveCharacter() {
+    const safeName = form.name.trim() || "Unnamed Character";
+
+    const normalizedForm: CharacterBuilderInput = {
+      ...form,
+      name: safeName,
+    };
+
+    const savedPreview = convertBuilderToCharacter(normalizedForm);
+
     const savedPayload = {
-      ...characterPreview.character,
+      ...savedPreview.character,
       __source: "builder",
       __savedAt: new Date().toISOString(),
     };
 
     addCustomCharacter(savedPayload);
-    setSaveMessage(`Saved "${characterPreview.character.name}" to My Characters.`);
+    setSaveMessage(`Saved "${savedPreview.character.name}" to My Characters.`);
   }
 
   const tagsText = form.tags?.join(", ") ?? "";
 
   return (
     <main className="min-h-screen bg-[#07070b] text-white">
-      <section className="mx-auto max-w-7xl px-6 py-10 md:px-8 md:py-14">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="mb-2 text-sm uppercase tracking-[0.28em] text-pink-300/80">
+            <div className="mb-2 text-xs uppercase tracking-[0.28em] text-pink-300/70">
               Lovora Character Engine
-            </p>
-            <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">
+            </div>
+            <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
               Create Character
             </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-white/70 md:text-base">
-              Build a character using high-level controls while the system compiles
-              a much deeper behavioral prompt in the background.
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/65">
+              Build a deeper character with personality sliders, active scenario, and
+              a real emotional history instead of a fixed template.
             </p>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <Link
               href="/my-characters"
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:border-pink-400/40 hover:bg-white/10"
+              className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/80 transition hover:bg-white/10"
             >
               My Characters
             </Link>
+
             <button
-              type="button"
               onClick={handleSaveCharacter}
-              className="rounded-2xl bg-pink-500 px-4 py-3 text-sm font-medium text-white transition hover:bg-pink-400"
+              className="rounded-2xl bg-gradient-to-r from-pink-500 to-fuchsia-500 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-pink-500/20 transition hover:opacity-95"
             >
               Save Character
             </button>
@@ -243,24 +287,24 @@ export default function CreateCharacterPage() {
         </div>
 
         {saveMessage ? (
-          <div className="mb-6 rounded-2xl border border-pink-400/20 bg-pink-500/10 px-4 py-3 text-sm text-pink-100">
+          <div className="mb-6 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
             {saveMessage}
           </div>
         ) : null}
 
-        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl backdrop-blur md:p-6">
+        <div className="grid gap-8 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-2xl backdrop-blur md:p-6">
             <div className="mb-6">
               <h2 className="text-xl font-semibold">Character Builder</h2>
               <p className="mt-2 text-sm text-white/60">
-                Adjust the visible inputs. The internal traits, preview card, and
-                compiled system prompt update instantly.
+                Start from neutral defaults and shape the character into someone
+                genuinely distinct.
               </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/70">Name</span>
+            <div className="grid gap-5 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-sm text-white/70">Name</span>
                 <input
                   value={form.name}
                   onChange={(e) => updateField("name", e.target.value)}
@@ -269,8 +313,8 @@ export default function CreateCharacterPage() {
                 />
               </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/70">Archetype</span>
+              <label className="space-y-2">
+                <span className="text-sm text-white/70">Archetype</span>
                 <select
                   value={form.archetype}
                   onChange={(e) =>
@@ -286,10 +330,8 @@ export default function CreateCharacterPage() {
                 </select>
               </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/70">
-                  Gender Presentation
-                </span>
+              <label className="space-y-2">
+                <span className="text-sm text-white/70">Gender Presentation</span>
                 <select
                   value={form.genderPresentation}
                   onChange={(e) =>
@@ -308,30 +350,28 @@ export default function CreateCharacterPage() {
                 </select>
               </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/70">Age Vibe</span>
+              <label className="space-y-2">
+                <span className="text-sm text-white/70">Age Vibe</span>
                 <input
                   value={form.ageVibe}
                   onChange={(e) => updateField("ageVibe", e.target.value)}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
-                  placeholder="mid-20s"
+                  placeholder="mid-20s, early 30s, ageless..."
                 />
               </label>
 
-              <label className="block md:col-span-2">
-                <span className="mb-2 block text-sm text-white/70">
-                  Background Vibe
-                </span>
+              <label className="space-y-2 md:col-span-2">
+                <span className="text-sm text-white/70">Background Vibe</span>
                 <input
                   value={form.backgroundVibe}
                   onChange={(e) => updateField("backgroundVibe", e.target.value)}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
-                  placeholder="Describe the world and aura of this character"
+                  placeholder="Urban nightlife, academic pressure, quiet clinic corridors..."
                 />
               </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/70">Reply Length</span>
+              <label className="space-y-2">
+                <span className="text-sm text-white/70">Reply Length</span>
                 <select
                   value={form.replyLength}
                   onChange={(e) =>
@@ -347,8 +387,8 @@ export default function CreateCharacterPage() {
                 </select>
               </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/70">Speech Style</span>
+              <label className="space-y-2">
+                <span className="text-sm text-white/70">Speech Style</span>
                 <select
                   value={form.speechStyle}
                   onChange={(e) =>
@@ -364,10 +404,8 @@ export default function CreateCharacterPage() {
                 </select>
               </label>
 
-              <label className="block md:col-span-2">
-                <span className="mb-2 block text-sm text-white/70">
-                  Relationship Pace
-                </span>
+              <label className="space-y-2 md:col-span-2">
+                <span className="text-sm text-white/70">Relationship Pace</span>
                 <select
                   value={form.relationshipPace}
                   onChange={(e) =>
@@ -387,38 +425,213 @@ export default function CreateCharacterPage() {
               </label>
             </div>
 
-            <div className="mt-8 grid gap-4 md:grid-cols-2">
-              {sliderFields.map((field) => (
-                <label
-                  key={field.key}
-                  className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                >
-                  <div className="mb-3 flex items-center justify-between">
-                    <span className="text-sm text-white/75">{field.label}</span>
-                    <span className="text-sm font-medium text-pink-300">
-                      {form[field.key]}
-                    </span>
-                  </div>
+            <div className="mt-8">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-white">Scenario</h3>
+                <p className="mt-2 text-sm text-white/55">
+                  Define the active scene so the character behaves like they are already
+                  inside a moment, not starting from nowhere.
+                </p>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-2">
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm text-white/70">Setting</span>
                   <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={form[field.key]}
-                    onChange={(e) =>
-                      updateField(field.key, Number(e.target.value) as never)
-                    }
-                    className="w-full accent-pink-400"
+                    value={form.scenario?.setting ?? ""}
+                    onChange={(e) => updateScenarioField("setting", e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Military base lounge, hospital night shift, campus library..."
                   />
                 </label>
-              ))}
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm text-white/70">Relationship to User</span>
+                  <input
+                    value={form.scenario?.relationshipToUser ?? ""}
+                    onChange={(e) =>
+                      updateScenarioField("relationshipToUser", e.target.value)
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Former lover, commander, classmate, patient, stranger..."
+                  />
+                </label>
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm text-white/70">Scene Goal</span>
+                  <input
+                    value={form.scenario?.sceneGoal ?? ""}
+                    onChange={(e) => updateScenarioField("sceneGoal", e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Test loyalty, comfort them, build forbidden tension..."
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm text-white/70">Tone</span>
+                  <input
+                    value={form.scenario?.tone ?? ""}
+                    onChange={(e) => updateScenarioField("tone", e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Cold, intimate, clinical, dangerous..."
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm text-white/70">Opening State</span>
+                  <input
+                    value={form.scenario?.openingState ?? ""}
+                    onChange={(e) =>
+                      updateScenarioField("openingState", e.target.value)
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Already irritated, quietly curious, emotionally guarded..."
+                  />
+                </label>
+              </div>
             </div>
 
-            <div className="mt-8 grid gap-4">
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/70">
-                  Tags (comma separated)
-                </span>
+            <div className="mt-8">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-white">Character History</h3>
+                <p className="mt-2 text-sm text-white/55">
+                  This section gives the character a lived past, internal contradictions,
+                  and a real emotional center.
+                </p>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-sm text-white/70">Origin</span>
+                  <input
+                    value={form.history?.origin ?? ""}
+                    onChange={(e) => updateHistoryField("origin", e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Where they come from, what kind of world shaped them"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm text-white/70">Occupation / Role</span>
+                  <input
+                    value={form.history?.occupation ?? ""}
+                    onChange={(e) => updateHistoryField("occupation", e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Doctor, student, intelligence officer, bartender..."
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm text-white/70">Public Mask</span>
+                  <input
+                    value={form.history?.publicMask ?? ""}
+                    onChange={(e) => updateHistoryField("publicMask", e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="How they appear to most people"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm text-white/70">Private Self</span>
+                  <input
+                    value={form.history?.privateSelf ?? ""}
+                    onChange={(e) => updateHistoryField("privateSelf", e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Who they really are underneath"
+                  />
+                </label>
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm text-white/70">Defining Desire</span>
+                  <input
+                    value={form.history?.definingDesire ?? ""}
+                    onChange={(e) =>
+                      updateHistoryField("definingDesire", e.target.value)
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="What they want most, deep down"
+                  />
+                </label>
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm text-white/70">Emotional Wound</span>
+                  <input
+                    value={form.history?.emotionalWound ?? ""}
+                    onChange={(e) =>
+                      updateHistoryField("emotionalWound", e.target.value)
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="What hurt them and still shapes how they love, trust, or pull away"
+                  />
+                </label>
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm text-white/70">Secret</span>
+                  <input
+                    value={form.history?.secret ?? ""}
+                    onChange={(e) => updateHistoryField("secret", e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="What they hide from almost everyone"
+                  />
+                </label>
+
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm text-white/70">
+                    Manual Backstory (optional)
+                  </span>
+                  <textarea
+                    value={form.history?.manualBackstory ?? ""}
+                    onChange={(e) =>
+                      updateHistoryField("manualBackstory", e.target.value)
+                    }
+                    rows={6}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
+                    placeholder="Write the exact backstory yourself. If this is filled, it becomes the strongest source for the character's past."
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-8">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-white">Behavior Sliders</h3>
+                <p className="mt-2 text-sm text-white/55">
+                  These visible controls still matter, but now they sit on top of a
+                  deeper psychological history.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {sliderFields.map((field) => (
+                  <label
+                    key={field.key}
+                    className="space-y-2 rounded-2xl border border-white/10 bg-black/20 p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-white/75">{field.label}</span>
+                      <span className="text-sm font-medium text-pink-200">
+                        {form[field.key]}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={form[field.key]}
+                      onChange={(e) =>
+                        updateField(field.key, Number(e.target.value) as never)
+                      }
+                      className="w-full accent-pink-400"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-8 grid gap-5">
+              <label className="space-y-2">
+                <span className="text-sm text-white/70">Tags (comma separated)</span>
                 <input
                   value={tagsText}
                   onChange={(e) =>
@@ -431,20 +644,18 @@ export default function CreateCharacterPage() {
                     )
                   }
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
-                  placeholder="flirty, dominant, luxury"
+                  placeholder="cold, dangerous, loyal, wounded..."
                 />
               </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/70">
-                  Custom Notes
-                </span>
+              <label className="space-y-2">
+                <span className="text-sm text-white/70">Creator Notes</span>
                 <textarea
                   value={form.customNotes ?? ""}
                   onChange={(e) => updateField("customNotes", e.target.value)}
                   rows={5}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none transition focus:border-pink-400/60"
-                  placeholder="Extra behavior or creator notes..."
+                  placeholder="Extra instructions that should shape the character's behavior"
                 />
               </label>
             </div>
@@ -454,8 +665,7 @@ export default function CreateCharacterPage() {
             <div className="rounded-3xl border border-pink-400/20 bg-gradient-to-br from-pink-500/10 to-fuchsia-500/5 p-5 shadow-2xl backdrop-blur md:p-6">
               <h2 className="text-xl font-semibold">Compiled Trait Output</h2>
               <p className="mt-2 text-sm text-white/60">
-                These are the internal traits generated behind the visible builder
-                inputs.
+                Internal traits generated from sliders, scenario, and character history.
               </p>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -478,8 +688,7 @@ export default function CreateCharacterPage() {
             <div className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl backdrop-blur md:p-6">
               <h2 className="text-xl font-semibold">Lovora Character Preview</h2>
               <p className="mt-2 text-sm text-white/60">
-                This is how the generated builder data maps into a real Lovora
-                character object.
+                This is the generated character object your builder currently creates.
               </p>
 
               <div className="mt-5 overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b12]">
@@ -526,6 +735,111 @@ export default function CreateCharacterPage() {
                     </div>
                     <div className="rounded-2xl border border-pink-400/15 bg-pink-500/5 p-4 text-sm leading-6 text-white/85">
                       {characterPreview.character.greeting}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      Scenario
+                    </div>
+                    <div className="space-y-2">
+                      {form.scenario?.setting ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Setting:</span>{" "}
+                          {form.scenario.setting}
+                        </div>
+                      ) : null}
+
+                      {form.scenario?.relationshipToUser ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Relationship:</span>{" "}
+                          {form.scenario.relationshipToUser}
+                        </div>
+                      ) : null}
+
+                      {form.scenario?.sceneGoal ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Goal:</span>{" "}
+                          {form.scenario.sceneGoal}
+                        </div>
+                      ) : null}
+
+                      {form.scenario?.tone ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Tone:</span>{" "}
+                          {form.scenario.tone}
+                        </div>
+                      ) : null}
+
+                      {form.scenario?.openingState ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Opening:</span>{" "}
+                          {form.scenario.openingState}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      History
+                    </div>
+                    <div className="space-y-2">
+                      {form.history?.origin ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Origin:</span>{" "}
+                          {form.history.origin}
+                        </div>
+                      ) : null}
+
+                      {form.history?.occupation ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Occupation:</span>{" "}
+                          {form.history.occupation}
+                        </div>
+                      ) : null}
+
+                      {form.history?.publicMask ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Public Mask:</span>{" "}
+                          {form.history.publicMask}
+                        </div>
+                      ) : null}
+
+                      {form.history?.privateSelf ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Private Self:</span>{" "}
+                          {form.history.privateSelf}
+                        </div>
+                      ) : null}
+
+                      {form.history?.definingDesire ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Desire:</span>{" "}
+                          {form.history.definingDesire}
+                        </div>
+                      ) : null}
+
+                      {form.history?.emotionalWound ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Wound:</span>{" "}
+                          {form.history.emotionalWound}
+                        </div>
+                      ) : null}
+
+                      {form.history?.secret ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Secret:</span>{" "}
+                          {form.history.secret}
+                        </div>
+                      ) : null}
+
+                      {form.history?.manualBackstory ? (
+                        <div className="rounded-2xl border border-pink-400/15 bg-pink-500/5 px-3 py-2 text-sm leading-6 text-white/80">
+                          <span className="text-white/45">Manual Backstory:</span>{" "}
+                          {form.history.manualBackstory}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -602,7 +916,8 @@ export default function CreateCharacterPage() {
               <div className="mb-4">
                 <h2 className="text-xl font-semibold">Generated System Prompt</h2>
                 <p className="mt-2 text-sm text-white/60">
-                  This is the live prompt compiled from the character builder.
+                  The final prompt now includes scenario and lived history, not only
+                  vibe sliders.
                 </p>
               </div>
 

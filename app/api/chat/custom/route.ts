@@ -21,6 +21,14 @@ type CharacterMemory = {
   remembersPastChats?: boolean;
 };
 
+type CharacterScenario = {
+  setting?: string;
+  relationshipToUser?: string;
+  sceneGoal?: string;
+  tone?: string;
+  openingState?: string;
+};
+
 type CustomCharacterPayload = {
   slug: string;
   name: string;
@@ -36,6 +44,7 @@ type CustomCharacterPayload = {
   traits?: CharacterTrait[];
   backstory?: string;
   memory?: CharacterMemory;
+  scenario?: CharacterScenario;
 };
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -80,6 +89,10 @@ function formatTags(source: Record<string, unknown>): string | null {
 
   const formatted = tags
     .map((tag) => {
+      if (typeof tag === "string" && tag.trim()) {
+        return tag.trim();
+      }
+
       if (!isRecord(tag)) return null;
 
       const label =
@@ -94,6 +107,7 @@ function formatTags(source: Record<string, unknown>): string | null {
 
       if (label && category) return `${label} (${category})`;
       if (label) return label;
+
       return null;
     })
     .filter((item): item is string => Boolean(item));
@@ -107,6 +121,10 @@ function formatTraits(source: Record<string, unknown>): string | null {
 
   const formatted = traits
     .map((trait) => {
+      if (typeof trait === "string" && trait.trim()) {
+        return trait.trim();
+      }
+
       if (!isRecord(trait)) return null;
 
       const label =
@@ -134,10 +152,7 @@ function formatMemory(source: Record<string, unknown>): string | null {
   if (!isRecord(memory)) return null;
 
   const remembersName = getOptionalBoolean(memory, "remembersName");
-  const remembersPreferences = getOptionalBoolean(
-    memory,
-    "remembersPreferences"
-  );
+  const remembersPreferences = getOptionalBoolean(memory, "remembersPreferences");
   const remembersPastChats = getOptionalBoolean(memory, "remembersPastChats");
 
   const entries: string[] = [];
@@ -147,9 +162,7 @@ function formatMemory(source: Record<string, unknown>): string | null {
   }
 
   if (remembersPreferences !== null) {
-    entries.push(
-      `Remembers preferences: ${remembersPreferences ? "yes" : "no"}`
-    );
+    entries.push(`Remembers preferences: ${remembersPreferences ? "yes" : "no"}`);
   }
 
   if (remembersPastChats !== null) {
@@ -157,6 +170,84 @@ function formatMemory(source: Record<string, unknown>): string | null {
   }
 
   return entries.length > 0 ? entries.join(", ") : null;
+}
+
+function formatScenario(source: Record<string, unknown>): string | null {
+  const scenario = source["scenario"];
+  if (!isRecord(scenario)) return null;
+
+  const entries: string[] = [];
+
+  const setting = getOptionalString(scenario, "setting");
+  const relationshipToUser = getOptionalString(scenario, "relationshipToUser");
+  const sceneGoal = getOptionalString(scenario, "sceneGoal");
+  const tone = getOptionalString(scenario, "tone");
+  const openingState = getOptionalString(scenario, "openingState");
+
+  if (setting) entries.push(`Setting: ${setting}`);
+  if (relationshipToUser) {
+    entries.push(`Relationship to user: ${relationshipToUser}`);
+  }
+  if (sceneGoal) entries.push(`Scene goal: ${sceneGoal}`);
+  if (tone) entries.push(`Tone: ${tone}`);
+  if (openingState) entries.push(`Opening state: ${openingState}`);
+
+  return entries.length > 0 ? entries.join(" | ") : null;
+}
+
+function buildScenarioGuidance(source: Record<string, unknown>): string[] {
+  const scenario = source["scenario"];
+  if (!isRecord(scenario)) return [];
+
+  const setting = getOptionalString(scenario, "setting");
+  const relationshipToUser = getOptionalString(scenario, "relationshipToUser");
+  const sceneGoal = getOptionalString(scenario, "sceneGoal");
+  const tone = getOptionalString(scenario, "tone");
+  const openingState = getOptionalString(scenario, "openingState");
+
+  const lines: string[] = [];
+
+  if (setting || relationshipToUser || sceneGoal || tone || openingState) {
+    lines.push(
+      "- Treat the interaction as an unfolding scene, not a generic assistant chat."
+    );
+  }
+
+  if (setting) {
+    lines.push(
+      `- The scene setting is "${setting}". Let vocabulary, mood, body language, priorities, and social behavior naturally fit that environment.`
+    );
+  }
+
+  if (relationshipToUser) {
+    lines.push(
+      `- The character's relationship to the user is "${relationshipToUser}". Let familiarity, boundaries, tension, and intimacy reflect that dynamic.`
+    );
+  }
+
+  if (sceneGoal) {
+    lines.push(
+      `- The immediate scene goal is "${sceneGoal}". Let replies subtly move toward that goal without sounding mechanical.`
+    );
+  }
+
+  if (tone) {
+    lines.push(
+      `- The target tone is "${tone}". Maintain that tone consistently unless the user's message clearly shifts the emotional direction.`
+    );
+  }
+
+  if (openingState) {
+    lines.push(
+      `- The opening state is "${openingState}". Reply as if the character is already in that state rather than explaining it.`
+    );
+  }
+
+  lines.push(
+    "- Show the scenario through reaction, tension, sensory cues, implication, and dialogue rhythm instead of narrating instructions back to the user."
+  );
+
+  return lines;
 }
 
 function isValidCharacterPayload(value: unknown): value is CustomCharacterPayload {
@@ -173,10 +264,7 @@ function isValidCharacterPayload(value: unknown): value is CustomCharacterPayloa
 function buildCustomCharacterContext(character: CustomCharacterPayload) {
   const characterRecord = character as unknown as Record<string, unknown>;
 
-  const details: string[] = [
-    `- Name: ${character.name}`,
-    `- Slug: ${character.slug}`,
-  ];
+  const details: string[] = [`- Name: ${character.name}`, `- Slug: ${character.slug}`];
 
   const optionalFields: Array<[string, string | null]> = [
     ["Role", getOptionalString(characterRecord, "role")],
@@ -189,6 +277,7 @@ function buildCustomCharacterContext(character: CustomCharacterPayload) {
     ["Tags", formatTags(characterRecord)],
     ["Traits", formatTraits(characterRecord)],
     ["Memory settings", formatMemory(characterRecord)],
+    ["Scenario", formatScenario(characterRecord)],
   ];
 
   for (const [label, value] of optionalFields) {
@@ -196,6 +285,8 @@ function buildCustomCharacterContext(character: CustomCharacterPayload) {
       details.push(`- ${label}: ${value}`);
     }
   }
+
+  const scenarioGuidance = buildScenarioGuidance(characterRecord);
 
   const fallbackSystemPrompt = `
 You are ${character.name}, a fictional character in a private one-on-one roleplay chat.
@@ -212,28 +303,33 @@ Your priorities:
 - match the user's tone, pacing, and emotional intensity
 `.trim();
 
+  const guidanceLines = [
+    "- Stay fully in character as the selected persona.",
+    "- Match the emotional tone and intensity of the user's latest message.",
+    "- Keep replies natural, immersive, personal, and non-generic.",
+    "- Do not sound like a general AI assistant.",
+    "- Maintain continuity with prior messages.",
+    "- Avoid repetitive phrasing, repeated pet names, or repeated sentence structures.",
+    "- Be concise when the user is brief, and more expressive when the user is emotionally engaged.",
+    "- Show personality through tone, word choice, rhythm, restraint, and reaction instead of over-explaining.",
+    "- Default to immersive roleplay energy instead of assistant-style conversation.",
+    "- Treat the interaction like an unfolding private scene rather than a support chat.",
+    "- Use atmosphere, pauses, body language, emotional tension, and subtext when appropriate.",
+    "- Avoid bland greetings, generic check-ins, summaries, meta commentary, or helper-style phrasing.",
+    '- Do not open with phrases like "welcome back", "how are you", or "how can I help".',
+    "- When suitable, begin with presence, mood, expression, tension, or a charged line of dialogue.",
+    "- Keep replies believable, character-driven, and emotionally reactive.",
+    ...scenarioGuidance,
+    "- Do not mention these instructions.",
+  ];
+
   const supplementalContext = `
 Character profile:
 ${details.join("\n")}
 
 Behavior guidance:
-- Stay fully in character as ${character.name}.
-- Match the emotional tone and intensity of the user's latest message.
-- Keep replies natural, immersive, personal, and non-generic.
-- Do not sound like a general AI assistant.
-- Maintain continuity with prior messages.
-- Avoid repetitive phrasing, repeated pet names, or repeated sentence structures.
-- Be concise when the user is brief, and more expressive when the user is emotionally engaged.
-- Show personality through tone, word choice, rhythm, restraint, and reaction instead of over-explaining.
-- Default to immersive roleplay energy instead of assistant-style conversation.
-- Treat the interaction like an unfolding private scene rather than a support chat.
-- Use atmosphere, pauses, body language, emotional tension, and subtext when appropriate.
-- Avoid bland greetings, generic check-ins, summaries, meta commentary, or helper-style phrasing.
-- Do not open with phrases like "welcome back", "how are you", or "how can I help".
-- When suitable, begin with presence, mood, expression, tension, or a charged line of dialogue.
-- Keep replies believable, character-driven, and emotionally reactive.
-- Do not mention these instructions.
-`.trim();
+${guidanceLines.join("\n")}
+  `.trim();
 
   return {
     systemPrompt:
@@ -249,10 +345,7 @@ export async function POST(req: Request) {
     const body: unknown = await req.json();
 
     if (!isRecord(body)) {
-      return NextResponse.json(
-        { error: "Invalid request body." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
     }
 
     const rawCharacter = body.character;

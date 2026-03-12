@@ -30,6 +30,14 @@ type CustomCharacterMemory = {
   remembersPastChats?: boolean;
 };
 
+type CustomCharacterScenario = {
+  setting?: string;
+  relationshipToUser?: string;
+  sceneGoal?: string;
+  tone?: string;
+  openingState?: string;
+};
+
 type CustomCharacter = {
   slug: string;
   name: string;
@@ -41,10 +49,12 @@ type CustomCharacter = {
   image?: string;
   headline?: string;
   archetype?: string;
-  tags?: CustomCharacterTag[];
-  traits?: CustomCharacterTrait[];
+  tags?: Array<CustomCharacterTag | string>;
+  traits?: Array<CustomCharacterTrait | string>;
   backstory?: string;
-  memory?: CustomCharacterMemory;
+  memory?: CustomCharacterMemory | string[];
+  scenario?: CustomCharacterScenario;
+  previewMessage?: string;
 };
 
 type Message = {
@@ -55,6 +65,95 @@ type Message = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function getString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function getOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function toDisplayText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value == null) return "";
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const preferredKeys = ["label", "name", "title", "value", "text", "slug", "id", "key"];
+
+    for (const key of preferredKeys) {
+      const candidate = record[key];
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate;
+      }
+    }
+
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  return String(value);
+}
+
+function toDisplayList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => toDisplayText(item)).filter(Boolean);
+  }
+
+  if (value == null) return [];
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const candidateArrays = [
+      record.items,
+      record.entries,
+      record.memories,
+      record.list,
+      record.values,
+      record.lines,
+    ];
+
+    for (const candidate of candidateArrays) {
+      if (Array.isArray(candidate)) {
+        return candidate.map((item) => toDisplayText(item)).filter(Boolean);
+      }
+    }
+
+    if (
+      typeof record.remembersName === "boolean" ||
+      typeof record.remembersPreferences === "boolean" ||
+      typeof record.remembersPastChats === "boolean"
+    ) {
+      const entries: string[] = [];
+
+      if (typeof record.remembersName === "boolean") {
+        entries.push(`Remembers name: ${record.remembersName ? "yes" : "no"}`);
+      }
+
+      if (typeof record.remembersPreferences === "boolean") {
+        entries.push(
+          `Remembers preferences: ${record.remembersPreferences ? "yes" : "no"}`
+        );
+      }
+
+      if (typeof record.remembersPastChats === "boolean") {
+        entries.push(
+          `Remembers past chats: ${record.remembersPastChats ? "yes" : "no"}`
+        );
+      }
+
+      return entries;
+    }
+  }
+
+  const text = toDisplayText(value);
+  return text ? [text] : [];
 }
 
 function normalizeCharacter(value: unknown): CustomCharacter | null {
@@ -69,28 +168,41 @@ function normalizeCharacter(value: unknown): CustomCharacter | null {
   const greeting =
     typeof value.greeting === "string" && value.greeting.trim()
       ? value.greeting.trim()
-      : `*${name} looks at you quietly.* Hey. I’ve been waiting for you.`;
+      : `*${name} looks at you quietly.* Hey.\nI’ve been waiting for you.`;
+
+  const scenario = isRecord(value.scenario)
+    ? {
+        setting: getOptionalString(value.scenario.setting),
+        relationshipToUser: getOptionalString(value.scenario.relationshipToUser),
+        sceneGoal: getOptionalString(value.scenario.sceneGoal),
+        tone: getOptionalString(value.scenario.tone),
+        openingState: getOptionalString(value.scenario.openingState),
+      }
+    : undefined;
 
   return {
     slug: value.slug.trim(),
     name,
-    role: typeof value.role === "string" ? value.role : "",
-    description: typeof value.description === "string" ? value.description : "",
-    personality: typeof value.personality === "string" ? value.personality : "",
+    role: getString(value.role),
+    description: getString(value.description),
+    personality: getString(value.personality),
     greeting,
-    systemPrompt:
-      typeof value.systemPrompt === "string" ? value.systemPrompt : "",
-    image: typeof value.image === "string" ? value.image : "",
-    headline: typeof value.headline === "string" ? value.headline : "",
-    archetype: typeof value.archetype === "string" ? value.archetype : "",
-    tags: Array.isArray(value.tags) ? (value.tags as CustomCharacterTag[]) : [],
-    traits: Array.isArray(value.traits)
-      ? (value.traits as CustomCharacterTrait[])
+    systemPrompt: getString(value.systemPrompt),
+    image: getString(value.image),
+    headline: getString(value.headline),
+    archetype: getString(value.archetype),
+    tags: Array.isArray(value.tags)
+      ? (value.tags as Array<CustomCharacterTag | string>)
       : [],
-    backstory: typeof value.backstory === "string" ? value.backstory : "",
-    memory: isRecord(value.memory)
-      ? (value.memory as CustomCharacterMemory)
+    traits: Array.isArray(value.traits)
+      ? (value.traits as Array<CustomCharacterTrait | string>)
+      : [],
+    backstory: getString(value.backstory),
+    memory: Array.isArray(value.memory) || isRecord(value.memory)
+      ? (value.memory as CustomCharacterMemory | string[])
       : undefined,
+    scenario,
+    previewMessage: getString(value.previewMessage),
   };
 }
 
@@ -108,14 +220,27 @@ export default function CustomCharacterChatPage() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isResetting, setIsResetting] = useState(false);
   const [chatStatus, setChatStatus] = useState("");
-  const [activeConversationId, setActiveConversationId] = useState<
-    string | null
-  >(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(
+    null
+  );
 
   const conversationSlug = useMemo(() => {
     if (!character) return "";
     return `custom:${character.slug}`;
   }, [character]);
+
+  const displayTags = useMemo(
+    () => toDisplayList(character?.tags),
+    [character?.tags]
+  );
+  const displayTraits = useMemo(
+    () => toDisplayList(character?.traits),
+    [character?.traits]
+  );
+  const displayMemory = useMemo(
+    () => toDisplayList(character?.memory),
+    [character?.memory]
+  );
 
   useEffect(() => {
     try {
@@ -180,8 +305,7 @@ export default function CustomCharacterChatPage() {
             slug: conversationSlug,
             name: character.name,
             greeting:
-              character.greeting ||
-              `*${character.name} looks at you softly.* Hey.`,
+              character.greeting || `*${character.name} looks at you softly.* Hey.`,
           }
         );
 
@@ -192,8 +316,7 @@ export default function CustomCharacterChatPage() {
         const dbMessages = await loadConversationMessages(
           supabase,
           conversation.id,
-          character.greeting ||
-            `*${character.name} looks at you softly.* Hey.`
+          character.greeting || `*${character.name} looks at you softly.* Hey.`
         );
 
         if (!isMounted) return;
@@ -250,6 +373,7 @@ export default function CustomCharacterChatPage() {
     const confirmed = window.confirm(
       "This will clear the current chat and start again from the first message.\n\nContinue?"
     );
+
     if (!confirmed) return;
 
     setIsResetting(true);
@@ -269,16 +393,13 @@ export default function CustomCharacterChatPage() {
       }
 
       const greeting =
-        character.greeting ||
-        `*${character.name} looks at you softly.* Hey. I’ve been waiting for you.`;
+        character.greeting || `*${character.name} looks at you softly.* Hey.\nI’ve been waiting for you.`;
 
-      const { error: greetingInsertError } = await supabase
-        .from("messages")
-        .insert({
-          conversation_id: activeConversationId,
-          role: "assistant",
-          content: greeting,
-        });
+      const { error: greetingInsertError } = await supabase.from("messages").insert({
+        conversation_id: activeConversationId,
+        role: "assistant",
+        content: greeting,
+      });
 
       if (greetingInsertError) {
         setChatStatus("Chat cleared, but greeting could not be restored.");
@@ -301,9 +422,7 @@ export default function CustomCharacterChatPage() {
       ]);
 
       if (updateConversationError) {
-        setChatStatus(
-          "Chat reset, but conversation title could not be updated."
-        );
+        setChatStatus("Chat reset, but conversation title could not be updated.");
       } else {
         setChatStatus("Chat reset successfully.");
       }
@@ -315,7 +434,7 @@ export default function CustomCharacterChatPage() {
     }
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
     const trimmedMessage = input.trim();
@@ -340,25 +459,20 @@ export default function CustomCharacterChatPage() {
     };
 
     const nextMessages = [...messages, newUserMessage];
-
     setMessages(nextMessages);
     setInput("");
     setIsTyping(true);
     setChatStatus("");
 
     try {
-      const { error: userMessageError } = await supabase.from("messages").insert(
-        {
-          conversation_id: activeConversationId,
-          role: "user",
-          content: trimmedMessage,
-        }
-      );
+      const { error: userMessageError } = await supabase.from("messages").insert({
+        conversation_id: activeConversationId,
+        role: "user",
+        content: trimmedMessage,
+      });
 
       if (userMessageError) {
-        setChatStatus(
-          "Message sent, but the user message could not be saved."
-        );
+        setChatStatus("Message sent, but the user message could not be saved.");
       }
 
       const response = await fetch("/api/chat/custom", {
@@ -425,9 +539,7 @@ export default function CustomCharacterChatPage() {
         });
 
       if (assistantMessageError) {
-        setChatStatus(
-          "Reply received, but the assistant message could not be saved."
-        );
+        setChatStatus("Reply received, but the assistant message could not be saved.");
       }
 
       const nextTitle =
@@ -443,17 +555,17 @@ export default function CustomCharacterChatPage() {
         .eq("id", activeConversationId);
 
       if (updateConversationError) {
-        setChatStatus(
-          "Reply saved, but conversation title could not be updated."
-        );
+        setChatStatus("Reply saved, but conversation title could not be updated.");
       } else if (!assistantMessageError) {
         setChatStatus("");
       }
     } catch (error) {
       console.error(error);
+
       if (requestIdRef.current !== currentRequestId) {
         return;
       }
+
       setChatStatus("Could not reach the chat server.");
     } finally {
       if (requestIdRef.current === currentRequestId) {
@@ -465,233 +577,346 @@ export default function CustomCharacterChatPage() {
   if (!character && !isInitializing) {
     return (
       <AuthGuard>
-        <main className="min-h-screen bg-[#0a0a0f] text-white">
+        <div className="min-h-screen bg-[#07070b] text-white">
           <Navbar />
-          <div className="mx-auto flex min-h-[80vh] max-w-3xl items-center justify-center px-6 py-16">
-            <div className="w-full rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center">
-              <h1 className="text-2xl font-semibold">Character not found</h1>
+          <main className="mx-auto max-w-3xl px-4 py-20 sm:px-6 lg:px-8">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
+              <h1 className="text-3xl font-semibold">Character not found</h1>
               <p className="mt-3 text-sm text-white/65">
                 This custom character could not be loaded from local storage.
               </p>
               <Link
                 href="/my-characters"
-                className="mt-6 inline-flex rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/15"
+                className="mt-6 inline-flex rounded-2xl bg-white/10 px-5 py-3 text-sm text-white/85 transition hover:bg-white/15"
               >
                 Back to My Characters
               </Link>
             </div>
-          </div>
-        </main>
+          </main>
+        </div>
       </AuthGuard>
     );
   }
 
   return (
     <AuthGuard>
-      <main className="min-h-screen bg-[#0a0a0f] text-white">
+      <div className="min-h-screen bg-[#07070b] text-white">
         <Navbar />
 
-        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-          <div className="mb-4 flex items-center justify-between gap-4">
+        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <div className="mb-6 flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-pink-300/70">
+              <div className="mb-2 text-xs uppercase tracking-[0.28em] text-pink-300/70">
                 Private Chat
-              </p>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+              </div>
+              <h1 className="text-3xl font-semibold tracking-tight">
                 {character?.name ?? "Custom Character"}
               </h1>
-              <p className="mt-1 text-sm text-white/55">
+              <p className="mt-2 text-sm text-white/60">
                 {character?.headline || "Live custom session"}
               </p>
             </div>
 
             <Link
               href="/my-characters"
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:bg-white/10"
+              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:bg-white/10"
             >
               Back
             </Link>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-            <aside className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-              <div className="flex items-center gap-4">
+          <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+            <aside className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-2xl backdrop-blur">
+              <div className="mb-5 flex items-start gap-4">
                 {character?.image ? (
-                  <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-white/10">
+                  <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-white/10">
                     <Image
                       src={character.image}
-                      alt={character.name}
+                      alt={character.name ?? "Custom Character"}
                       fill
                       className="object-cover"
                     />
                   </div>
                 ) : (
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-pink-500/10 text-xl font-semibold text-pink-200">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500/25 to-fuchsia-500/20 text-2xl font-semibold text-pink-200">
                     {character?.name?.charAt(0) || "C"}
                   </div>
                 )}
 
-                <div>
-                  <h2 className="text-lg font-semibold">
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-xl font-semibold">
                     {character?.name ?? "Custom Character"}
                   </h2>
-                  <p className="text-sm text-white/55">
+                  <p className="mt-1 text-sm text-white/55">
                     {isInitializing ? "Loading..." : "Online now"}
                   </p>
                 </div>
               </div>
 
-              <div className="mt-5 space-y-4 text-sm">
+              <div className="space-y-5">
                 {character?.archetype ? (
                   <div>
-                    <p className="mb-1 text-xs uppercase tracking-[0.18em] text-white/40">
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
                       Archetype
-                    </p>
-                    <p className="text-white/80">{character.archetype}</p>
+                    </div>
+                    <div className="text-sm text-white/80">{character.archetype}</div>
                   </div>
                 ) : null}
 
                 {character?.role ? (
                   <div>
-                    <p className="mb-1 text-xs uppercase tracking-[0.18em] text-white/40">
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
                       Role
-                    </p>
-                    <p className="text-white/80">{character.role}</p>
+                    </div>
+                    <div className="text-sm text-white/80">{character.role}</div>
                   </div>
                 ) : null}
 
                 {character?.description ? (
                   <div>
-                    <p className="mb-1 text-xs uppercase tracking-[0.18em] text-white/40">
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
                       Description
+                    </div>
+                    <p className="text-sm leading-6 text-white/75">
+                      {character.description}
                     </p>
-                    <p className="text-white/80">{character.description}</p>
                   </div>
                 ) : null}
 
-                <div className="pt-2">
-                  <button
-                    onClick={handleResetChat}
-                    disabled={
-                      !activeConversationId ||
-                      isTyping ||
-                      isInitializing ||
-                      isResetting
-                    }
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/85 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isResetting ? "Resetting..." : "Reset chat"}
-                  </button>
-                </div>
+                {character?.previewMessage ? (
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      Preview Message
+                    </div>
+                    <div className="rounded-2xl border border-pink-400/15 bg-pink-500/5 p-4 text-sm leading-6 text-white/85">
+                      {character.previewMessage}
+                    </div>
+                  </div>
+                ) : null}
+
+                {character?.scenario ? (
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      Scenario
+                    </div>
+
+                    <div className="space-y-2">
+                      {character.scenario.setting ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Setting:</span>{" "}
+                          {character.scenario.setting}
+                        </div>
+                      ) : null}
+
+                      {character.scenario.relationshipToUser ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Relationship:</span>{" "}
+                          {character.scenario.relationshipToUser}
+                        </div>
+                      ) : null}
+
+                      {character.scenario.sceneGoal ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Goal:</span>{" "}
+                          {character.scenario.sceneGoal}
+                        </div>
+                      ) : null}
+
+                      {character.scenario.tone ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Tone:</span>{" "}
+                          {character.scenario.tone}
+                        </div>
+                      ) : null}
+
+                      {character.scenario.openingState ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                          <span className="text-white/45">Opening:</span>{" "}
+                          {character.scenario.openingState}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {displayTags.length > 0 ? (
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      Tags
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {displayTags.map((tag, index) => (
+                        <span
+                          key={`${tag}-${index}`}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {displayTraits.length > 0 ? (
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      Traits
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {displayTraits.map((trait, index) => (
+                        <span
+                          key={`${trait}-${index}`}
+                          className="rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-xs text-pink-200"
+                        >
+                          {trait}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {displayMemory.length > 0 ? (
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      Memory
+                    </div>
+                    <div className="space-y-2">
+                      {displayMemory.map((item, index) => (
+                        <div
+                          key={`${item}-${index}`}
+                          className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75"
+                        >
+                          {item}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {character?.backstory ? (
+                  <div>
+                    <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      Backstory
+                    </div>
+                    <p className="text-sm leading-6 text-white/75">
+                      {character.backstory}
+                    </p>
+                  </div>
+                ) : null}
+
+                <button
+                  onClick={handleResetChat}
+                  disabled={
+                    !activeConversationId || isTyping || isInitializing || isResetting
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isResetting ? "Resetting..." : "Reset chat"}
+                </button>
               </div>
             </aside>
 
-            <section className="flex min-h-[70vh] flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
+            <section className="flex min-h-[72vh] flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] shadow-2xl backdrop-blur">
               <div className="border-b border-white/10 px-5 py-4">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm font-medium text-white">
+                    <h2 className="text-lg font-semibold">
                       {character?.name ?? "Custom Character"}
-                    </p>
-                    <p className="text-xs text-white/45">
-                      {activeConversationId
-                        ? "Private chat saved"
-                        : "Private chat"}
+                    </h2>
+                    <p className="mt-1 text-sm text-white/55">
+                      {activeConversationId ? "Private chat saved" : "Private chat"}
                     </p>
                   </div>
                 </div>
 
                 {chatStatus ? (
-                  <div className="mt-3 rounded-2xl border border-pink-400/20 bg-pink-500/10 px-3 py-2 text-xs text-pink-100">
+                  <div className="mt-4 rounded-2xl border border-pink-400/15 bg-pink-500/10 px-4 py-3 text-sm text-pink-100">
                     {chatStatus}
                   </div>
                 ) : null}
               </div>
 
-              <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-5">
-                {messages.map((message) => {
-                  const isUser = message.role === "user";
+              <div className="flex-1 overflow-y-auto px-5 py-5">
+                <div className="mx-auto flex max-w-3xl flex-col gap-4">
+                  {messages.map((message) => {
+                    const isUser = message.role === "user";
 
-                  return (
-                    <div
-                      key={message.id}
-                      className={`flex ${
-                        isUser ? "justify-end" : "justify-start"
-                      }`}
-                    >
+                    return (
                       <div
-                        className={`max-w-[85%] rounded-3xl px-4 py-3 text-sm leading-6 ${
-                          isUser
-                            ? "bg-pink-500 text-white"
-                            : "border border-white/10 bg-white/6 text-white/90"
-                        }`}
+                        key={message.id}
+                        className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                       >
-                        {!isUser ? (
-                          <p className="mb-1 text-xs font-medium uppercase tracking-[0.14em] text-pink-200/90">
-                            {character?.name ?? "Character"}
-                          </p>
-                        ) : null}
-                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <div
+                          className={`max-w-[85%] rounded-3xl px-4 py-3 text-sm leading-7 shadow-lg ${
+                            isUser
+                              ? "bg-gradient-to-r from-pink-500 to-fuchsia-500 text-white"
+                              : "border border-white/10 bg-white/5 text-white/85"
+                          }`}
+                        >
+                          {!isUser ? (
+                            <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/40">
+                              {character?.name ?? "Character"}
+                            </div>
+                          ) : null}
+
+                          <div className="whitespace-pre-wrap">{message.content}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {(isTyping || isInitializing) && character ? (
+                    <div className="flex justify-start">
+                      <div className="max-w-[85%] rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/75 shadow-lg">
+                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/40">
+                          {character.name}
+                        </div>
+                        {isInitializing ? "Loading..." : "Typing..."}
                       </div>
                     </div>
-                  );
-                })}
+                  ) : null}
 
-                {(isTyping || isInitializing) && character ? (
-                  <div className="flex justify-start">
-                    <div className="max-w-[85%] rounded-3xl border border-white/10 bg-white/6 px-4 py-3 text-sm text-white/80">
-                      <p className="mb-1 text-xs font-medium uppercase tracking-[0.14em] text-pink-200/90">
-                        {character.name}
-                      </p>
-                      <p>{isInitializing ? "Loading..." : "Typing..."}</p>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div ref={messagesEndRef} />
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
 
-              <form
-                onSubmit={handleSubmit}
-                className="border-t border-white/10 p-4 sm:p-5"
-              >
-                <div className="flex items-center gap-3 rounded-3xl border border-white/10 bg-black/30 pr-2">
-                  <input
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder={`Message ${character?.name ?? "your character"}...`}
-                    disabled={
-                      isTyping ||
-                      isInitializing ||
-                      isResetting ||
-                      !activeConversationId
-                    }
-                    className="h-12 flex-1 bg-transparent px-4 text-sm text-white outline-none placeholder:text-white/30 disabled:opacity-60"
-                  />
+              <div className="border-t border-white/10 p-4">
+                <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
+                  <div className="flex items-center gap-3 rounded-3xl border border-white/10 bg-black/20 px-2 py-2">
+                    <input
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      placeholder={`Message ${character?.name ?? "your character"}...`}
+                      disabled={
+                        isTyping || isInitializing || isResetting || !activeConversationId
+                      }
+                      className="h-12 flex-1 bg-transparent px-4 text-sm text-white outline-none placeholder:text-white/30 disabled:opacity-60"
+                    />
 
-                  <button
-                    type="submit"
-                    disabled={
-                      !input.trim() ||
-                      isTyping ||
-                      isInitializing ||
-                      isResetting ||
-                      !activeConversationId
-                    }
-                    className="rounded-2xl bg-pink-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-pink-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isTyping ? "Waiting..." : "Send"}
-                  </button>
-                </div>
+                    <button
+                      type="submit"
+                      disabled={
+                        !input.trim() ||
+                        isTyping ||
+                        isInitializing ||
+                        isResetting ||
+                        !activeConversationId
+                      }
+                      className="rounded-2xl bg-gradient-to-r from-pink-500 to-fuchsia-500 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-pink-500/20 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isTyping ? "Waiting..." : "Send"}
+                    </button>
+                  </div>
 
-                <p className="mt-3 text-xs text-white/35">
-                  Private conversation • Messages are saved automatically
-                </p>
-              </form>
+                  <p className="mt-3 text-center text-xs text-white/40">
+                    Private conversation • Messages are saved automatically
+                  </p>
+                </form>
+              </div>
             </section>
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </AuthGuard>
   );
 }

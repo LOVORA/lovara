@@ -9,9 +9,31 @@ export type CharacterArchetype =
   | "best-friend-lover";
 
 export type ReplyLength = "short" | "balanced" | "detailed";
+
 export type SpeechStyle = "natural" | "poetic" | "witty" | "bold" | "soft";
+
 export type RelationshipPace = "slow-burn" | "balanced" | "fast";
+
 export type GenderPresentation = "feminine" | "masculine" | "androgynous";
+
+export type CharacterScenario = {
+  setting?: string;
+  relationshipToUser?: string;
+  sceneGoal?: string;
+  tone?: string;
+  openingState?: string;
+};
+
+export type CharacterHistory = {
+  origin?: string;
+  occupation?: string;
+  publicMask?: string;
+  privateSelf?: string;
+  definingDesire?: string;
+  emotionalWound?: string;
+  secret?: string;
+  manualBackstory?: string;
+};
 
 export type CharacterBuilderInput = {
   name: string;
@@ -20,16 +42,16 @@ export type CharacterBuilderInput = {
   ageVibe: string;
   backgroundVibe: string;
 
-  playful: number; // 0-100
-  romantic: number; // 0-100
-  dominant: number; // 0-100
-  affectionate: number; // 0-100
-  jealous: number; // 0-100
-  mysterious: number; // 0-100
-  confident: number; // 0-100
-  emotionalDepth: number; // 0-100
-  teasing: number; // 0-100
-  humor: number; // 0-100
+  playful: number;
+  romantic: number;
+  dominant: number;
+  affectionate: number;
+  jealous: number;
+  mysterious: number;
+  confident: number;
+  emotionalDepth: number;
+  teasing: number;
+  humor: number;
 
   replyLength: ReplyLength;
   speechStyle: SpeechStyle;
@@ -37,25 +59,27 @@ export type CharacterBuilderInput = {
 
   tags?: string[];
   customNotes?: string;
+  scenario?: CharacterScenario;
+  history?: CharacterHistory;
 };
 
 export type InternalTraitState = {
-  initiativeLevel: number; // 0-1
-  verbalAssertiveness: number; // 0-1
-  affectionWarmth: number; // 0-1
-  jealousyExpression: number; // 0-1
-  emotionalOpenness: number; // 0-1
-  mysteryProjection: number; // 0-1
-  teasingFrequency: number; // 0-1
-  humorSharpness: number; // 0-1
-  attachmentSpeed: number; // 0-1
-  sceneLeadership: number; // 0-1
-  reassuranceStyle: number; // 0-1
-  responseDensity: number; // 0-1
-  sensoryLanguage: number; // 0-1
-  vulnerabilityVisibility: number; // 0-1
-  controlPreference: number; // 0-1
-  responseTemperature: number; // 0-1
+  initiativeLevel: number;
+  verbalAssertiveness: number;
+  affectionWarmth: number;
+  jealousyExpression: number;
+  emotionalOpenness: number;
+  mysteryProjection: number;
+  teasingFrequency: number;
+  humorSharpness: number;
+  attachmentSpeed: number;
+  sceneLeadership: number;
+  reassuranceStyle: number;
+  responseDensity: number;
+  sensoryLanguage: number;
+  vulnerabilityVisibility: number;
+  controlPreference: number;
+  responseTemperature: number;
 };
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
@@ -198,6 +222,89 @@ function resolveTraitConflicts(traits: InternalTraitState): InternalTraitState {
   return normalizeTraits(next);
 }
 
+function applyHistoryInfluence(
+  input: CharacterBuilderInput,
+  traits: InternalTraitState
+): InternalTraitState {
+  const next = { ...traits };
+  const history = input.history;
+
+  if (!history) {
+    return normalizeTraits(next);
+  }
+
+  if (history.publicMask?.trim()) {
+    next.mysteryProjection += 0.06;
+    next.verbalAssertiveness += 0.03;
+  }
+
+  if (history.privateSelf?.trim()) {
+    next.vulnerabilityVisibility += 0.08;
+    next.emotionalOpenness += 0.06;
+  }
+
+  if (history.definingDesire?.trim()) {
+    next.initiativeLevel += 0.06;
+    next.responseTemperature += 0.04;
+  }
+
+  if (history.emotionalWound?.trim()) {
+    next.mysteryProjection += 0.08;
+    next.vulnerabilityVisibility += 0.05;
+  }
+
+  if (history.secret?.trim()) {
+    next.mysteryProjection += 0.1;
+  }
+
+  if (history.occupation?.trim()) {
+    const job = history.occupation.trim().toLowerCase();
+
+    if (
+      job.includes("doctor") ||
+      job.includes("nurse") ||
+      job.includes("therapist") ||
+      job.includes("psychologist")
+    ) {
+      next.reassuranceStyle += 0.08;
+      next.affectionWarmth += 0.04;
+    }
+
+    if (
+      job.includes("soldier") ||
+      job.includes("commander") ||
+      job.includes("officer") ||
+      job.includes("military")
+    ) {
+      next.sceneLeadership += 0.1;
+      next.controlPreference += 0.08;
+      next.verbalAssertiveness += 0.08;
+    }
+
+    if (
+      job.includes("teacher") ||
+      job.includes("professor") ||
+      job.includes("student")
+    ) {
+      next.emotionalOpenness += 0.04;
+      next.humorSharpness += 0.04;
+    }
+
+    if (
+      job.includes("bartender") ||
+      job.includes("performer") ||
+      job.includes("singer") ||
+      job.includes("host")
+    ) {
+      next.initiativeLevel += 0.06;
+      next.responseTemperature += 0.06;
+      next.sensoryLanguage += 0.04;
+    }
+  }
+
+  return normalizeTraits(next);
+}
+
 export function buildInternalTraits(
   input: CharacterBuilderInput
 ): InternalTraitState {
@@ -215,19 +322,23 @@ export function buildInternalTraits(
   const humor = fromPercent(input.humor);
 
   traits.initiativeLevel += dominant * 0.18 + confident * 0.14 + teasing * 0.06;
-  traits.verbalAssertiveness += dominant * 0.25 + confident * 0.16 - mysterious * 0.04;
+  traits.verbalAssertiveness +=
+    dominant * 0.25 + confident * 0.16 - mysterious * 0.04;
   traits.affectionWarmth += affectionate * 0.28 + romantic * 0.16;
   traits.jealousyExpression += jealous * 0.34;
-  traits.emotionalOpenness += emotionalDepth * 0.24 + romantic * 0.1 - mysterious * 0.16;
+  traits.emotionalOpenness +=
+    emotionalDepth * 0.24 + romantic * 0.1 - mysterious * 0.16;
   traits.mysteryProjection += mysterious * 0.34;
   traits.teasingFrequency += teasing * 0.32 + playful * 0.14;
   traits.humorSharpness += humor * 0.28 + teasing * 0.08;
   traits.sceneLeadership += dominant * 0.2 + confident * 0.12;
   traits.reassuranceStyle += affectionate * 0.14 + emotionalDepth * 0.12;
-  traits.sensoryLanguage += romantic * 0.12 + mysterious * 0.08 + emotionalDepth * 0.08;
+  traits.sensoryLanguage +=
+    romantic * 0.12 + mysterious * 0.08 + emotionalDepth * 0.08;
   traits.vulnerabilityVisibility += emotionalDepth * 0.2 - mysterious * 0.08;
   traits.controlPreference += dominant * 0.28 + jealous * 0.1;
-  traits.responseTemperature += romantic * 0.16 + affectionate * 0.14 + dominant * 0.08;
+  traits.responseTemperature +=
+    romantic * 0.16 + affectionate * 0.14 + dominant * 0.08;
 
   switch (input.relationshipPace) {
     case "slow-burn":
@@ -276,6 +387,7 @@ export function buildInternalTraits(
   }
 
   traits = normalizeTraits(traits);
+  traits = applyHistoryInfluence(input, traits);
   traits = resolveTraitConflicts(traits);
 
   return traits;
@@ -403,7 +515,10 @@ function buildSpeechBlock(
 }
 
 function buildIdentityBlock(input: CharacterBuilderInput): string {
-  const tags = input.tags?.length ? ` Core tags: ${input.tags.join(", ")}.` : "";
+  const tags = input.tags?.length
+    ? ` Core tags: ${input.tags.join(", ")}.`
+    : "";
+
   const notes = input.customNotes?.trim()
     ? ` Creator notes: ${input.customNotes.trim()}`
     : "";
@@ -418,6 +533,99 @@ function buildIdentityBlock(input: CharacterBuilderInput): string {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function buildScenarioBlock(input: CharacterBuilderInput): string {
+  const scenario = input.scenario;
+
+  if (!scenario) {
+    return "Scene context: No fixed scene was provided, so stay fully in character while adapting naturally to the user's implied setting and energy.";
+  }
+
+  const details: string[] = [];
+
+  if (scenario.setting?.trim()) {
+    details.push(`Setting: ${scenario.setting.trim()}.`);
+  }
+
+  if (scenario.relationshipToUser?.trim()) {
+    details.push(`Relationship to user: ${scenario.relationshipToUser.trim()}.`);
+  }
+
+  if (scenario.sceneGoal?.trim()) {
+    details.push(`Scene goal: ${scenario.sceneGoal.trim()}.`);
+  }
+
+  if (scenario.tone?.trim()) {
+    details.push(`Scene tone: ${scenario.tone.trim()}.`);
+  }
+
+  if (scenario.openingState?.trim()) {
+    details.push(`Opening state: ${scenario.openingState.trim()}.`);
+  }
+
+  if (details.length === 0) {
+    return "Scene context: No fixed scene was provided, so stay fully in character while adapting naturally to the user's implied setting and energy.";
+  }
+
+  return [
+    "Scene context: Treat this roleplay as an unfolding scene, not a generic chat.",
+    ...details,
+    "Let your word choice, emotional intensity, priorities, body language, and social behavior reflect this scene naturally.",
+    "Do not explain the scene mechanically. Simply behave as someone who is already inside it.",
+  ].join(" ");
+}
+
+function buildHistoryBlock(input: CharacterBuilderInput): string {
+  const history = input.history;
+
+  if (!history) {
+    return "Character history: No detailed history was provided, so infer a coherent past from the archetype, emotional traits, and current scene.";
+  }
+
+  const details: string[] = [];
+
+  if (history.origin?.trim()) {
+    details.push(`Origin: ${history.origin.trim()}.`);
+  }
+
+  if (history.occupation?.trim()) {
+    details.push(`Occupation or role: ${history.occupation.trim()}.`);
+  }
+
+  if (history.publicMask?.trim()) {
+    details.push(`Public mask: ${history.publicMask.trim()}.`);
+  }
+
+  if (history.privateSelf?.trim()) {
+    details.push(`Private self: ${history.privateSelf.trim()}.`);
+  }
+
+  if (history.definingDesire?.trim()) {
+    details.push(`Core desire: ${history.definingDesire.trim()}.`);
+  }
+
+  if (history.emotionalWound?.trim()) {
+    details.push(`Emotional wound: ${history.emotionalWound.trim()}.`);
+  }
+
+  if (history.secret?.trim()) {
+    details.push(`Secret: ${history.secret.trim()}.`);
+  }
+
+  if (history.manualBackstory?.trim()) {
+    details.push(`Backstory canon: ${history.manualBackstory.trim()}.`);
+  }
+
+  if (details.length === 0) {
+    return "Character history: No detailed history was provided, so infer a coherent past from the archetype, emotional traits, and current scene.";
+  }
+
+  return [
+    "Character history: Treat these details as part of the character's lived past and emotional architecture.",
+    ...details,
+    "Let these facts influence subtext, vulnerability, defensiveness, confidence, and what the character avoids or pursues.",
+  ].join(" ");
 }
 
 function buildSystemRulesBlock(traits: InternalTraitState): string {
@@ -455,6 +663,8 @@ export function buildCharacterSystemPrompt(
 
   const sections = [
     buildIdentityBlock(input),
+    buildScenarioBlock(input),
+    buildHistoryBlock(input),
     buildBehaviorBlock(traits),
     buildSpeechBlock(input, traits),
     buildSystemRulesBlock(traits),

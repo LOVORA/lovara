@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { characters } from "../../lib/characters";
+import { getCustomCharacters } from "../../lib/custom-characters-storage";
 
 type ConversationItem = {
   id: string;
@@ -23,20 +24,36 @@ type MessagePreviewRow = {
   created_at: string;
 };
 
+type BuiltInCharacter = {
+  slug: string;
+  name: string;
+  role: string;
+  image?: string;
+};
+
+type SavedCustomCharacter = {
+  slug: string;
+  name?: string;
+  role?: string;
+  image?: string;
+};
+
 type ChatCard = {
   id: string;
   characterSlug: string;
+  realSlug: string;
+  isCustom: boolean;
   characterName: string;
   characterRole: string;
   characterImage?: string;
   updatedAt: string;
   preview: string;
+  href: string;
 };
 
 function formatRelativeTime(dateString: string) {
   const date = new Date(dateString);
   const now = new Date();
-
   const diffMs = now.getTime() - date.getTime();
   const diffMinutes = Math.floor(diffMs / 1000 / 60);
   const diffHours = Math.floor(diffMinutes / 60);
@@ -50,14 +67,36 @@ function formatRelativeTime(dateString: string) {
   return date.toLocaleDateString();
 }
 
+function parseCharacterSlug(characterSlug: string) {
+  const isCustom = characterSlug.startsWith("custom:");
+  const realSlug = isCustom ? characterSlug.slice("custom:".length) : characterSlug;
+
+  return {
+    isCustom,
+    realSlug,
+    href: isCustom ? `/chat/custom/${realSlug}` : `/chat/${realSlug}`,
+  };
+}
+
 export default function ChatsList() {
   const [userId, setUserId] = useState<string | null>(null);
   const [chats, setChats] = useState<ConversationItem[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [customCharacters, setCustomCharacters] = useState<SavedCustomCharacter[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    try {
+      const saved = getCustomCharacters();
+      setCustomCharacters(Array.isArray(saved) ? (saved as SavedCustomCharacter[]) : []);
+    } catch (error) {
+      console.error(error);
+      setCustomCharacters([]);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -131,7 +170,6 @@ export default function ChatsList() {
       for (const row of ((messageRows as MessagePreviewRow[] | null) ?? [])) {
         if (latestPreviewByConversation[row.conversation_id]) continue;
         if (row.role !== "assistant" && row.role !== "user") continue;
-
         latestPreviewByConversation[row.conversation_id] = row.content;
       }
 
@@ -148,31 +186,48 @@ export default function ChatsList() {
 
   const chatCards = useMemo<ChatCard[]>(() => {
     return chats.map((chat) => {
-      const character = characters.find((item) => item.slug === chat.character_slug);
+      const parsed = parseCharacterSlug(chat.character_slug);
+
+      const builtInCharacter = characters.find(
+        (item) => item.slug === parsed.realSlug
+      ) as BuiltInCharacter | undefined;
+
+      const customCharacter = customCharacters.find(
+        (item) => item.slug === parsed.realSlug
+      );
+
+      const resolvedCharacter = parsed.isCustom ? customCharacter : builtInCharacter;
 
       return {
         id: chat.id,
         characterSlug: chat.character_slug,
-        characterName: character?.name ?? chat.character_slug,
-        characterRole: character?.role ?? "Private character chat",
-        characterImage: character?.image,
+        realSlug: parsed.realSlug,
+        isCustom: parsed.isCustom,
+        characterName:
+          resolvedCharacter?.name ??
+          (parsed.isCustom ? parsed.realSlug : chat.character_slug),
+        characterRole:
+          resolvedCharacter?.role ??
+          (parsed.isCustom ? "Custom character chat" : "Private character chat"),
+        characterImage: resolvedCharacter?.image,
         updatedAt: chat.updated_at,
         preview:
           previews[chat.id] ||
-          "No messages yet. Open this chat to start the conversation.",
+          "No messages yet.\nOpen this chat to start the conversation.",
+        href: parsed.href,
       };
     });
-  }, [chats, previews]);
+  }, [chats, previews, customCharacters]);
 
   const filteredCards = useMemo(() => {
     const query = search.trim().toLowerCase();
-
     if (!query) return chatCards;
 
     return chatCards.filter((chat) => {
       return (
         chat.characterName.toLowerCase().includes(query) ||
         chat.characterSlug.toLowerCase().includes(query) ||
+        chat.realSlug.toLowerCase().includes(query) ||
         chat.characterRole.toLowerCase().includes(query) ||
         chat.preview.toLowerCase().includes(query)
       );
@@ -183,7 +238,7 @@ export default function ChatsList() {
     if (!userId || deletingSlug) return;
 
     const confirmed = window.confirm(
-      "This will delete your saved conversation for this character. Continue?"
+      "This will delete your saved conversation for this character.\nContinue?"
     );
 
     if (!confirmed) return;
@@ -207,13 +262,11 @@ export default function ChatsList() {
 
       setPreviews((prev) => {
         const next = { ...prev };
-
         for (const chat of chats) {
           if (chat.character_slug === characterSlug) {
             delete next[chat.id];
           }
         }
-
         return next;
       });
     } catch (error) {
@@ -226,141 +279,113 @@ export default function ChatsList() {
 
   if (loading) {
     return (
-      <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-8 text-white/70 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-pink-400" />
-          <p className="text-sm uppercase tracking-[0.18em] text-white/60">
-            Loading chats...
-          </p>
-        </div>
+      <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-8 text-white/70">
+        Loading chats...
       </div>
     );
   }
 
   if (message && chatCards.length === 0) {
     return (
-      <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-8 text-white/70 backdrop-blur-md">
+      <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-8 text-white/70">
         {message}
       </div>
     );
   }
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-md">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.22em] text-pink-200/70">
-              Search
-            </p>
-            <p className="mt-2 text-sm text-white/55">
-              Find a saved conversation by character, role, or message preview.
-            </p>
-          </div>
-
-          <div className="w-full md:max-w-md">
-            <input
-              type="text"
-              value={search}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
-              placeholder="Search chats..."
-              className="w-full rounded-[20px] border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-            />
-          </div>
+    <div>
+      <div className="mb-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-pink-200/75">
+          Search
         </div>
+        <p className="mb-4 text-sm text-white/60">
+          Find a saved conversation by character, role, or message preview.
+        </p>
+
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search chats..."
+          className="w-full rounded-[20px] border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
+        />
       </div>
 
       {message && (
-        <div className="rounded-[24px] border border-white/10 bg-white/[0.04] px-5 py-3 text-sm text-white/70 backdrop-blur-md">
+        <div className="mb-6 rounded-[20px] border border-pink-400/15 bg-pink-500/10 px-4 py-3 text-sm text-pink-100">
           {message}
         </div>
       )}
 
       {filteredCards.length === 0 ? (
-        <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-10 text-center backdrop-blur-md">
-          <p className="text-xl font-semibold text-white">No chats found</p>
-          <p className="mt-3 text-sm leading-7 text-white/60">
+        <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-8 text-center">
+          <h3 className="text-xl font-semibold text-white">No chats found</h3>
+          <p className="mt-2 text-sm text-white/60">
             {chatCards.length === 0
               ? "Start a conversation with a character first."
               : "Try a different search keyword."}
           </p>
         </div>
       ) : (
-        <div className="grid gap-5">
+        <div className="grid gap-4">
           {filteredCards.map((chat) => (
             <div
               key={chat.id}
-              className="group overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] transition duration-300 hover:border-pink-400/20 hover:bg-white/[0.06]"
+              className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.25)]"
             >
-              <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-5">
-                <Link href={`/chat/${chat.characterSlug}`} className="min-w-0 flex-1">
-                  <div className="flex items-start gap-4">
-                    <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-[22px] border border-white/10 bg-white/10 shadow-[0_12px_30px_rgba(236,72,153,0.18)]">
-                      {chat.characterImage ? (
-                        <Image
-                          src={chat.characterImage}
-                          alt={chat.characterName}
-                          fill
-                          className="object-cover transition duration-500 group-hover:scale-105"
-                          sizes="80px"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-pink-500 to-fuchsia-600 text-2xl font-bold text-white">
-                          {chat.characterName.charAt(0)}
-                        </div>
-                      )}
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex min-w-0 items-start gap-4">
+                  {chat.characterImage ? (
+                    <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-white/10">
+                      <Image
+                        src={chat.characterImage}
+                        alt={chat.characterName}
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500/25 to-fuchsia-500/20 text-lg font-semibold text-pink-200">
+                      {chat.characterName.charAt(0)}
+                    </div>
+                  )}
 
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate text-lg font-semibold text-white">
+                        {chat.characterName}
+                      </h3>
+
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
+                        {chat.isCustom ? "Custom" : "Built-in"}
+                      </span>
+
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
+                        Saved
+                      </span>
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-xl font-semibold tracking-tight text-white">
-                          {chat.characterName}
-                        </p>
+                    <p className="mt-1 text-sm text-white/60">{chat.characterRole}</p>
 
-                        <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-pink-300/80">
-                          {chat.characterSlug}
-                        </span>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/72">
+                      {chat.preview}
+                    </p>
 
-                        <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-emerald-200/75">
-                          Saved
-                        </span>
-                      </div>
-
-                      <p className="mt-3 text-[11px] uppercase tracking-[0.2em] text-white/40">
-                        {chat.characterRole}
-                      </p>
-
-                      <p className="mt-3 line-clamp-2 max-w-3xl text-sm leading-7 text-white/65">
-                        {chat.preview}
-                      </p>
-
-                      <div className="mt-4 flex flex-wrap items-center gap-3">
-                        <p className="text-xs text-white/45">
-                          Updated {formatRelativeTime(chat.updatedAt)}
-                        </p>
-
-                        <span className="text-xs text-white/25">•</span>
-
-                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">
-                          Private conversation
-                        </p>
-                      </div>
+                    <div className="mt-3 text-xs text-white/45">
+                      Updated {formatRelativeTime(chat.updatedAt)} • Private conversation
                     </div>
                   </div>
-                </Link>
+                </div>
 
                 <div className="flex shrink-0 items-center gap-3">
                   <Link
-                    href={`/chat/${chat.characterSlug}`}
-                    className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/10 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-white/85 transition hover:bg-white/15"
+                    href={chat.href}
+                    className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-pink-500 to-fuchsia-500 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-white shadow-lg shadow-pink-500/20 transition hover:opacity-95"
                   >
                     Open chat
                   </Link>
 
                   <button
-                    type="button"
                     onClick={() => handleDelete(chat.characterSlug)}
                     disabled={deletingSlug === chat.characterSlug}
                     className="inline-flex items-center justify-center rounded-full border border-red-400/20 bg-red-500/10 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
