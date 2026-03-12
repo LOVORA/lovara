@@ -1,26 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getCustomCharacters,
   removeCustomCharacter,
+  type StoredCustomCharacter,
 } from "../../lib/custom-characters-storage";
 
-type SavedCharacter = {
-  slug: string;
-  name?: string;
+type CustomCharacterCard = StoredCustomCharacter & {
   headline?: string;
   description?: string;
-  greeting?: string;
   image?: string;
-  role?: string;
-  archetype?: string;
-  backstory?: string;
-  previewMessage?: unknown;
-  tags?: unknown;
-  traits?: unknown;
-  memory?: unknown;
+  tags?: string[];
+  traits?: string[];
   scenario?: {
     setting?: string;
     relationshipToUser?: string;
@@ -28,335 +21,288 @@ type SavedCharacter = {
     tone?: string;
     openingState?: string;
   };
-  __savedAt?: string;
 };
 
-function toDisplayText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value == null) return "";
-
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const preferredKeys = ["label", "name", "title", "value", "text", "slug", "id", "key"];
-
-    for (const key of preferredKeys) {
-      const candidate = record[key];
-      if (typeof candidate === "string" && candidate.trim()) {
-        return candidate;
-      }
-    }
-
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-
-  return String(value);
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-function toDisplayList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map((item) => toDisplayText(item)).filter(Boolean);
-  }
+function normalizeCharacter(raw: StoredCustomCharacter): CustomCharacterCard {
+  const record = raw as Record<string, unknown>;
 
-  if (value == null) return [];
+  const scenarioRaw =
+    typeof record.scenario === "object" && record.scenario !== null
+      ? (record.scenario as Record<string, unknown>)
+      : undefined;
 
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const candidateArrays = [
-      record.items,
-      record.entries,
-      record.memories,
-      record.list,
-      record.values,
-      record.lines,
-    ];
-
-    for (const candidate of candidateArrays) {
-      if (Array.isArray(candidate)) {
-        return candidate.map((item) => toDisplayText(item)).filter(Boolean);
-      }
-    }
-  }
-
-  const text = toDisplayText(value);
-  return text ? [text] : [];
+  return {
+    ...raw,
+    headline: typeof record.headline === "string" ? record.headline : undefined,
+    description:
+      typeof record.description === "string" ? record.description : undefined,
+    image: typeof record.image === "string" ? record.image : undefined,
+    tags: isStringArray(record.tags) ? record.tags : [],
+    traits: isStringArray(record.traits) ? record.traits : [],
+    scenario: scenarioRaw
+      ? {
+          setting:
+            typeof scenarioRaw.setting === "string" ? scenarioRaw.setting : undefined,
+          relationshipToUser:
+            typeof scenarioRaw.relationshipToUser === "string"
+              ? scenarioRaw.relationshipToUser
+              : undefined,
+          sceneGoal:
+            typeof scenarioRaw.sceneGoal === "string"
+              ? scenarioRaw.sceneGoal
+              : undefined,
+          tone: typeof scenarioRaw.tone === "string" ? scenarioRaw.tone : undefined,
+          openingState:
+            typeof scenarioRaw.openingState === "string"
+              ? scenarioRaw.openingState
+              : undefined,
+        }
+      : undefined,
+  };
 }
 
-function formatSavedAt(value?: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString();
-}
-
-export default function MyCharactersPage() {
-  const [characters, setCharacters] = useState<SavedCharacter[]>([]);
-
-  useEffect(() => {
-    setCharacters(getCustomCharacters() as SavedCharacter[]);
-  }, []);
-
-  function handleDelete(slug: string) {
-    const next = removeCustomCharacter(slug);
-    setCharacters(next as SavedCharacter[]);
+function CharacterAvatar({
+  name,
+  image,
+}: {
+  name: string;
+  image?: string;
+}) {
+  if (image) {
+    return (
+      <div className="h-16 w-16 overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={image} alt={name} className="h-full w-full object-cover" />
+      </div>
+    );
   }
 
   return (
-    <main className="min-h-screen bg-[#07070b] text-white">
-      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="mb-2 text-xs uppercase tracking-[0.28em] text-pink-300/70">
-              Lovora
+    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500/30 to-fuchsia-500/20 text-xl font-semibold text-white">
+      {name.slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string;
+  value?: string;
+}) {
+  if (!value) return null;
+
+  return (
+    <div className="text-sm text-white/72">
+      <span className="text-white/38">{label}:</span> {value}
+    </div>
+  );
+}
+
+export default function MyCharactersPage() {
+  const [characters, setCharacters] = useState<CustomCharacterCard[]>([]);
+  const [mounted, setMounted] = useState(false);
+
+  function refreshCharacters() {
+    const stored = getCustomCharacters<StoredCustomCharacter>().map(normalizeCharacter);
+    setCharacters(stored);
+  }
+
+  useEffect(() => {
+    setMounted(true);
+    refreshCharacters();
+  }, []);
+
+  const sortedCharacters = useMemo(() => {
+  return [...characters].sort((a, b) => {
+    const nameA = a.name ?? "Unnamed Character";
+    const nameB = b.name ?? "Unnamed Character";
+    return nameA.localeCompare(nameB);
+  });
+}, [characters]);
+
+
+  function handleDelete(slug: string) {
+    removeCustomCharacter(slug);
+    refreshCharacters();
+  }
+
+  return (
+    <main className="min-h-screen bg-[#05050a] text-white">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute left-[-8%] top-[-10%] h-[26rem] w-[26rem] rounded-full bg-pink-500/12 blur-3xl" />
+        <div className="absolute right-[-10%] top-[8%] h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/10 blur-3xl" />
+        <div className="absolute bottom-[-12%] left-[18%] h-[22rem] w-[22rem] rounded-full bg-violet-500/10 blur-3xl" />
+      </div>
+
+      <section className="relative mx-auto max-w-7xl px-4 py-8 md:px-6 md:py-12">
+        <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-white/5 shadow-[0_30px_120px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+          <div className="border-b border-white/10 px-5 py-6 md:px-7 md:py-8">
+            <div className="mb-3 inline-flex rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-pink-200/85">
+              Lovora Library
             </div>
-            <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
-              My Characters
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/65">
-              Your locally saved custom characters from the builder.
-            </p>
-          </div>
 
-          <Link
-            href="/create-character"
-            className="inline-flex rounded-2xl bg-gradient-to-r from-pink-500 to-fuchsia-500 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-pink-500/20 transition hover:opacity-95"
-          >
-            Create New Character
-          </Link>
-        </div>
+            <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">
+                  My Characters
+                </h1>
+                <p className="mt-4 max-w-3xl text-sm leading-7 text-white/65 md:text-[15px]">
+                  View, manage, and launch every character created in your studio.
+                </p>
+              </div>
 
-        {characters.length === 0 ? (
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center shadow-2xl backdrop-blur">
-            <h2 className="text-2xl font-semibold">No saved characters yet</h2>
-            <p className="mt-3 text-sm text-white/60">
-              Create a character and save it to see it here.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-6 lg:grid-cols-2">
-            {characters.map((character, index) => {
-              const tags = toDisplayList(character.tags);
-              const traits = toDisplayList(character.traits);
-              const memory = toDisplayList(character.memory);
-              const previewMessage = toDisplayText(character.previewMessage);
-              const savedAt = formatSavedAt(character.__savedAt);
-
-              return (
-                <div
-                  key={`${character.slug}-${index}`}
-                  className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] shadow-2xl backdrop-blur"
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  href="/create-character"
+                  className="rounded-2xl bg-gradient-to-r from-pink-500 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-900/30 transition hover:opacity-95"
                 >
-                  <div className="border-b border-white/10 p-5">
-                    <div className="mb-4 flex items-start gap-4">
-                      {character.image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={character.image}
-                          alt={character.name ?? "Character"}
-                          className="h-16 w-16 rounded-2xl object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500/25 to-fuchsia-500/20 text-xl font-semibold text-pink-200">
-                          {character.name?.charAt(0) ?? "C"}
+                  Create New Character
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 md:p-7">
+            {!mounted ? (
+              <div className="rounded-[1.75rem] border border-white/10 bg-[#0a0a11]/80 p-8 text-center text-white/60">
+                Loading characters...
+              </div>
+            ) : sortedCharacters.length === 0 ? (
+              <div className="rounded-[1.75rem] border border-dashed border-white/10 bg-[#0a0a11]/80 p-10 text-center">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500/20 to-fuchsia-500/10 text-xl font-semibold text-pink-100">
+                  +
+                </div>
+                <h2 className="mt-5 text-2xl font-semibold text-white">
+                  No custom characters yet
+                </h2>
+                <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-white/60">
+                  Start with quick mode for speed or detailed studio for full control.
+                </p>
+                <div className="mt-6">
+                  <Link
+                    href="/create-character"
+                    className="inline-flex rounded-2xl bg-gradient-to-r from-pink-500 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-900/30 transition hover:opacity-95"
+                  >
+                    Open Character Studio
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {sortedCharacters.map((character) => {
+                  const scenario = character.scenario;
+
+                  return (
+                    <div
+                      key={character.slug}
+                      className="group overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#0a0a11]/85 shadow-2xl backdrop-blur transition hover:border-pink-400/20 hover:bg-[#0d0d15]"
+                    >
+                      <div className="border-b border-white/10 p-5">
+                        <div className="flex items-start gap-4">
+                          <CharacterAvatar
+                            name={character.name || "Character"}
+                            image={character.image}
+                          />
+
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-xl font-semibold text-white">
+                              {character.name || "Unnamed Character"}
+                            </div>
+                            <div className="mt-1 text-sm text-pink-200/80">
+                              {character.headline || "Custom Lovora character"}
+                            </div>
+                          </div>
                         </div>
-                      )}
 
-                      <div className="min-w-0 flex-1">
-                        <h2 className="truncate text-2xl font-semibold">
-                          {character.name ?? "Unnamed Character"}
-                        </h2>
-                        <p className="mt-1 text-sm text-pink-300/80">
-                          {character.headline ?? character.slug}
-                        </p>
-
-                        {savedAt ? (
-                          <p className="mt-2 text-xs text-white/40">
-                            Saved: {savedAt}
+                        {character.description ? (
+                          <p className="mt-4 line-clamp-4 text-sm leading-7 text-white/68">
+                            {character.description}
                           </p>
                         ) : null}
                       </div>
+
+                      <div className="space-y-4 p-5">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">
+                            Scene Snapshot
+                          </div>
+                          <div className="space-y-2">
+                            <InfoRow label="Setting" value={scenario?.setting} />
+                            <InfoRow
+                              label="Relationship"
+                              value={scenario?.relationshipToUser}
+                            />
+                            <InfoRow label="Goal" value={scenario?.sceneGoal} />
+                            <InfoRow label="Tone" value={scenario?.tone} />
+                          </div>
+                        </div>
+
+                        {character.tags && character.tags.length > 0 ? (
+                          <div>
+                            <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/40">
+                              Tags
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {character.tags.slice(0, 6).map((tag, index) => (
+                                <span
+                                  key={`${tag}-${index}`}
+                                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {character.traits && character.traits.length > 0 ? (
+                          <div>
+                            <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/40">
+                              Trait Badges
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {character.traits.slice(0, 5).map((trait, index) => (
+                                <span
+                                  key={`${trait}-${index}`}
+                                  className="rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-xs text-pink-200"
+                                >
+                                  {trait}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="flex gap-3 pt-2">
+                          <Link
+                            href={`/chat/custom/${character.slug}`}
+                            className="flex-1 rounded-2xl bg-gradient-to-r from-pink-500 to-fuchsia-500 px-4 py-3 text-center text-sm font-semibold text-white shadow-lg shadow-pink-900/30 transition hover:opacity-95"
+                          >
+                            Open Chat
+                          </Link>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(character.slug)}
+                            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
                     </div>
-
-                    {character.role ? (
-                      <div className="mb-2 text-sm text-white/70">
-                        <span className="text-white/45">Role:</span> {character.role}
-                      </div>
-                    ) : null}
-
-                    {character.archetype ? (
-                      <div className="text-sm text-white/70">
-                        <span className="text-white/45">Archetype:</span>{" "}
-                        {character.archetype}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-5 p-5">
-                    <div>
-                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
-                        Description
-                      </div>
-                      <p className="text-sm leading-6 text-white/75">
-                        {character.description ?? "No description"}
-                      </p>
-                    </div>
-
-                    {previewMessage ? (
-                      <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
-                          Preview Message
-                        </div>
-                        <div className="rounded-2xl border border-pink-400/15 bg-pink-500/5 p-4 text-sm leading-6 text-white/85">
-                          {previewMessage}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div>
-                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
-                        Greeting
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/80">
-                        {character.greeting ?? "No greeting"}
-                      </div>
-                    </div>
-
-                    {character.scenario ? (
-                      <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
-                          Scenario
-                        </div>
-
-                        <div className="space-y-2">
-                          {character.scenario.setting ? (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                              <span className="text-white/45">Setting:</span>{" "}
-                              {character.scenario.setting}
-                            </div>
-                          ) : null}
-
-                          {character.scenario.relationshipToUser ? (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                              <span className="text-white/45">Relationship:</span>{" "}
-                              {character.scenario.relationshipToUser}
-                            </div>
-                          ) : null}
-
-                          {character.scenario.sceneGoal ? (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                              <span className="text-white/45">Goal:</span>{" "}
-                              {character.scenario.sceneGoal}
-                            </div>
-                          ) : null}
-
-                          {character.scenario.tone ? (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                              <span className="text-white/45">Tone:</span>{" "}
-                              {character.scenario.tone}
-                            </div>
-                          ) : null}
-
-                          {character.scenario.openingState ? (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                              <span className="text-white/45">Opening:</span>{" "}
-                              {character.scenario.openingState}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {tags.length > 0 ? (
-                      <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
-                          Tags
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {tags.map((tag, tagIndex) => (
-                            <span
-                              key={`${tag}-${tagIndex}`}
-                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {traits.length > 0 ? (
-                      <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
-                          Traits
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {traits.map((trait, traitIndex) => (
-                            <span
-                              key={`${trait}-${traitIndex}`}
-                              className="rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-xs text-pink-200"
-                            >
-                              {trait}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {memory.length > 0 ? (
-                      <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
-                          Memory Seed
-                        </div>
-                        <div className="space-y-2">
-                          {memory.map((item, memoryIndex) => (
-                            <div
-                              key={`${item}-${memoryIndex}`}
-                              className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75"
-                            >
-                              {item}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {character.backstory ? (
-                      <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
-                          Backstory
-                        </div>
-                        <p className="text-sm leading-6 text-white/75">
-                          {character.backstory}
-                        </p>
-                      </div>
-                    ) : null}
-
-                    <div className="flex gap-3 pt-2">
-                      <button
-                        onClick={() => handleDelete(character.slug)}
-                        className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:bg-white/10"
-                      >
-                        Delete
-                      </button>
-
-                      <Link
-                        href={`/chat/custom/${character.slug}`}
-                        className="flex-1 rounded-2xl bg-gradient-to-r from-pink-500 to-fuchsia-500 px-4 py-3 text-center text-sm font-medium text-white shadow-lg shadow-pink-500/20 transition hover:opacity-95"
-                      >
-                        Chat
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </section>
     </main>
   );
