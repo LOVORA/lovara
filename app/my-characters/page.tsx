@@ -78,7 +78,7 @@ export default function MyCharactersPage() {
   const [characters, setCharacters] = useState<SavedCharacter[]>([]);
 
   useEffect(() => {
-    setCharacters(getCustomCharacters<SavedCharacter>());
+    setCharacters(getCustomCharacters() as SavedCharacter[]);
   }, []);
 
   function handleDelete(slug: string) {
@@ -87,85 +87,79 @@ export default function MyCharactersPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#07070b] text-white">
-      <section className="mx-auto max-w-6xl px-6 py-10 md:px-8 md:py-14">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <main className="min-h-screen bg-black text-white">
+      <div className="mx-auto max-w-6xl px-6 py-12">
+        <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="mb-2 text-sm uppercase tracking-[0.28em] text-pink-300/80">
+            <p className="mb-2 text-sm uppercase tracking-[0.2em] text-white/50">
               Lovora
             </p>
-            <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">
-              My Characters
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/70 md:text-base">
+            <h1 className="text-3xl font-semibold tracking-tight">My Characters</h1>
+            <p className="mt-3 max-w-2xl text-sm text-white/65">
               Your locally saved custom characters from the builder.
             </p>
           </div>
 
           <Link
             href="/create-character"
-            className="rounded-2xl bg-pink-500 px-4 py-3 text-sm font-medium text-white transition hover:bg-pink-400"
+            className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/15"
           >
             Create New Character
           </Link>
         </div>
 
         {characters.length === 0 ? (
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8">
             <h2 className="text-xl font-semibold">No saved characters yet</h2>
-            <p className="mt-3 text-sm text-white/60">
+            <p className="mt-2 text-sm text-white/65">
               Create a character and save it to see it here.
             </p>
           </div>
         ) : (
-          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             {characters.map((character, index) => {
               const tags = toDisplayList(character.tags);
               const traits = toDisplayList(character.traits);
 
               return (
-                <div
+                <article
                   key={`${character.slug}-${index}`}
-                  className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur"
+                  className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
                 >
-                  <div className="border-b border-white/10 p-5">
-                    <div className="mb-3 flex items-center gap-3">
-                      <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-pink-500/30 to-fuchsia-500/20" />
-                      <div>
-                        <div className="text-lg font-semibold text-white">
-                          {character.name ?? "Unnamed Character"}
-                        </div>
-                        <div className="text-sm text-pink-300/80">
-                          {character.headline ?? character.slug}
-                        </div>
-                      </div>
-                    </div>
-
-                    <p className="text-sm leading-6 text-white/70">
-                      {character.description ?? "No description"}
+                  <div className="mb-5">
+                    <h2 className="text-xl font-semibold">
+                      {character.name ?? "Unnamed Character"}
+                    </h2>
+                    <p className="mt-1 text-sm text-white/45">
+                      {character.headline ?? character.slug}
                     </p>
                   </div>
 
-                  <div className="space-y-4 p-5">
+                  <div className="space-y-4 text-sm text-white/80">
                     <div>
-                      <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                      <p className="mb-1 text-xs uppercase tracking-[0.18em] text-white/40">
+                        Description
+                      </p>
+                      <p>{character.description ?? "No description"}</p>
+                    </div>
+
+                    <div>
+                      <p className="mb-1 text-xs uppercase tracking-[0.18em] text-white/40">
                         Greeting
-                      </div>
-                      <div className="rounded-2xl border border-pink-400/15 bg-pink-500/5 p-4 text-sm leading-6 text-white/85">
-                        {character.greeting ?? "No greeting"}
-                      </div>
+                      </p>
+                      <p>{character.greeting ?? "No greeting"}</p>
                     </div>
 
                     {tags.length > 0 ? (
                       <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                        <p className="mb-2 text-xs uppercase tracking-[0.18em] text-white/40">
                           Tags
-                        </div>
+                        </p>
                         <div className="flex flex-wrap gap-2">
                           {tags.map((tag, tagIndex) => (
                             <span
-                              key={`${tag}-${tagIndex}`}
-                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
+                              key={`${character.slug}-tag-${tagIndex}`}
+                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75"
                             >
                               {tag}
                             </span>
@@ -176,14 +170,14 @@ export default function MyCharactersPage() {
 
                     {traits.length > 0 ? (
                       <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">
+                        <p className="mb-2 text-xs uppercase tracking-[0.18em] text-white/40">
                           Traits
-                        </div>
+                        </p>
                         <div className="flex flex-wrap gap-2">
                           {traits.map((trait, traitIndex) => (
                             <span
-                              key={`${trait}-${traitIndex}`}
-                              className="rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-xs text-pink-200"
+                              key={`${character.slug}-trait-${traitIndex}`}
+                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75"
                             >
                               {trait}
                             </span>
@@ -191,31 +185,29 @@ export default function MyCharactersPage() {
                         </div>
                       </div>
                     ) : null}
-
-                    <div className="flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(character.slug)}
-                        className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:bg-white/10"
-                      >
-                        Delete
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled
-                        className="flex-1 rounded-2xl bg-pink-500/50 px-4 py-3 text-sm font-medium text-white/80"
-                      >
-                        Chat Soon
-                      </button>
-                    </div>
                   </div>
-                </div>
+
+                  <div className="mt-6 flex gap-3">
+                    <button
+                      onClick={() => handleDelete(character.slug)}
+                      className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:bg-white/10"
+                    >
+                      Delete
+                    </button>
+
+                    <Link
+                      href={`/chat/custom/${character.slug}`}
+                      className="flex-1 rounded-2xl border border-pink-400/30 bg-pink-500/10 px-4 py-3 text-center text-sm font-medium text-pink-200 transition hover:bg-pink-500/20"
+                    >
+                      Chat
+                    </Link>
+                  </div>
+                </article>
               );
             })}
           </div>
         )}
-      </section>
+      </div>
     </main>
   );
 }
