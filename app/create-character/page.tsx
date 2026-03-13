@@ -18,8 +18,8 @@ import {
   type ReplyLength,
   type SpeechStyle,
 } from "../../lib/character-engine";
-import { convertBuilderToCharacter } from "../../lib/custom-character-adapter";
-import { addCustomCharacter } from "../../lib/custom-characters-storage";
+import { buildCustomCharacterFromBuilder } from "../../lib/custom-character-adapter";
+import { customCharactersStorage } from "../../lib/custom-characters-storage";
 
 const archetypes: CharacterArchetype[] = [
   "sweetheart",
@@ -582,6 +582,17 @@ function toDisplayList(value: unknown): string[] {
   return text ? [text] : [];
 }
 
+function flattenMemorySeed(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+
+  const record = value as Record<string, unknown>;
+  const buckets = [record.identity, record.behavior, record.scenario];
+
+  return buckets.flatMap((bucket) =>
+    Array.isArray(bucket) ? bucket.map((item) => toDisplayText(item)).filter(Boolean) : []
+  );
+}
+
 function scoreLabel(value: number) {
   if (value >= 80) return "Extreme";
   if (value >= 65) return "High";
@@ -631,7 +642,7 @@ function buildQualitySignals(form: CharacterBuilderInput) {
       form.ageVibe ? 10 : 0,
       form.backgroundVibe?.trim() ? 20 : 0,
       form.customNotes?.trim() ? 20 : 0,
-    ].reduce((a, b) => a + b, 0),
+    ].reduce((a, b) => a + b, 0)
   );
 
   const scenarioSignal = clamp(
@@ -641,7 +652,7 @@ function buildQualitySignals(form: CharacterBuilderInput) {
       scenario.sceneGoal?.trim() ? 20 : 0,
       scenario.tone?.trim() ? 20 : 0,
       scenario.openingState?.trim() ? 18 : 0,
-    ].reduce((a, b) => a + b, 0),
+    ].reduce((a, b) => a + b, 0)
   );
 
   const traitSignal = clamp(
@@ -651,8 +662,8 @@ function buildQualitySignals(form: CharacterBuilderInput) {
         if (value >= 35 && value <= 90) return acc + 10;
         if (value >= 20 && value <= 100) return acc + 7;
         return acc + 4;
-      }, 0),
-    ),
+      }, 0)
+    )
   );
 
   const polishSignal = clamp(
@@ -661,7 +672,7 @@ function buildQualitySignals(form: CharacterBuilderInput) {
       form.replyLength ? 20 : 0,
       form.speechStyle ? 20 : 0,
       form.relationshipPace ? 25 : 0,
-    ].reduce((a, b) => a + b, 0),
+    ].reduce((a, b) => a + b, 0)
   );
 
   const total = clamp(
@@ -669,8 +680,8 @@ function buildQualitySignals(form: CharacterBuilderInput) {
       identitySignal * 0.28 +
         scenarioSignal * 0.34 +
         traitSignal * 0.22 +
-        polishSignal * 0.16,
-    ),
+        polishSignal * 0.16
+    )
   );
 
   const label =
@@ -745,7 +756,7 @@ function inferScenarioImpact(form: CharacterBuilderInput) {
 
 function buildLivePromptSnippet(
   output: ReturnType<typeof buildCharacterEngineOutput>,
-  maxLength = 1100,
+  maxLength = 1100
 ) {
   const text = output.systemPrompt ?? "";
   if (text.length <= maxLength) return text;
@@ -775,7 +786,7 @@ function StudioSection({
         "rounded-[2rem] border p-5 shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur md:p-6",
         featured
           ? "border-pink-400/20 bg-gradient-to-br from-pink-500/12 via-fuchsia-500/8 to-white/5"
-          : "border-white/10 bg-white/[0.04]",
+          : "border-white/10 bg-white/[0.04]"
       )}
     >
       <div className="mb-5">
@@ -844,7 +855,7 @@ function InputField(props: InputHTMLAttributes<HTMLInputElement>) {
       {...props}
       className={classNames(
         "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/28 focus:border-pink-400/40",
-        props.className,
+        props.className
       )}
     />
   );
@@ -856,7 +867,7 @@ function TextareaField(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
       {...props}
       className={classNames(
         "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/28 focus:border-pink-400/40",
-        props.className,
+        props.className
       )}
     />
   );
@@ -881,7 +892,7 @@ function SegmentButton({
         "rounded-[1.5rem] border p-4 text-left transition",
         active
           ? "border-pink-400/35 bg-gradient-to-br from-pink-500/18 to-fuchsia-500/10 shadow-[0_14px_40px_rgba(236,72,153,0.18)]"
-          : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.075]",
+          : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.075]"
       )}
     >
       <div className="text-sm font-semibold text-white">{title}</div>
@@ -911,7 +922,7 @@ function OptionCard({
         "rounded-[1.35rem] border p-4 text-left transition",
         active
           ? "border-pink-400/35 bg-pink-500/10 shadow-[0_12px_30px_rgba(236,72,153,0.14)]"
-          : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.075]",
+          : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.075]"
       )}
     >
       <div className="text-sm font-semibold text-white">{title}</div>
@@ -942,7 +953,7 @@ function PillButton({
         "rounded-full border px-3.5 py-2 text-xs font-medium transition",
         active
           ? "border-pink-400/30 bg-pink-500/12 text-pink-100"
-          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/[0.075]",
+          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/[0.075]"
       )}
     >
       {children}
@@ -996,7 +1007,7 @@ export default function CreateCharacterPage() {
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   const output = useMemo(() => buildCharacterEngineOutput(form), [form]);
-  const characterPreview = useMemo(() => convertBuilderToCharacter(form), [form]);
+  const characterPreview = useMemo(() => buildCustomCharacterFromBuilder(form), [form]);
 
   const scenario = form.scenario ?? {};
   const completionScore = buildCompletionScore(form);
@@ -1005,13 +1016,10 @@ export default function CreateCharacterPage() {
   const avgTrait = averageTraitScore(form);
   const livePromptSnippet = useMemo(() => buildLivePromptSnippet(output), [output]);
 
-  const previewMessage = (
-    characterPreview.character as unknown as { previewMessage?: unknown }
-  ).previewMessage;
-
-  const displayTags = toDisplayList(characterPreview.character.tags);
-  const displayTraits = toDisplayList(characterPreview.character.traits);
-  const displayMemory = toDisplayList(characterPreview.character.memory);
+  const previewMessage = characterPreview.previewMessage;
+  const displayTags = toDisplayList(characterPreview.tags);
+  const displayTraits = toDisplayList(characterPreview.traitBadges);
+  const displayMemory = flattenMemorySeed(characterPreview.memorySeed);
 
   const quickSummary = [
     form.ageVibe.replace("-year-old", ""),
@@ -1022,8 +1030,7 @@ export default function CreateCharacterPage() {
     .filter(Boolean)
     .join(" • ");
 
-  const previewHeadline =
-    characterPreview.character.headline || `${formatLabel(form.archetype)} energy`;
+  const previewHeadline = characterPreview.headline || `${formatLabel(form.archetype)} energy`;
 
   const previewDescriptor = [
     scenario.setting || "Scene not chosen",
@@ -1042,15 +1049,32 @@ export default function CreateCharacterPage() {
       ? "The character has a solid base, but scenario or polish can be pushed harder."
       : "The builder still needs more specificity to avoid generic outputs.";
 
+  const canSave = Boolean(
+    form.name.trim() &&
+      form.backgroundVibe.trim() &&
+      scenario.setting?.trim() &&
+      scenario.relationshipToUser?.trim() &&
+      scenario.sceneGoal?.trim() &&
+      scenario.tone?.trim() &&
+      scenario.openingState?.trim()
+  );
+
   useEffect(() => {
     if (!copiedPrompt) return;
     const timer = window.setTimeout(() => setCopiedPrompt(false), 1800);
     return () => window.clearTimeout(timer);
   }, [copiedPrompt]);
 
+  useEffect(() => {
+    if (!saveMessage) return;
+    setSaveMessage("");
+    // intentionally only when form changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
+
   function updateField<K extends keyof CharacterBuilderInput>(
     key: K,
-    value: CharacterBuilderInput[K],
+    value: CharacterBuilderInput[K]
   ) {
     setForm((prev) => ({
       ...prev,
@@ -1060,7 +1084,7 @@ export default function CreateCharacterPage() {
 
   function updateScenarioField(
     key: keyof NonNullable<CharacterBuilderInput["scenario"]>,
-    value: string,
+    value: string
   ) {
     setForm((prev) => ({
       ...prev,
@@ -1072,13 +1096,17 @@ export default function CreateCharacterPage() {
   }
 
   function handleSaveCharacter() {
-    const savedPayload = {
-      ...characterPreview.character,
-      __source: "builder",
-      __savedAt: new Date().toISOString(),
-    };
-    addCustomCharacter(savedPayload);
-    setSaveMessage(`Saved "${characterPreview.character.name}" to My Characters.`);
+    if (!canSave) {
+      setSaveMessage("Complete the core identity and scenario fields before saving.");
+      return;
+    }
+
+    try {
+      customCharactersStorage.save(characterPreview);
+      setSaveMessage(`Saved "${characterPreview.name}" to My Characters.`);
+    } catch {
+      setSaveMessage("Could not save character. Please try again.");
+    }
   }
 
   function resetBuilder() {
@@ -1362,7 +1390,7 @@ export default function CreateCharacterPage() {
                           title={preset.title}
                           subtitle={preset.subtitle}
                           meta={`${formatLabel(preset.values.archetype)} • ${formatLabel(
-                            preset.values.genderPresentation,
+                            preset.values.genderPresentation
                           )}`}
                           onClick={() => applyQuickIdentityPreset(preset)}
                         />
@@ -1446,7 +1474,7 @@ export default function CreateCharacterPage() {
                               e.target.value
                                 .split(",")
                                 .map((item) => item.trim())
-                                .filter(Boolean),
+                                .filter(Boolean)
                             )
                           }
                           placeholder="flirty, elegant, safe, dangerous"
@@ -1691,7 +1719,7 @@ export default function CreateCharacterPage() {
                             max={100}
                             value={form[field.key]}
                             onChange={(e) =>
-                              updateField(field.key, Number(e.target.value) as never)
+                              updateField(field.key, Number(e.target.value) as CharacterBuilderInput[typeof field.key])
                             }
                             className="mt-4 w-full accent-pink-400"
                           />
@@ -1715,7 +1743,7 @@ export default function CreateCharacterPage() {
                               e.target.value
                                 .split(",")
                                 .map((item) => item.trim())
-                                .filter(Boolean),
+                                .filter(Boolean)
                             )
                           }
                           placeholder="flirty, elegant, dominant, mysterious"
@@ -1745,7 +1773,7 @@ export default function CreateCharacterPage() {
                         Live Preview
                       </div>
                       <h2 className="mt-2 text-2xl font-semibold text-white">
-                        {characterPreview.character.name}
+                        {characterPreview.name}
                       </h2>
                       <p className="mt-2 text-sm leading-7 text-white/60">
                         {previewHeadline}
@@ -1776,7 +1804,7 @@ export default function CreateCharacterPage() {
                         "rounded-2xl border px-4 py-3 text-left transition",
                         previewTab === "overview"
                           ? "border-pink-400/30 bg-pink-500/10 text-white"
-                          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20",
+                          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20"
                       )}
                     >
                       <div className="text-sm font-medium">Overview</div>
@@ -1788,7 +1816,7 @@ export default function CreateCharacterPage() {
                         "rounded-2xl border px-4 py-3 text-left transition",
                         previewTab === "opening"
                           ? "border-pink-400/30 bg-pink-500/10 text-white"
-                          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20",
+                          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20"
                       )}
                     >
                       <div className="text-sm font-medium">Opening</div>
@@ -1800,7 +1828,7 @@ export default function CreateCharacterPage() {
                         "rounded-2xl border px-4 py-3 text-left transition",
                         previewTab === "traits"
                           ? "border-pink-400/30 bg-pink-500/10 text-white"
-                          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20",
+                          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20"
                       )}
                     >
                       <div className="text-sm font-medium">Traits</div>
@@ -1812,7 +1840,7 @@ export default function CreateCharacterPage() {
                         "rounded-2xl border px-4 py-3 text-left transition",
                         previewTab === "prompt"
                           ? "border-pink-400/30 bg-pink-500/10 text-white"
-                          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20",
+                          : "border-white/10 bg-white/5 text-white/70 hover:border-white/20"
                       )}
                     >
                       <div className="text-sm font-medium">Prompt</div>
@@ -1853,7 +1881,7 @@ export default function CreateCharacterPage() {
                           Character Snapshot
                         </div>
                         <div className="text-sm leading-7 text-white/78">
-                          {characterPreview.character.description}
+                          {characterPreview.description}
                         </div>
                       </div>
 
@@ -1914,7 +1942,7 @@ export default function CreateCharacterPage() {
                           Greeting Preview
                         </div>
                         <div className="text-sm leading-7 text-white/82">
-                          {characterPreview.character.greeting}
+                          {characterPreview.greeting}
                         </div>
                       </div>
 
@@ -1932,14 +1960,20 @@ export default function CreateCharacterPage() {
                           Memory Seed
                         </div>
                         <div className="space-y-2">
-                          {displayMemory.map((item, index) => (
-                            <div
-                              key={`${item}-${index}`}
-                              className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/74"
-                            >
-                              {item}
+                          {displayMemory.length > 0 ? (
+                            displayMemory.map((item, index) => (
+                              <div
+                                key={`${item}-${index}`}
+                                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/74"
+                              >
+                                {item}
+                              </div>
+                            ))
+                          ) : (
+                            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/54">
+                              No memory seed generated yet.
                             </div>
-                          ))}
+                          )}
                         </div>
                       </div>
 
@@ -1948,7 +1982,7 @@ export default function CreateCharacterPage() {
                           Backstory
                         </div>
                         <div className="text-sm leading-7 text-white/76">
-                          {toDisplayText(characterPreview.character.backstory)}
+                          {toDisplayText(characterPreview.backstory)}
                         </div>
                       </div>
                     </>
@@ -2043,7 +2077,7 @@ export default function CreateCharacterPage() {
               <div className="flex flex-col gap-4 rounded-[1.5rem] border border-white/10 bg-[#09090f]/88 p-4 shadow-[0_18px_70px_rgba(0,0,0,0.45)] backdrop-blur md:flex-row md:items-center md:justify-between">
                 <div>
                   <div className="text-sm font-medium text-white">
-                    {characterPreview.character.name} is ready to save.
+                    {characterPreview.name} is ready to save.
                   </div>
                   <div className="mt-1 text-sm text-white/56">
                     {saveMessage || "Refine the preview, check the prompt, then save with confidence."}
@@ -2067,7 +2101,13 @@ export default function CreateCharacterPage() {
                   <button
                     type="button"
                     onClick={handleSaveCharacter}
-                    className="rounded-full bg-gradient-to-r from-pink-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_14px_34px_rgba(236,72,153,0.32)] transition hover:scale-[1.01]"
+                    disabled={!canSave}
+                    className={classNames(
+                      "rounded-full px-6 py-3 text-sm font-semibold text-white shadow-[0_14px_34px_rgba(236,72,153,0.32)] transition",
+                      canSave
+                        ? "bg-gradient-to-r from-pink-500 to-fuchsia-500 hover:scale-[1.01]"
+                        : "cursor-not-allowed bg-white/10 text-white/45 shadow-none"
+                    )}
                   >
                     Save Character
                   </button>
