@@ -23,6 +23,7 @@ type Message = {
 export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
+  const initIdRef = useRef(0);
 
   const character = useMemo(
     () => getCharacterBySlug(characterSlug) ?? null,
@@ -41,11 +42,11 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
+  }, [messages, isTyping, isInitializing]);
 
   useEffect(() => {
     let isMounted = true;
-    requestIdRef.current += 1;
+    const currentInitId = ++initIdRef.current;
 
     async function initializeConversation() {
       if (!character) {
@@ -69,7 +70,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           error: userError,
         } = await supabase.auth.getUser();
 
-        if (!isMounted) return;
+        if (!isMounted || initIdRef.current !== currentInitId) return;
 
         if (userError || !user) {
           setChatStatus("You need to sign in to open this chat.");
@@ -87,7 +88,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           }
         );
 
-        if (!isMounted) return;
+        if (!isMounted || initIdRef.current !== currentInitId) return;
 
         setActiveConversationId(conversation.id);
 
@@ -97,7 +98,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           character.greeting
         );
 
-        if (!isMounted) return;
+        if (!isMounted || initIdRef.current !== currentInitId) return;
 
         const formattedMessages: Message[] = dbMessages.flatMap(
           (message: DbMessageRow) => {
@@ -120,13 +121,13 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       } catch (error) {
         console.error(error);
 
-        if (!isMounted) return;
+        if (!isMounted || initIdRef.current !== currentInitId) return;
 
         setMessages([]);
         setActiveConversationId(null);
         setChatStatus("Could not load this conversation.");
       } finally {
-        if (isMounted) {
+        if (isMounted && initIdRef.current === currentInitId) {
           setIsInitializing(false);
         }
       }
@@ -138,6 +139,25 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       isMounted = false;
     };
   }, [character]);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session?.user) {
+        setMessages([]);
+        setActiveConversationId(null);
+        setIsTyping(false);
+        setIsResetting(false);
+        setIsInitializing(false);
+        setChatStatus("You need to sign in to open this chat.");
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   async function handleResetChat() {
     if (
@@ -275,12 +295,13 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
       if (!response.ok) {
         const errorMessage =
-          (data &&
-            typeof data === "object" &&
-            "error" in data &&
-            typeof data.error === "string" &&
-            data.error) ||
-          "Failed to get a reply from the AI.";
+          data &&
+          typeof data === "object" &&
+          "error" in data &&
+          typeof data.error === "string" &&
+          data.error
+            ? data.error
+            : "Failed to get a reply from the AI.";
 
         setChatStatus(errorMessage);
         return;

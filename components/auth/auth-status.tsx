@@ -2,120 +2,110 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
-type AuthUser = {
-  id?: string;
+type UserState = {
   email?: string;
 };
 
 export default function AuthStatus() {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<UserState | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
     async function loadUser() {
       try {
-        const response = await fetch("/api/auth/me", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
 
-        if (!response.ok) {
-          if (mounted) {
-            setUser(null);
-          }
+        if (!mounted) return;
+
+        if (error || !user) {
+          setUser(null);
+          setIsLoading(false);
           return;
         }
 
-        const data = (await response.json()) as { user?: AuthUser | null };
-
-        if (mounted) {
-          setUser(data.user ?? null);
-        }
+        setUser({ email: user.email });
+        setIsLoading(false);
       } catch {
-        if (mounted) {
-          setUser(null);
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        if (!mounted) return;
+        setUser(null);
+        setIsLoading(false);
       }
     }
 
     loadUser();
 
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+
+      setUser(session?.user ? { email: session.user.email } : null);
+      setIsLoading(false);
+      setIsLoggingOut(false);
+    });
+
     return () => {
       mounted = false;
+      subscription.unsubscribe();
     };
   }, []);
 
   async function handleLogout() {
+    if (isLoggingOut) return;
+
+    setIsLoggingOut(true);
+
     try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-    } catch {
-      // no-op
-    } finally {
+      await supabase.auth.signOut();
       window.location.href = "/";
+    } catch {
+      setIsLoggingOut(false);
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2">
-        <div className="h-9 w-20 animate-pulse rounded-full border border-white/10 bg-white/5" />
-        <div className="h-9 w-24 animate-pulse rounded-full border border-white/10 bg-white/5" />
-      </div>
-    );
+  if (isLoading) {
+    return <div className="text-sm text-white/60">Loading...</div>;
   }
 
   if (!user) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <Link
           href="/login"
-          className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/75 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
+          className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/90 transition hover:border-white/20"
         >
           Login
         </Link>
-
         <Link
-  href="/sign-up"
-  className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition hover:scale-[1.02] hover:bg-white/90"
->
-  Sign up
-</Link>
+          href="/sign-up"
+          className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-black transition hover:opacity-90"
+        >
+          Sign up
+        </Link>
       </div>
     );
   }
 
-  const label = user.email?.split("@")[0] || "Account";
-
   return (
-    <div className="flex items-center gap-2">
-      <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70 lg:block">
-        {label}
-      </div>
-
-      <Link
-        href="/my-characters"
-        className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/75 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
-      >
-        Dashboard
-      </Link>
-
+    <div className="flex items-center gap-3">
+      <span className="max-w-[180px] truncate text-sm text-white/70">
+        {user.email}
+      </span>
       <button
         type="button"
         onClick={handleLogout}
-        className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition hover:scale-[1.02] hover:bg-white/90"
+        disabled={isLoggingOut}
+        className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/90 transition hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        Logout
+        {isLoggingOut ? "Logging out..." : "Logout"}
       </button>
     </div>
   );

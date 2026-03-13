@@ -1,8 +1,8 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabase";
+import { ReactNode, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 type AuthGuardProps = {
   children: ReactNode;
@@ -11,67 +11,82 @@ type AuthGuardProps = {
 export default function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const [loading, setLoading] = useState(true);
-  const [allowed, setAllowed] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+  const [isAuthed, setIsAuthed] = useState(false);
+
+  const nextPath = useMemo(() => {
+    const qs = searchParams.toString();
+    return qs ? `${pathname}?${qs}` : pathname;
+  }, [pathname, searchParams]);
 
   useEffect(() => {
-    let active = true;
+    let isMounted = true;
 
-    async function checkUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!active) return;
-
-      if (!user) {
-        const nextPath = pathname || "/";
-        router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
-        setAllowed(false);
-        setLoading(false);
-        return;
-      }
-
-      setAllowed(true);
-      setLoading(false);
+    async function redirectToLogin() {
+      if (!isMounted) return;
+      setIsAuthed(false);
+      setIsChecking(false);
+      router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
     }
 
-    checkUser();
+    async function checkAuth() {
+      try {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+
+        if (!isMounted) return;
+
+        if (error || !user) {
+          await redirectToLogin();
+          return;
+        }
+
+        setIsAuthed(true);
+        setIsChecking(false);
+      } catch {
+        if (!isMounted) return;
+        await redirectToLogin();
+      }
+    }
+
+    checkAuth();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!active) return;
+      if (!isMounted) return;
 
-      if (session?.user) {
-        setAllowed(true);
-        setLoading(false);
-      } else {
-        setAllowed(false);
+      if (!session?.user) {
+        setIsAuthed(false);
+        setIsChecking(false);
+        router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+        return;
       }
+
+      setIsAuthed(true);
+      setIsChecking(false);
     });
 
     return () => {
-      active = false;
+      isMounted = false;
       subscription.unsubscribe();
     };
-  }, [pathname, router]);
+  }, [nextPath, router]);
 
-  if (loading) {
+  if (isChecking) {
     return (
-      <div className="flex min-h-[420px] items-center justify-center rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-center text-white/65">
-        Checking account...
+      <div className="flex min-h-[40vh] items-center justify-center text-white/70">
+        Loading...
       </div>
     );
   }
 
-  if (!allowed) {
-    return (
-      <div className="flex min-h-[420px] items-center justify-center rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-center text-white/50">
-        Redirecting to login...
-      </div>
-    );
+  if (!isAuthed) {
+    return null;
   }
 
   return <>{children}</>;
