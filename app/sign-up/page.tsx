@@ -1,25 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useState } from "react";
 
-type LoginResponse = {
+type SignUpResponse = {
   ok?: boolean;
   error?: string;
 };
 
-export default function LoginPage() {
+export default function SignUpPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
-  const redirectTo = useMemo(() => {
-    return searchParams.get("redirect") || "/my-characters";
-  }, [searchParams]);
-
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(true);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [agree, setAgree] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -29,41 +26,57 @@ export default function LoginPage() {
     setError("");
     setSuccess("");
 
+    const normalizedName = name.trim();
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (!normalizedEmail || !password.trim()) {
-      setError("Please fill in your email and password.");
+    if (!normalizedName || !normalizedEmail || !password || !confirmPassword) {
+      setError("Please complete all required fields.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    if (!agree) {
+      setError("You need to accept the terms to continue.");
       return;
     }
 
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch("/api/auth/sign-up", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         credentials: "include",
         body: JSON.stringify({
+          name: normalizedName,
           email: normalizedEmail,
           password,
-          rememberMe,
         }),
       });
 
-      const data = (await response.json().catch(() => ({}))) as LoginResponse;
+      const data = (await response.json().catch(() => ({}))) as SignUpResponse;
 
       if (!response.ok) {
-        setError(data.error || "Login failed. Please try again.");
+        setError(data.error || "Sign up failed. Please try again.");
         return;
       }
 
-      setSuccess("Login successful. Redirecting...");
-      router.push(redirectTo);
+      setSuccess("Account created successfully. Redirecting...");
+      router.push("/my-characters");
       router.refresh();
     } catch {
-      setError("Something went wrong while logging in.");
+      setError("Something went wrong while creating your account.");
     } finally {
       setLoading(false);
     }
@@ -72,46 +85,46 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen bg-[#07070c] text-white">
       <div className="mx-auto flex min-h-screen w-full max-w-7xl items-center px-4 py-12 sm:px-6 lg:px-8">
-        <div className="grid w-full gap-10 lg:grid-cols-[1fr_480px]">
+        <div className="grid w-full gap-10 lg:grid-cols-[1fr_500px]">
           <section className="flex flex-col justify-center">
             <div className="mb-4 inline-flex w-fit rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-white/60">
-              Welcome back
+              Start here
             </div>
 
             <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-              Continue your character experience without losing momentum.
+              Create your Lovora account and start building better characters.
             </h1>
 
             <p className="mt-5 max-w-2xl text-base leading-8 text-white/60 sm:text-lg">
-              Access your saved characters, return to active chats, and keep your
-              vault in one place with a cleaner premium experience.
+              Save custom characters, keep your vault organized, and move from
+              creation to conversation with a smoother premium flow.
             </p>
 
             <div className="mt-8 grid max-w-2xl gap-4 sm:grid-cols-3">
               <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                  Vault
+                  Create
                 </div>
                 <div className="mt-2 text-sm font-medium text-white/85">
-                  Saved custom characters
+                  Build custom personalities
                 </div>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                  Chats
+                  Save
                 </div>
                 <div className="mt-2 text-sm font-medium text-white/85">
-                  Continue your sessions
+                  Keep your favorites ready
                 </div>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                  Studio
+                  Chat
                 </div>
                 <div className="mt-2 text-sm font-medium text-white/85">
-                  Build and refine faster
+                  Enter richer character scenes
                 </div>
               </div>
             </div>
@@ -120,17 +133,35 @@ export default function LoginPage() {
           <section className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.35)] sm:p-8">
             <div className="mb-8">
               <div className="text-sm font-medium uppercase tracking-[0.18em] text-fuchsia-200/70">
-                Login
+                Sign up
               </div>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white">
-                Sign in to Lovora
+                Create your account
               </h2>
               <p className="mt-3 text-sm leading-7 text-white/60">
-                Use your email and password to access your account.
+                Use a valid email and a secure password to get started.
               </p>
             </div>
 
             <form className="space-y-5" onSubmit={handleSubmit}>
+              <div>
+                <label
+                  htmlFor="name"
+                  className="mb-2 block text-sm font-medium text-white/80"
+                >
+                  Name
+                </label>
+                <input
+                  id="name"
+                  type="text"
+                  autoComplete="name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Your name"
+                  className="w-full rounded-2xl border border-white/10 bg-[#101019] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-white/20 focus:bg-[#13131f]"
+                />
+              </div>
+
               <div>
                 <label
                   htmlFor="email"
@@ -159,22 +190,40 @@ export default function LoginPage() {
                 <input
                   id="password"
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Enter your password"
+                  placeholder="At least 6 characters"
                   className="w-full rounded-2xl border border-white/10 bg-[#101019] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-white/20 focus:bg-[#13131f]"
                 />
               </div>
 
-              <label className="flex items-center gap-3 text-sm text-white/65">
+              <div>
+                <label
+                  htmlFor="confirm-password"
+                  className="mb-2 block text-sm font-medium text-white/80"
+                >
+                  Confirm password
+                </label>
+                <input
+                  id="confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  placeholder="Repeat your password"
+                  className="w-full rounded-2xl border border-white/10 bg-[#101019] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-white/20 focus:bg-[#13131f]"
+                />
+              </div>
+
+              <label className="flex items-start gap-3 text-sm text-white/65">
                 <input
                   type="checkbox"
-                  checked={rememberMe}
-                  onChange={(event) => setRememberMe(event.target.checked)}
-                  className="h-4 w-4 rounded border-white/20 bg-transparent"
+                  checked={agree}
+                  onChange={(event) => setAgree(event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-white/20 bg-transparent"
                 />
-                Keep me signed in
+                <span>I agree to create an account and use Lovora responsibly.</span>
               </label>
 
               {error ? (
@@ -194,19 +243,19 @@ export default function LoginPage() {
                 disabled={loading}
                 className="w-full rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {loading ? "Signing in..." : "Login"}
+                {loading ? "Creating account..." : "Sign up"}
               </button>
             </form>
 
             <div className="mt-6 text-sm text-white/55">
-  Don&apos;t have an account?{" "}
-  <Link
-    href="/sign-up"
-    className="font-medium text-white transition hover:text-fuchsia-200"
-  >
-    Sign up
-  </Link>
-</div>
+              Already have an account?{" "}
+              <Link
+                href="/login"
+                className="font-medium text-white transition hover:text-fuchsia-200"
+              >
+                Login
+              </Link>
+            </div>
           </section>
         </div>
       </div>

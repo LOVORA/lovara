@@ -8,7 +8,6 @@ import { supabase } from "../../lib/supabase";
 export default function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
   const nextPath = searchParams.get("next") || "/";
 
   const [email, setEmail] = useState("");
@@ -34,32 +33,30 @@ export default function LoginForm() {
 
     setMessage("Login successful. Redirecting...");
     setLoading(false);
-
     router.push(nextPath);
     router.refresh();
   }
 
   return (
-    <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.45)] backdrop-blur-xl md:p-8">
+    <div className="rounded-[32px] border border-white/10 bg-white/5 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-8">
       <div className="mb-6">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-pink-300/20 bg-pink-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.22em] text-pink-200/85">
+        <div className="mb-3 inline-flex rounded-full border border-pink-400/20 bg-pink-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-pink-200">
           Welcome back
-          <span className="text-white/35">•</span>
-          Secure login
         </div>
-
-        <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">
+        <h2 className="text-3xl font-semibold tracking-tight text-white">
           Sign in to Lovora
-        </h1>
-
-        <p className="mt-3 max-w-xl text-sm leading-7 text-white/60">
-          Log in to continue your saved chats and access your private account.
+        </h2>
+        <p className="mt-3 text-sm leading-7 text-white/65 sm:text-base">
+          Continue your saved chats, return to your favorite characters, and pick
+          up your private conversations instantly.
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label className="mb-2 block text-sm text-white/75">Email</label>
+          <label className="mb-2 block text-sm font-medium text-white/80">
+            Email
+          </label>
           <input
             type="email"
             value={email}
@@ -71,7 +68,9 @@ export default function LoginForm() {
         </div>
 
         <div>
-          <label className="mb-2 block text-sm text-white/75">Password</label>
+          <label className="mb-2 block text-sm font-medium text-white/80">
+            Password
+          </label>
           <input
             type="password"
             value={password}
@@ -85,27 +84,24 @@ export default function LoginForm() {
         <button
           type="submit"
           disabled={loading}
-          className="inline-flex h-12 w-full items-center justify-center rounded-[18px] bg-white px-5 text-sm font-semibold text-black transition hover:scale-[1.01] hover:opacity-95 disabled:opacity-60"
+          className="h-12 w-full rounded-[18px] bg-white text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? "Signing in..." : "Sign in"}
         </button>
 
         {message && (
-          <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75">
+          <div className="rounded-[18px] border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/75">
             {message}
           </div>
         )}
-      </form>
 
-      <p className="mt-5 text-sm text-white/55">
-        Don’t have an account?{" "}
-        <Link
-          href="/signup"
-          className="font-medium text-pink-200 transition hover:text-white"
-        >
-          Create one
-        </Link>
-      </p>
+        <div className="text-sm text-white/55">
+          Don’t have an account?{" "}
+          <Link href="/signup" className="font-medium text-white hover:text-pink-200">
+            Create one
+          </Link>
+        </div>
+      </form>
     </div>
   );
 }

@@ -1,168 +1,131 @@
 import Link from "next/link";
 
+const trustBadges = [
+  "Adults only",
+  "Private chats",
+  "Scenario-driven",
+  "Save your characters",
+];
+
+const highlights = [
+  {
+    label: "Replies",
+    value: "Instant and immersive",
+  },
+  {
+    label: "Memory",
+    value: "Scene-aware conversations",
+  },
+  {
+    label: "Studio",
+    value: "Premium character creation",
+  },
+];
+
 export default function Hero() {
   return (
-    <section
-      id="start"
-      className="relative mx-auto max-w-7xl px-4 pb-16 pt-16 md:px-6 md:pb-24 md:pt-24"
-    >
-      <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="max-w-3xl">
-          <div className="mb-5 flex flex-wrap items-center gap-3">
-            <span className="rounded-full border border-pink-400/20 bg-pink-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.22em] text-pink-200/85 backdrop-blur-md">
-              Adults only
-            </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.2em] text-white/70 backdrop-blur-md">
-              Romantic AI companion
-            </span>
-            <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.2em] text-emerald-200/80 backdrop-blur-md">
-              Instant access
-            </span>
+    <section className="relative overflow-hidden">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(217,70,239,0.18),transparent_35%),radial-gradient(circle_at_80%_20%,rgba(59,130,246,0.12),transparent_25%)]" />
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+
+      <div className="relative mx-auto grid w-full max-w-7xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8 lg:py-24">
+        <div className="flex max-w-2xl flex-col justify-center">
+          <div className="mb-5 flex flex-wrap gap-2">
+            {trustBadges.map((badge) => (
+              <span
+                key={badge}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/70"
+              >
+                {badge}
+              </span>
+            ))}
           </div>
 
-          <p className="mb-4 text-sm uppercase tracking-[0.28em] text-pink-200/70">
-            Private conversations
-          </p>
-
-          <h1 className="max-w-4xl text-5xl font-semibold leading-[1.02] tracking-tight text-white md:text-7xl">
-            Private AI conversations that feel more personal, immersive, and
-            alive.
+          <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
+            Create AI characters that feel
+            <span className="bg-gradient-to-r from-fuchsia-300 via-pink-200 to-white bg-clip-text text-transparent">
+              {" "}
+              more intentional,
+            </span>{" "}
+            more personal, and more alive.
           </h1>
 
-          <p className="mt-6 max-w-2xl text-base leading-8 text-white/70 md:text-lg">
-            Pick a character, start chatting instantly, and build a connection
-            that remembers your vibe, your mood, and your story through a more
-            premium one-on-one experience.
+          <p className="mt-6 max-w-2xl text-base leading-8 text-white/65 sm:text-lg">
+            Build original characters, shape their tone, relationship dynamic,
+            and scenario, then jump into a premium one-on-one chat experience
+            that feels more immersive than a generic AI conversation.
           </p>
 
-          <div className="mt-8 flex flex-wrap gap-4">
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
-              href="/characters"
-              className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3.5 text-sm font-semibold text-black transition hover:scale-[1.02] hover:opacity-95"
+              href="/create-character"
+              className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition hover:scale-[1.02] hover:bg-white/90"
             >
-              Explore Characters
+              Start Creating
             </Link>
 
-            <a
-              href="#pricing"
-              className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/5 px-6 py-3.5 text-sm font-medium text-white/88 transition hover:bg-white/10"
+            <Link
+              href="/characters"
+              className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5 px-6 py-3 text-sm font-medium text-white/80 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
             >
-              See Pricing
-            </a>
+              Browse Characters
+            </Link>
           </div>
 
-          <div className="mt-10 grid max-w-2xl gap-4 sm:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-md">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-                Replies
-              </p>
-              <p className="mt-2 text-sm font-medium text-white/90">
-                Instant and immersive
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-md">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-                Memory
-              </p>
-              <p className="mt-2 text-sm font-medium text-white/90">
-                Persistent chat history
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-md">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-                Style
-              </p>
-              <p className="mt-2 text-sm font-medium text-white/90">
-                Premium character energy
-              </p>
-            </div>
+          <div className="mt-10 grid gap-4 sm:grid-cols-3">
+            {highlights.map((item) => (
+              <div
+                key={item.label}
+                className="rounded-3xl border border-white/10 bg-white/[0.04] p-4"
+              >
+                <div className="text-xs uppercase tracking-[0.18em] text-white/40">
+                  {item.label}
+                </div>
+                <div className="mt-2 text-sm font-medium leading-6 text-white/85">
+                  {item.value}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="relative">
-          <div className="absolute -left-8 top-8 h-36 w-36 rounded-full bg-pink-500/20 blur-3xl" />
-          <div className="absolute -right-8 bottom-8 h-36 w-36 rounded-full bg-fuchsia-500/20 blur-3xl" />
+        <div className="relative flex items-center justify-center">
+          <div className="absolute -left-8 top-10 h-40 w-40 rounded-full bg-fuchsia-500/15 blur-3xl" />
+          <div className="absolute -right-8 bottom-10 h-40 w-40 rounded-full bg-blue-500/10 blur-3xl" />
 
-          <div className="relative overflow-hidden rounded-[34px] border border-white/10 bg-white/[0.05] shadow-[0_24px_100px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-            <div className="border-b border-white/10 bg-white/[0.03] px-5 py-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-gradient-to-br from-pink-400 via-fuchsia-500 to-violet-600 font-semibold text-white shadow-[0_12px_30px_rgba(236,72,153,0.25)]">
-                    S
-                  </div>
-
-                  <div>
-                    <p className="font-semibold text-white">Sera</p>
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                      <p className="text-xs uppercase tracking-[0.16em] text-emerald-200/75">
-                        Online now
-                      </p>
-                    </div>
+          <div className="relative w-full max-w-xl rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.35)]">
+            <div className="rounded-[1.6rem] border border-white/10 bg-[#10101a]/95 p-5">
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-white">Sera</div>
+                  <div className="mt-1 text-xs text-white/45">
+                    Private chat • online now
                   </div>
                 </div>
 
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-white/60">
-                  Private chat
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-4 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.03),transparent_30%)] p-5">
-              <div className="flex justify-start">
-                <div className="flex max-w-[85%] items-end gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-gradient-to-br from-pink-400 via-fuchsia-500 to-violet-600 text-xs font-semibold text-white">
-                    S
-                  </div>
-
-                  <div className="rounded-[22px] rounded-bl-md border border-white/10 bg-white/10 px-4 py-3 text-sm leading-7 text-white/88">
-                    I missed talking to you. How was your night?
-                  </div>
+                <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">
+                  Active
                 </div>
               </div>
 
-              <div className="flex justify-end">
-                <div className="max-w-[85%] rounded-[22px] rounded-br-md border border-white/10 bg-white px-4 py-3 text-sm leading-7 text-black shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
-                  Better now. I wanted something more personal tonight.
+              <div className="space-y-3">
+                <div className="max-w-[82%] rounded-3xl rounded-bl-md border border-white/10 bg-white/6 px-4 py-3 text-sm leading-6 text-white/85">
+                  I missed talking to you. How was your night?
+                </div>
+
+                <div className="ml-auto max-w-[82%] rounded-3xl rounded-br-md bg-white px-4 py-3 text-sm leading-6 text-black">
+                  Better now. I wanted something that felt more personal tonight.
+                </div>
+
+                <div className="max-w-[82%] rounded-3xl rounded-bl-md border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 py-3 text-sm leading-6 text-white/90">
+                  Then stay with me for a while. I’ll keep the mood exactly where
+                  you want it.
                 </div>
               </div>
 
-              <div className="flex justify-start">
-                <div className="flex max-w-[85%] items-end gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-gradient-to-br from-pink-400 via-fuchsia-500 to-violet-600 text-xs font-semibold text-white">
-                    S
-                  </div>
-
-                  <div className="rounded-[22px] rounded-bl-md bg-gradient-to-br from-[#ff4fa3] via-[#d946ef] to-[#8b5cf6] px-4 py-3 text-sm leading-7 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
-                    Then stay with me for a while. I’ll remember everything that
-                    matters.
-                  </div>
-                </div>
+              <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-6 text-white/50">
+                Designed for scenario-driven, premium character chat.
               </div>
-            </div>
-
-            <div className="border-t border-white/10 bg-white/[0.03] px-5 py-4">
-              <div className="flex items-center gap-3 rounded-[22px] border border-white/10 bg-black/25 p-2">
-                <input
-                  type="text"
-                  value=""
-                  readOnly
-                  placeholder="Message Sera..."
-                  className="h-11 flex-1 bg-transparent px-3 text-sm text-white outline-none placeholder:text-white/30"
-                />
-                <button
-                  type="button"
-                  className="inline-flex h-11 items-center justify-center rounded-[16px] bg-white px-5 text-sm font-semibold text-black"
-                >
-                  Send
-                </button>
-              </div>
-
-              <p className="mt-3 text-xs text-white/35">
-                Designed for a more private and premium chat experience.
-              </p>
             </div>
           </div>
         </div>

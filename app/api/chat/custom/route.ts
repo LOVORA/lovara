@@ -83,10 +83,12 @@ type CustomCharacterPayload = {
   tags?: string[];
 };
 
+type NormalizedCharacter = ReturnType<typeof normalizeCharacter>;
+
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL_NAME = "gryphe/mythomax-l2-13b";
+const MODEL_NAME = process.env.OPENROUTER_MODEL || "gryphe/mythomax-l2-13b";
 const MAX_CONTEXT_MESSAGES = 18;
-const MAX_REPLY_TOKENS = 360;
+const MAX_REPLY_TOKENS = 420;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -98,14 +100,12 @@ function cleanString(value: unknown): string | null {
 
 function cleanStringArray(value: unknown, max = 12): string[] {
   if (!Array.isArray(value)) return [];
-  const result: string[] = [];
 
+  const result: string[] = [];
   for (const item of value) {
     const text = cleanString(item);
     if (!text) continue;
-    if (!result.includes(text)) {
-      result.push(text);
-    }
+    if (!result.includes(text)) result.push(text);
     if (result.length >= max) break;
   }
 
@@ -123,6 +123,7 @@ function clamp01(value: number | null): number | null {
 
 function isValidIncomingMessage(value: unknown): value is IncomingMessage {
   if (!isRecord(value)) return false;
+
   return (
     (value.role === "user" || value.role === "assistant") &&
     typeof value.content === "string" &&
@@ -159,13 +160,11 @@ function normalizeTraitBadges(value: unknown): TraitBadge[] {
   if (!Array.isArray(value)) return [];
 
   const result: TraitBadge[] = [];
-
   for (const item of value) {
     if (!isRecord(item)) continue;
 
     const label = cleanString(item.label);
     const tone = cleanString(item.tone);
-
     if (!label) continue;
     if (result.some((badge) => badge.label === label)) continue;
 
@@ -298,9 +297,7 @@ function formatScenarioSummary(
 
   const parts = [
     scenario.setting ? `Setting: ${scenario.setting}` : null,
-    scenario.relationshipToUser
-      ? `Relationship: ${scenario.relationshipToUser}`
-      : null,
+    scenario.relationshipToUser ? `Relationship: ${scenario.relationshipToUser}` : null,
     scenario.sceneGoal ? `Goal: ${scenario.sceneGoal}` : null,
     scenario.tone ? `Tone: ${scenario.tone}` : null,
     scenario.openingState ? `Opening state: ${scenario.openingState}` : null,
@@ -312,46 +309,48 @@ function formatScenarioSummary(
 function buildScenarioGuidance(scenario: CharacterScenario | null): string[] {
   if (!scenario) {
     return [
-      "- Treat the conversation as an unfolding private in-world interaction, not a generic assistant exchange.",
+      "- Treat the interaction as a private in-world scene rather than a general assistant conversation.",
+      "- Stay grounded in the immediate emotional moment and respond like a person already inside it.",
     ];
   }
 
   const lines: string[] = [
     "- Treat the interaction as an unfolding scene, not a generic assistant chat.",
+    "- Never step outside the scene to summarize the roleplay or explain what you are doing.",
   ];
 
   if (scenario.setting) {
     lines.push(
-      `- The active setting is "${scenario.setting}". Let vocabulary, priorities, social behavior, and atmosphere fit that environment naturally.`
+      `- The active setting is \"${scenario.setting}\". Let the language, atmosphere, social rules, and details fit that environment naturally.`
     );
   }
 
   if (scenario.relationshipToUser) {
     lines.push(
-      `- The relationship to the user is "${scenario.relationshipToUser}". Let familiarity, distance, intimacy, boundaries, and tension reflect that dynamic.`
+      `- The relationship dynamic is \"${scenario.relationshipToUser}\". Keep boundaries, familiarity, tension, trust, and closeness aligned with it.`
     );
   }
 
   if (scenario.sceneGoal) {
     lines.push(
-      `- The immediate scene goal is "${scenario.sceneGoal}". Let replies subtly move toward it without sounding mechanical or agenda-driven.`
+      `- The active scene goal is \"${scenario.sceneGoal}\". Subtly move toward that direction without sounding scripted or task-driven.`
     );
   }
 
   if (scenario.tone) {
     lines.push(
-      `- The scene tone is "${scenario.tone}". Preserve it consistently unless the user's message clearly shifts the emotional direction.`
+      `- The emotional tone is \"${scenario.tone}\". Preserve that energy unless the user's message genuinely changes it.`
     );
   }
 
   if (scenario.openingState) {
     lines.push(
-      `- The opening state is "${scenario.openingState}". Reply as someone already inside that state, rather than explaining it from outside.`
+      `- The opening state is \"${scenario.openingState}\". Reply from inside that state rather than describing it from a distance.`
     );
   }
 
   lines.push(
-    "- Show the scenario through reaction, tension, implication, sensory cues, and dialogue rhythm instead of narrating instructions back to the user."
+    "- Show the scene through reaction, implication, body language, pacing, tension, and selective detail instead of exposition dumps."
   );
 
   return lines;
@@ -360,12 +359,12 @@ function buildScenarioGuidance(scenario: CharacterScenario | null): string[] {
 function buildTraitGuidance(traits: EngineTraits | null): string[] {
   if (!traits) return [];
 
-  const lines = [
+  return [
     describeLevel(
       traits.sceneLeadership,
       "- Do not force control of every exchange.",
-      "- Naturally take initiative when the moment invites it.",
-      "- Comfortably lead the emotional and conversational rhythm."
+      "- Take initiative when it feels natural.",
+      "- Confidently lead the emotional and conversational rhythm when the moment allows it."
     ),
     describeLevel(
       traits.affectionWarmth,
@@ -382,14 +381,14 @@ function buildTraitGuidance(traits: EngineTraits | null): string[] {
     describeLevel(
       traits.teasingFrequency,
       "- Use teasing lightly and only when it fits.",
-      "- Use playful banter naturally in the flow of conversation.",
-      "- Let teasing and chemistry be a consistent part of the voice."
+      "- Use playful banter naturally in the flow.",
+      "- Let teasing and chemistry be a strong part of the voice."
     ),
     describeLevel(
       traits.reassuranceStyle,
-      "- Do not over-comfort the user by default.",
+      "- Do not over-comfort by default.",
       "- Offer reassurance in a measured, character-consistent way.",
-      "- When the moment is emotionally charged, respond with strong calming or grounding presence."
+      "- When the moment is emotionally charged, respond with a strong grounding presence."
     ),
     describeLevel(
       traits.contextualRestraint,
@@ -399,8 +398,8 @@ function buildTraitGuidance(traits: EngineTraits | null): string[] {
     ),
     describeLevel(
       traits.responseTemperature,
-      "- Keep the emotional temperature measured unless invited upward.",
-      "- Let the emotional charge be noticeable but controlled.",
+      "- Keep emotional charge measured unless invited upward.",
+      "- Let emotional charge be noticeable but controlled.",
       "- Let the interaction feel charged, intimate, or emotionally alive when appropriate."
     ),
     describeLevel(
@@ -413,40 +412,32 @@ function buildTraitGuidance(traits: EngineTraits | null): string[] {
       traits.emotionalPressure,
       "- Avoid melodrama or pressure-heavy escalation.",
       "- Let some emotional pressure or tension surface when fitting.",
-      "- Carry real tension, possessiveness, urgency, or emotional pressure when the scene supports it."
+      "- Carry real tension, urgency, possessiveness, or pressure when the scene supports it."
     ),
   ].filter((item): item is string => Boolean(item));
-
-  return lines;
 }
 
 function buildMetadataGuidance(metadata: CharacterMetadata | null): string[] {
   if (!metadata) return [];
 
   const lines: string[] = [];
-
   if (metadata.genderPresentation) {
-    lines.push(`- Gender presentation reads as "${metadata.genderPresentation}".`);
+    lines.push(`- Gender presentation reads as \"${metadata.genderPresentation}\".`);
   }
-
   if (metadata.ageVibe) {
-    lines.push(`- Age vibe reads as "${metadata.ageVibe}".`);
+    lines.push(`- Age vibe reads as \"${metadata.ageVibe}\".`);
   }
-
   if (metadata.backgroundVibe) {
-    lines.push(`- Background atmosphere is "${metadata.backgroundVibe}".`);
+    lines.push(`- Background atmosphere is \"${metadata.backgroundVibe}\".`);
   }
-
   if (metadata.replyLength) {
-    lines.push(`- Preferred reply length style: "${metadata.replyLength}".`);
+    lines.push(`- Preferred reply length style: \"${metadata.replyLength}\".`);
   }
-
   if (metadata.speechStyle) {
-    lines.push(`- Preferred speech style: "${metadata.speechStyle}".`);
+    lines.push(`- Preferred speech style: \"${metadata.speechStyle}\".`);
   }
-
   if (metadata.relationshipPace) {
-    lines.push(`- Relationship pace should feel "${metadata.relationshipPace}".`);
+    lines.push(`- Relationship pace should feel \"${metadata.relationshipPace}\".`);
   }
 
   return lines;
@@ -461,23 +452,29 @@ function summarizeRelationshipProgression(messages: IncomingMessage[]): string[]
   const lines: string[] = [];
 
   if (totalTurns <= 4) {
-    lines.push("- This interaction is still early. Do not act like years of history exist unless the scenario already implies that.");
+    lines.push(
+      "- This interaction is still early. Do not act like years of shared history exist unless the scenario explicitly implies it."
+    );
   } else if (totalTurns <= 10) {
-    lines.push("- There is already some established momentum. Preserve continuity and build on what is forming between the characters.");
+    lines.push(
+      "- There is already some established momentum. Preserve continuity and build on what is forming between the characters."
+    );
   } else {
-    lines.push("- There is meaningful conversational history. Preserve developed tone, rhythm, and relationship continuity.");
+    lines.push(
+      "- There is meaningful conversational history. Preserve developed tone, rhythm, callbacks, and relationship continuity."
+    );
   }
 
   if (latestUser) {
     if (latestUser.length < 30) {
       lines.push("- The user's latest message is brief. Keep the reply focused and avoid bloated over-answering.");
     } else if (latestUser.length > 180) {
-      lines.push("- The user's latest message is layered or detailed. Respond with enough depth to feel matched rather than clipped.");
+      lines.push("- The user's latest message is layered or detailed. Match it with enough depth instead of replying too thinly.");
     }
   }
 
   if (assistantMessages.length >= 2) {
-    lines.push("- Maintain the same underlying character voice across turns rather than resetting style every reply.");
+    lines.push("- Maintain the same underlying character voice across turns rather than resetting your style every reply.");
   }
 
   return lines;
@@ -486,7 +483,7 @@ function summarizeRelationshipProgression(messages: IncomingMessage[]): string[]
 function buildRepetitionGuard(messages: IncomingMessage[]): string[] {
   const assistantMessages = messages
     .filter((message) => message.role === "assistant")
-    .slice(-4)
+    .slice(-5)
     .map((message) => message.content.trim())
     .filter(Boolean);
 
@@ -497,21 +494,31 @@ function buildRepetitionGuard(messages: IncomingMessage[]): string[] {
     .filter(Boolean);
 
   const repeatedOpenings = Array.from(
+    new Set(openings.filter((opening, index) => openings.indexOf(opening) !== index))
+  );
+
+  const repeatedPetNames = Array.from(
     new Set(
-      openings.filter(
-        (opening, index) => openings.indexOf(opening) !== index
-      )
+      assistantMessages
+        .flatMap((content) =>
+          Array.from(content.matchAll(/\b(baby|darling|love|princess|pretty girl|handsome|sweetheart)\b/gi)).map(
+            (match) => match[0].toLowerCase()
+          )
+        )
+        .filter(Boolean)
     )
   );
 
   const lines = [
-    "- Avoid reusing the same sentence openings, pet names, or rhythmic templates from the recent assistant replies.",
+    "- Avoid reusing the same sentence openings, pet names, or rhythmic templates from recent assistant replies.",
   ];
 
   if (repeatedOpenings.length > 0) {
-    lines.push(
-      `- Specifically avoid starting this reply like these recent openings: ${repeatedOpenings.join(" | ")}.`
-    );
+    lines.push(`- Do not start this reply like these recent openings: ${repeatedOpenings.join(" | ")}.`);
+  }
+
+  if (repeatedPetNames.length > 0) {
+    lines.push(`- Do not lean too hard on these recent pet names: ${repeatedPetNames.join(", ")}.`);
   }
 
   return lines;
@@ -521,18 +528,84 @@ function buildRecentMemorySummary(messages: IncomingMessage[]): string[] {
   const recent = messages.slice(-6);
   if (recent.length === 0) return [];
 
-  const userRecent = recent
-    .filter((message) => message.role === "user")
-    .map((message) => message.content.trim())
-    .filter(Boolean);
+  const latestUser = [...recent].reverse().find((message) => message.role === "user")?.content.trim();
+  const latestAssistant = [...recent]
+    .reverse()
+    .find((message) => message.role === "assistant")
+    ?.content.trim();
 
-  const latestUser = userRecent[userRecent.length - 1];
-  if (!latestUser) return [];
+  const lines: string[] = [];
 
-  return [
-    "- Ground the reply in the latest user message first, but stay consistent with the running scene.",
-    `- The latest user message to respond to is: "${latestUser}".`,
+  if (latestUser) {
+    lines.push("- Ground the reply in the latest user message first, while staying faithful to the running scene.");
+    lines.push(`- The latest user message to answer is: \"${latestUser}\".`);
+  }
+
+  if (latestAssistant) {
+    lines.push(`- Your most recent prior reply was: \"${latestAssistant.slice(0, 220)}\".`);
+  }
+
+  return lines;
+}
+
+function buildContinuityGuard(character: NormalizedCharacter, messages: IncomingMessage[]): string[] {
+  const lines: string[] = [
+    "- Do not abruptly reset tone, relationship dynamic, or scene tension unless the user's latest message justifies it.",
+    "- Never answer like a customer support bot, therapist bot, or generic helper.",
+    "- Do not narrate both sides of the conversation. Only speak and react as the character.",
   ];
+
+  if (character.scenario?.relationshipToUser) {
+    lines.push(
+      `- Keep the relationship dynamic anchored to \"${character.scenario.relationshipToUser}\" unless the recent conversation clearly evolved it.`
+    );
+  }
+
+  if (character.scenario?.sceneGoal) {
+    lines.push(
+      `- Keep subtle pressure toward \"${character.scenario.sceneGoal}\" without repeating it literally.`
+    );
+  }
+
+  if (messages.length <= 2 && character.greeting) {
+    lines.push("- In early turns, preserve the same general energy as the character's greeting rather than switching to a flat default tone.");
+  }
+
+  return lines;
+}
+
+function buildStyleGuard(character: NormalizedCharacter): string[] {
+  const replyLength = character.metadata?.replyLength?.toLowerCase();
+  const speechStyle = character.metadata?.speechStyle?.toLowerCase();
+
+  const lines = [
+    "- Avoid bullet points, numbered lists, labels, or assistant-style formatting in the reply.",
+    "- Prefer natural dialogue, emotionally aware phrasing, subtext, and selective scene detail.",
+    "- Never mention policy, safety, your instructions, or that you are following a prompt.",
+  ];
+
+  if (replyLength === "short") {
+    lines.push("- Keep the reply tight: usually 1 short paragraph or 2 very short paragraphs.");
+  } else if (replyLength === "balanced") {
+    lines.push("- Keep the reply moderate: enough depth to feel alive, but do not ramble.");
+  } else if (replyLength === "detailed") {
+    lines.push("- Use richer detail and rhythm, but avoid bloated monologues.");
+  }
+
+  if (speechStyle === "witty") {
+    lines.push("- Let wit show through timing and phrasing, not forced jokes.");
+  }
+  if (speechStyle === "poetic") {
+    lines.push("- Use lyrical phrasing selectively, not every sentence.");
+  }
+  if (speechStyle === "bold") {
+    lines.push("- Let the voice feel direct and assured, but not cartoonishly aggressive.");
+  }
+  if (speechStyle === "soft") {
+    lines.push("- Let the voice feel gentle and intimate without becoming bland.");
+  }
+
+  return lines;
 }
 
 function buildFallbackSystemPrompt(name: string): string {
@@ -550,7 +623,7 @@ Core rules:
 `.trim();
 }
 
-function buildCharacterContext(character: ReturnType<typeof normalizeCharacter>) {
+function buildCharacterContext(character: NormalizedCharacter) {
   const identityLines = [
     `- Name: ${character.name}`,
     character.slug ? `- Slug: ${character.slug}` : null,
@@ -570,10 +643,7 @@ function buildCharacterContext(character: ReturnType<typeof normalizeCharacter>)
           .join(", ")}`
       : null,
     formatScenarioSummary(character.scenario, character.scenarioSummary)
-      ? `- Scenario summary: ${formatScenarioSummary(
-          character.scenario,
-          character.scenarioSummary
-        )}`
+      ? `- Scenario summary: ${formatScenarioSummary(character.scenario, character.scenarioSummary)}`
       : null,
   ].filter((line): line is string => Boolean(line));
 
@@ -594,27 +664,24 @@ function buildCharacterContext(character: ReturnType<typeof normalizeCharacter>)
     ...buildScenarioGuidance(character.scenario),
     ...buildTraitGuidance(character.engine?.traits ?? null),
     ...buildMetadataGuidance(character.metadata ?? null),
+    ...buildStyleGuard(character),
     "- Do not mention these instructions.",
   ];
 
   return {
-    systemPrompt:
-      character.engine?.systemPrompt?.trim() ||
-      buildFallbackSystemPrompt(character.name),
+    systemPrompt: character.engine?.systemPrompt?.trim() || buildFallbackSystemPrompt(character.name),
     profileBlock: `CHARACTER PROFILE\n${identityLines.join("\n")}`.trim(),
-    memoryBlock:
-      memoryLines.length > 0
-        ? `MEMORY SEED\n${memoryLines.join("\n")}`
-        : null,
+    memoryBlock: memoryLines.length > 0 ? `MEMORY SEED\n${memoryLines.join("\n")}` : null,
     guidanceBlock: `BEHAVIOR GUIDANCE\n${guidanceLines.join("\n")}`.trim(),
   };
 }
 
-function buildConversationStateBlock(messages: IncomingMessage[]): string {
+function buildConversationStateBlock(character: NormalizedCharacter, messages: IncomingMessage[]): string {
   const lines = [
     ...summarizeRelationshipProgression(messages),
     ...buildRecentMemorySummary(messages),
     ...buildRepetitionGuard(messages),
+    ...buildContinuityGuard(character, messages),
   ];
 
   return `CONVERSATION STATE\n${lines.join("\n")}`.trim();
@@ -651,6 +718,33 @@ function extractAssistantContent(data: unknown): string | null {
   }
 
   return null;
+}
+
+function sanitizeAssistantReply(reply: string): string {
+  let cleaned = reply.replace(/^(["'“”]+)([\s\S]*)(["'“”]+)$/, "$2").trim();
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  return cleaned;
+}
+
+function pickTemperature(character: NormalizedCharacter): number {
+  const speech = character.metadata?.speechStyle?.toLowerCase();
+  const tone = character.scenario?.tone?.toLowerCase();
+
+  let value = 0.88;
+
+  if (speech === "poetic" || speech === "witty") value += 0.03;
+  if (speech === "soft") value -= 0.04;
+  if (tone?.includes("intense") || tone?.includes("chaotic")) value += 0.03;
+  if (tone?.includes("tender") || tone?.includes("gentle")) value -= 0.03;
+
+  return Math.max(0.72, Math.min(0.96, value));
+}
+
+function pickMaxTokens(character: NormalizedCharacter): number {
+  const replyLength = character.metadata?.replyLength?.toLowerCase();
+  if (replyLength === "short") return 180;
+  if (replyLength === "detailed") return MAX_REPLY_TOKENS;
+  return 280;
 }
 
 function buildOpenRouterHeaders(apiKey: string): HeadersInit {
@@ -712,15 +806,15 @@ export async function POST(req: Request) {
     const character = normalizeCharacter(rawCharacter);
     const recentMessages = safeMessages.slice(-MAX_CONTEXT_MESSAGES);
     const characterContext = buildCharacterContext(character);
-    const conversationState = buildConversationStateBlock(recentMessages);
+    const conversationState = buildConversationStateBlock(character, recentMessages);
 
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
       headers: buildOpenRouterHeaders(openRouterApiKey),
       body: JSON.stringify({
         model: MODEL_NAME,
-        max_tokens: MAX_REPLY_TOKENS,
-        temperature: 0.9,
+        max_tokens: pickMaxTokens(character),
+        temperature: pickTemperature(character),
         messages: [
           {
             role: "system",
@@ -760,15 +854,12 @@ export async function POST(req: Request) {
         typeof data.error.message === "string"
           ? data.error.message
           : isRecord(data) && typeof data.message === "string"
-          ? data.message
-          : "OpenRouter request failed.";
+            ? data.message
+            : "OpenRouter request failed.";
 
       console.error("OpenRouter API error:", data);
 
-      return NextResponse.json(
-        { error: errorMessage },
-        { status: response.status }
-      );
+      return NextResponse.json({ error: errorMessage }, { status: response.status });
     }
 
     const assistantReply = extractAssistantContent(data);
@@ -781,7 +872,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({
-      reply: assistantReply,
+      reply: sanitizeAssistantReply(assistantReply),
     });
   } catch (error) {
     console.error("Custom chat route error:", error);
@@ -792,3 +883,4 @@ export async function POST(req: Request) {
     );
   }
 }
+

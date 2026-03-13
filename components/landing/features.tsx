@@ -1,74 +1,70 @@
 const features = [
   {
-    title: "More Personal",
+    badge: "Character Depth",
+    title: "Build more than a name and avatar",
     description:
-      "Characters feel more emotionally responsive by remembering the tone, rhythm, and important details of your conversations.",
-    badge: "Memory",
+      "Shape personality, relationship dynamic, tone, setting, and scene energy so every character starts with a more believable identity.",
   },
   {
-    title: "Always Available",
+    badge: "Scenario Flow",
+    title: "Turn a chat into a scene",
     description:
-      "Start instantly whenever you want attention, connection, comfort, or a more intimate one-on-one conversation.",
-    badge: "Instant Access",
+      "Instead of generic prompts, create situations that influence how the character opens, responds, and keeps the interaction feeling grounded.",
   },
   {
-    title: "Different Personalities",
+    badge: "Saved Vault",
+    title: "Keep your best characters ready",
     description:
-      "Choose between playful, emotional, bold, soft, teasing, or more intense character dynamics depending on your mood.",
-    badge: "Character Variety",
+      "Save your creations, revisit them later, and keep a cleaner library of custom personalities you actually want to return to.",
   },
 ];
 
 export default function Features() {
   return (
-    <section id="features" className="mx-auto max-w-7xl px-4 py-12 md:px-6 md:py-16">
-      <div className="mx-auto mb-10 max-w-3xl text-center">
-        <p className="mb-3 text-sm uppercase tracking-[0.25em] text-pink-300/70">
-          Features
-        </p>
-        <h2 className="text-3xl font-semibold tracking-tight md:text-5xl">
-          Built for immersive private chat
-        </h2>
-        <p className="mt-4 text-base leading-8 text-white/65">
-          Everything is designed to make each conversation feel more fluid, more
-          premium, and more emotionally engaging.
-        </p>
-      </div>
+    <section className="border-y border-white/10 bg-white/[0.02]">
+      <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+        <div className="mx-auto max-w-3xl text-center">
+          <div className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-fuchsia-200/70">
+            Why Lovora feels better
+          </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {features.map((feature, index) => (
-          <div
-            key={feature.title}
-            className="group relative overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] p-7 backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-pink-400/20 hover:bg-white/[0.06]"
-          >
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,182,193,0.10),transparent_32%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.10),transparent_28%)] opacity-80 transition duration-300 group-hover:opacity-100" />
+          <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+            Built for a more premium character experience
+          </h2>
 
-            <div className="relative">
-              <div className="mb-5 flex items-center justify-between gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-[20px] border border-white/10 bg-gradient-to-br from-pink-400 via-fuchsia-500 to-violet-600 text-lg font-semibold text-white shadow-[0_12px_30px_rgba(236,72,153,0.22)]">
-                  {index + 1}
-                </div>
+          <p className="mt-5 text-base leading-8 text-white/60 sm:text-lg">
+            Every part of the flow is designed to make character creation and
+            conversation feel more intentional, more cinematic, and less like a
+            normal AI form.
+          </p>
+        </div>
 
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-[10px] uppercase tracking-[0.22em] text-pink-200/75">
+        <div className="mt-12 grid gap-6 lg:grid-cols-3">
+          {features.map((feature, index) => (
+            <div
+              key={feature.title}
+              className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-[0_12px_40px_rgba(0,0,0,0.18)]"
+            >
+              <div className="mb-6 flex items-center justify-between">
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white/65">
                   {feature.badge}
+                </span>
+
+                <span className="text-sm font-semibold text-white/35">
+                  0{index + 1}
                 </span>
               </div>
 
-              <h3 className="mb-3 text-2xl font-semibold tracking-tight text-white">
+              <h3 className="text-xl font-semibold leading-8 text-white">
                 {feature.title}
               </h3>
 
-              <p className="text-sm leading-7 text-white/68">
+              <p className="mt-4 text-sm leading-7 text-white/60 sm:text-base">
                 {feature.description}
               </p>
-
-              <div className="mt-6 flex items-center gap-2 text-sm text-white/55">
-                <span className="h-1.5 w-1.5 rounded-full bg-pink-300/70" />
-                <span>Premium companion experience</span>
-              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </section>
   );

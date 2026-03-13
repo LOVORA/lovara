@@ -2,94 +2,118 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabase";
 
 type AuthUser = {
+  id?: string;
   email?: string;
 };
 
 export default function AuthStatus() {
-  const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function getUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    let mounted = true;
 
-      if (user) {
-        setUser({ email: user.email });
-      } else {
-        setUser(null);
+    async function loadUser() {
+      try {
+        const response = await fetch("/api/auth/me", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          if (mounted) {
+            setUser(null);
+          }
+          return;
+        }
+
+        const data = (await response.json()) as { user?: AuthUser | null };
+
+        if (mounted) {
+          setUser(data.user ?? null);
+        }
+      } catch {
+        if (mounted) {
+          setUser(null);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-
-      setLoading(false);
     }
 
-    getUser();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setUser({ email: session.user.email });
-      } else {
-        setUser(null);
-      }
-    });
+    loadUser();
 
     return () => {
-      subscription.unsubscribe();
+      mounted = false;
     };
   }, []);
 
   async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/");
-    router.refresh();
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // no-op
+    } finally {
+      window.location.href = "/";
+    }
   }
 
   if (loading) {
     return (
-      <div className="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-sm text-white/60 backdrop-blur-md">
-        Loading...
+      <div className="flex items-center gap-2">
+        <div className="h-9 w-20 animate-pulse rounded-full border border-white/10 bg-white/5" />
+        <div className="h-9 w-24 animate-pulse rounded-full border border-white/10 bg-white/5" />
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="flex items-center gap-2 md:gap-3">
+      <div className="flex items-center gap-2">
         <Link
           href="/login"
-          className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white/88 transition hover:bg-white/[0.08]"
+          className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/75 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
         >
-          Sign in
+          Login
         </Link>
 
         <Link
-          href="/signup"
-          className="inline-flex items-center justify-center rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(255,255,255,0.08)] transition hover:scale-[1.02] hover:opacity-95"
-        >
-          Create Account
-        </Link>
+  href="/sign-up"
+  className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition hover:scale-[1.02] hover:bg-white/90"
+>
+  Sign up
+</Link>
       </div>
     );
   }
 
+  const label = user.email?.split("@")[0] || "Account";
+
   return (
-    <div className="flex items-center gap-2 md:gap-3">
-      <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-white/78 backdrop-blur-md md:flex">
-        <span className="h-2 w-2 rounded-full bg-emerald-400" />
-        <span className="max-w-[220px] truncate">{user.email}</span>
+    <div className="flex items-center gap-2">
+      <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70 lg:block">
+        {label}
       </div>
 
+      <Link
+        href="/my-characters"
+        className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/75 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
+      >
+        Dashboard
+      </Link>
+
       <button
+        type="button"
         onClick={handleLogout}
-        className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white/88 transition hover:bg-white/[0.08]"
+        className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition hover:scale-[1.02] hover:bg-white/90"
       >
         Logout
       </button>

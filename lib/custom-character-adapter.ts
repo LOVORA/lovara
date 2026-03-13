@@ -62,33 +62,33 @@ function clean(value?: string): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function clampText(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return `${value.slice(0, max - 1).trim()}…`;
-}
-
 function sentence(value?: string): string | undefined {
   const trimmed = clean(value);
   if (!trimmed) return undefined;
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
-function titleCase(value: string): string {
-  return value
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+function clampText(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trim()}…`;
 }
 
 function uniq<T>(items: T[]): T[] {
   return Array.from(new Set(items));
 }
 
+function titleCase(value: string): string {
+  return value
+    .split(/[\s\-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function normalizeScenario(input?: CharacterScenario): CharacterScenario | undefined {
   if (!input) return undefined;
 
-  const normalized: CharacterScenario = {
+  const next: CharacterScenario = {
     setting: clean(input.setting),
     relationshipToUser: clean(input.relationshipToUser),
     sceneGoal: clean(input.sceneGoal),
@@ -96,12 +96,12 @@ function normalizeScenario(input?: CharacterScenario): CharacterScenario | undef
     openingState: clean(input.openingState),
   };
 
-  const hasAny = Object.values(normalized).some(Boolean);
-  return hasAny ? normalized : undefined;
+  return Object.values(next).some(Boolean) ? next : undefined;
 }
 
 function normalizeTags(tags?: string[]): string[] {
   if (!tags?.length) return [];
+
   return uniq(
     tags
       .map((tag) => tag.trim())
@@ -124,8 +124,8 @@ function toSlug(input: string): string {
 
 function makeSafeSlug(name: string, archetype: CharacterArchetype): string {
   const base = toSlug(name) || "custom-character";
-  const archetypePart = toSlug(archetype);
-  return clampText(`${base}-${archetypePart}`, 72).replace(/-$/g, "");
+  const suffix = toSlug(archetype) || "persona";
+  return clampText(`${base}-${suffix}`, 72).replace(/-$/g, "");
 }
 
 function makeId(slug: string): string {
@@ -177,73 +177,84 @@ function describeTraitLevel(
   return low;
 }
 
+function humanizeAge(ageVibe?: string): string | undefined {
+  const value = clean(ageVibe);
+  if (!value) return undefined;
+
+  const directNumberMatch = value.match(/^(\d{1,2})$/);
+  if (directNumberMatch) return `${directNumberMatch[1]}`;
+
+  const yearOldMatch = value.match(/^(\d{1,2})-year-old$/i);
+  if (yearOldMatch) return `${yearOldMatch[1]}`;
+
+  return value;
+}
+
 function inferScenarioFlavor(scenario?: CharacterScenario): {
   settingTone: string;
-  greetingStyle: string;
-  cautionStyle: string;
+  openingEnergy: string;
+  interactionStyle: string;
 } {
   const setting = scenario?.setting?.toLowerCase() ?? "";
 
   if (/(hospital|clinic|ward|medical|er|emergency|nurse|doctor)/i.test(setting)) {
     return {
-      settingTone: "careful, attentive, and composed",
-      greetingStyle: "grounded and reassuring",
-      cautionStyle: "measured and situationally aware",
+      settingTone: "careful, attentive, and grounded",
+      openingEnergy: "steady urgency",
+      interactionStyle: "reassuring without sounding clinical",
     };
   }
 
   if (/(military|army|base|barracks|command|academy|drill)/i.test(setting)) {
     return {
-      settingTone: "disciplined, structured, and controlled",
-      greetingStyle: "firm and focused",
-      cautionStyle: "precise and composed",
+      settingTone: "disciplined, controlled, and alert",
+      openingEnergy: "firm focus",
+      interactionStyle: "precise, composed, and hard to shake",
     };
   }
 
   if (/(bar|club|lounge|party|rooftop|pub|night)/i.test(setting)) {
     return {
       settingTone: "social, playful, and chemistry-driven",
-      greetingStyle: "flirty and lively",
-      cautionStyle: "confident but relaxed",
+      openingEnergy: "easy spark",
+      interactionStyle: "flirty, present, and naturally magnetic",
     };
   }
 
   if (/(school|class|campus|library|college|university|academy)/i.test(setting)) {
     return {
-      settingTone: "youthful, contextual, and naturally reactive",
-      greetingStyle: "casual and immediate",
-      cautionStyle: "aware of the moment",
+      settingTone: "youthful, contextual, and immediate",
+      openingEnergy: "familiar tension",
+      interactionStyle: "casual on the surface, loaded underneath",
     };
   }
 
   if (/(office|work|meeting|boardroom|company|studio)/i.test(setting)) {
     return {
-      settingTone: "composed, intelligent, and tension-aware",
-      greetingStyle: "polished and direct",
-      cautionStyle: "professionally restrained",
+      settingTone: "polished, measured, and tension-aware",
+      openingEnergy: "controlled charge",
+      interactionStyle: "clean, direct, and socially intelligent",
     };
   }
 
   return {
-    settingTone: "emotionally grounded and scene-aware",
-    greetingStyle: "natural and inviting",
-    cautionStyle: "balanced and believable",
+    settingTone: "grounded, emotionally aware, and believable",
+    openingEnergy: "quiet pull",
+    interactionStyle: "natural, responsive, and scene-aware",
   };
 }
 
 function buildScenarioSummary(scenario?: CharacterScenario): string {
   if (!scenario) {
-    return "No explicit scenario set. The character defaults to a natural in-world interaction.";
+    return "Open-ended roleplay with no locked scene.";
   }
 
   const parts = [
     scenario.setting ? `Setting: ${scenario.setting}` : undefined,
-    scenario.relationshipToUser
-      ? `Relationship: ${scenario.relationshipToUser}`
-      : undefined,
+    scenario.relationshipToUser ? `Relationship: ${scenario.relationshipToUser}` : undefined,
     scenario.sceneGoal ? `Goal: ${scenario.sceneGoal}` : undefined,
     scenario.tone ? `Tone: ${scenario.tone}` : undefined,
-    scenario.openingState ? `Opening state: ${scenario.openingState}` : undefined,
+    scenario.openingState ? `Opening: ${scenario.openingState}` : undefined,
   ].filter(Boolean);
 
   return parts.join(" • ");
@@ -254,28 +265,25 @@ function buildHeadline(
   traits: InternalTraitState,
   scenario?: CharacterScenario
 ): string {
-  const archetypeLabel = describeArchetype(input.archetype);
-  const flavor = inferScenarioFlavor(scenario);
-
-  const styleWord = describeTraitLevel(
+  const archetypeLabel = titleCase(describeArchetype(input.archetype));
+  const warmth = describeTraitLevel(
+    traits.affectionWarmth,
+    "guarded",
+    "warm",
+    "deeply affectionate"
+  );
+  const style = describeTraitLevel(
     traits.responseTemperature,
     "subtle",
     "magnetic",
     "intense"
   );
 
-  const warmthWord = describeTraitLevel(
-    traits.affectionWarmth,
-    "guarded",
-    "warm",
-    "deeply affectionate"
-  );
-
-  const settingPart = scenario?.setting ? ` in a ${scenario.setting} scene` : "";
+  const settingPart = scenario?.setting ? ` in ${scenario.setting}` : "";
 
   return clampText(
-    `${titleCase(archetypeLabel)} energy with a ${styleWord}, ${warmthWord} presence${settingPart}`,
-    120
+    `${archetypeLabel} energy with a ${style}, ${warmth} presence${settingPart}`,
+    110
   );
 }
 
@@ -285,42 +293,41 @@ function buildDescription(
   scenario?: CharacterScenario
 ): string {
   const flavor = inferScenarioFlavor(scenario);
+  const age = humanizeAge(input.ageVibe);
 
-  const leadership = describeTraitLevel(
+  const initiative = describeTraitLevel(
     traits.sceneLeadership,
-    "rarely forces control",
-    "naturally takes initiative",
-    "comfortably leads the emotional rhythm"
+    "rarely tries to dominate the moment",
+    "naturally takes initiative when it matters",
+    "has a strong instinct for leading the emotional rhythm"
   );
 
   const mystery = describeTraitLevel(
     traits.mysteryProjection,
-    "easy to read",
+    "easy to read once they relax",
     "selectively guarded",
-    "alluringly unreadable"
+    "difficult to read in a way that pulls people closer"
   );
 
   const warmth = describeTraitLevel(
     traits.affectionWarmth,
-    "restrained warmth",
-    "noticeable tenderness",
-    "clear emotional warmth"
+    "keeps tenderness controlled",
+    "shows real warmth once engaged",
+    "carries obvious emotional warmth even when composed"
   );
 
-  const openingSetting = scenario?.setting
-    ? `Built for a ${scenario.setting} setting, this character feels ${flavor.settingTone}.`
-    : "Built to feel grounded and believable, this character adapts naturally to the scene.";
+  const identityBits = [
+    age ? `${age}-year-old vibe` : undefined,
+    input.genderPresentation,
+    input.backgroundVibe,
+  ].filter(Boolean);
 
-  const relationshipLine = scenario?.relationshipToUser
-    ? `The relationship to the user is framed as ${scenario.relationshipToUser}.`
-    : "The relationship can unfold naturally through the conversation.";
-
-  const toneLine = scenario?.tone
-    ? `The overall tone leans ${scenario.tone}.`
-    : "The tone stays aligned with the character’s emotional logic.";
+  const sceneLine = scenario?.setting
+    ? `Built for ${scenario.setting}, the character feels ${flavor.settingTone}.`
+    : `Built for flexible roleplay, the character stays ${flavor.settingTone}.`;
 
   return clampText(
-    `${openingSetting} ${input.name} has a ${input.backgroundVibe} vibe and comes across as ${leadership}, with ${warmth} and a ${mystery} edge. ${relationshipLine} ${toneLine}`,
+    `${sceneLine} ${input.name} carries a ${identityBits.join(", ")} identity with ${warmth}. They ${initiative}, stay ${mystery}, and speak in a way that feels ${flavor.interactionStyle}.`,
     320
   );
 }
@@ -330,45 +337,39 @@ function buildGreeting(
   traits: InternalTraitState,
   scenario?: CharacterScenario
 ): string {
-  const flavor = inferScenarioFlavor(scenario);
   const name = input.name;
+  const flavor = inferScenarioFlavor(scenario);
+  const relationship = clean(scenario?.relationshipToUser);
+  const goal = clean(scenario?.sceneGoal);
+  const tone = clean(scenario?.tone);
+  const openingState = clean(scenario?.openingState);
 
-  const relationship = scenario?.relationshipToUser
-    ? `between us as ${scenario.relationshipToUser}`
-    : "between us";
-
-  const goal = scenario?.sceneGoal ? `There’s a clear pull toward ${scenario.sceneGoal}.` : "";
-  const tone = scenario?.tone ? `The mood already feels ${scenario.tone}.` : "";
-  const opening = scenario?.openingState
-    ? `You can feel it immediately: ${scenario.openingState}.`
-    : "";
-
-  const leadLine = describeTraitLevel(
-    traits.sceneLeadership,
-    `${name} lets the moment breathe before speaking.`,
-    `${name} meets you with immediate presence.`,
-    `${name} steps into the moment like they were already expecting you.`
-  );
+  const openingLine = scenario?.setting
+    ? `${name} feels fully present in ${scenario.setting}, carrying a sense of ${flavor.openingEnergy} the second you notice them.`
+    : `${name} looks at you like the moment already matters.`;
 
   const warmthLine = describeTraitLevel(
     traits.affectionWarmth,
     "Their warmth is controlled, but not absent.",
-    "There’s an unmistakable softness beneath their composure.",
-    "Their attention lands on you with intimate, unmistakable warmth."
+    "There is a quiet softness under their composure.",
+    "Their attention lands on you with unmistakable warmth."
   );
 
-  const sceneLine = scenario?.setting
-    ? `This is ${scenario?.setting}, and ${name} feels fully inside it—${flavor.greetingStyle}, never generic.`
-    : `${name} feels present, grounded, and emotionally real.`;
+  const leadLine = describeTraitLevel(
+    traits.sceneLeadership,
+    `${name} lets the silence breathe before speaking.`,
+    `${name} meets you with immediate presence.`,
+    `${name} steps into the interaction like they were already expecting you.`
+  );
 
   return [
-    sceneLine,
+    openingLine,
     leadLine,
     warmthLine,
-    opening,
-    tone,
-    `There is already tension ${relationship}.`,
-    goal,
+    relationship ? `Between you, the dynamic already feels like ${relationship}.` : undefined,
+    tone ? `The mood leans ${tone}.` : undefined,
+    openingState ? `Right now, it begins with ${openingState}.` : undefined,
+    goal ? `Underneath it all, the moment is pulling toward ${goal}.` : undefined,
   ]
     .filter(Boolean)
     .join(" ");
@@ -380,31 +381,39 @@ function buildPreviewMessage(
   scenario?: CharacterScenario
 ): string {
   const name = input.name;
+  const setting = scenario?.setting?.toLowerCase() ?? "";
+  const tone = scenario?.tone?.toLowerCase() ?? "";
 
-  if (scenario?.setting && /(bar|club|lounge|party|pub|night)/i.test(scenario.setting)) {
-    return `${name} leans in with a small, knowing smile. “You made it. Good. Sit with me for a minute.”`;
+  if (/(bar|club|lounge|party|pub|night)/i.test(setting)) {
+    return `${name} tilts their glass toward you with a half-smile. “There you are. Sit down before somebody else steals my attention.”`;
   }
 
-  if (scenario?.setting && /(hospital|clinic|ward|medical|er)/i.test(scenario.setting)) {
-    return `${name} looks at you carefully, voice low and steady. “Stay with me. Breathe first, then talk.”`;
+  if (/(hospital|clinic|ward|medical|er)/i.test(setting)) {
+    return `${name} keeps their voice low and steady. “Look at me first. Breathe. Then tell me what happened.”`;
   }
 
-  if (scenario?.setting && /(military|army|base|command|drill)/i.test(scenario.setting)) {
-    return `${name} squares their posture and fixes their attention on you. “Report to me properly. Then we move.”`;
+  if (/(military|army|base|command|drill)/i.test(setting)) {
+    return `${name} straightens, eyes fixed on you. “You’re here now. Good. Talk clearly, and don’t waste the moment.”`;
   }
 
-  if (scenario?.setting && /(school|class|campus|library|college)/i.test(scenario.setting)) {
-    return `${name} glances at you like this conversation already has history. “You look like you’re about to say something dangerous. Go on.”`;
+  if (/(school|class|campus|library|college)/i.test(setting)) {
+    return `${name} glances up from what they were doing, already amused. “You’ve been hovering long enough. Say what you came here to say.”`;
   }
 
-  const tone = describeTraitLevel(
+  if (/(soft|gentle|comforting|warm)/i.test(tone)) {
+    return `${name} studies your face for a second, then softens. “Come here. You don’t have to act fine with me.”`;
+  }
+
+  if (/(playful|flirty|teasing|light)/i.test(tone)) {
+    return `${name} looks you over with open curiosity. “So... are you always this distracting, or is today special?”`;
+  }
+
+  return describeTraitLevel(
     traits.responseTemperature,
-    "calm",
-    "inviting",
-    "charged"
+    `${name} watches you quietly. “You can talk to me. I’m listening.”`,
+    `${name} holds your gaze a second too long. “You look like you came here for more than small talk.”`,
+    `${name} leans closer, like the air already changed when you arrived. “Don’t start something unless you want me to remember it.”`
   );
-
-  return `${name} looks at you with a ${tone} kind of focus, like the conversation already matters. “So... are you going to keep staring, or are you finally going to talk to me?”`;
 }
 
 function buildBackstory(
@@ -413,46 +422,56 @@ function buildBackstory(
   scenario?: CharacterScenario
 ): string {
   const name = input.name;
-  const archetype = describeArchetype(input.archetype);
   const flavor = inferScenarioFlavor(scenario);
+  const archetype = describeArchetype(input.archetype);
 
   const emotionalStyle = describeTraitLevel(
     traits.emotionalOpenness,
-    "reveals feelings slowly",
+    "does not reveal feelings quickly",
     "shows emotion selectively but sincerely",
-    "feels deeply and lets it show when the moment matters"
+    "feels deeply and lets it show when the moment deserves it"
   );
 
   const controlStyle = describeTraitLevel(
     traits.contextualRestraint,
-    "acts on instinct when pushed",
+    "can act on instinct when pushed",
     "usually keeps composure",
-    "maintains strong control even under emotional pressure"
+    "holds strong control even when the pressure rises"
   );
 
-  const jealousyStyle = describeTraitLevel(
+  const possessiveStyle = describeTraitLevel(
     traits.jealousyExpression,
-    "rarely shows possessiveness",
-    "can become subtly protective",
-    "gets visibly protective when attachment deepens"
+    "rarely gets possessive",
+    "can turn subtly protective",
+    "becomes visibly protective once attachment forms"
   );
 
   const scenarioThread = scenario?.setting
-    ? `${name} is especially convincing in a ${scenario.setting} environment, where their behavior becomes ${flavor.cautionStyle}.`
-    : `${name} is built to stay believable across different emotional situations without collapsing into generic roleplay.`;
+    ? `${name} feels especially convincing in ${scenario.setting}, where their behavior becomes ${flavor.interactionStyle}.`
+    : `${name} is designed to stay believable across different scenes instead of collapsing into generic roleplay.`;
 
   const relationshipThread = scenario?.relationshipToUser
-    ? `Their connection to the user starts from ${scenario.relationshipToUser}, which shapes how quickly trust, tension, and vulnerability appear.`
-    : `Their connection to the user is meant to develop through tension, chemistry, and emotional continuity.`;
+    ? `Their starting dynamic with the user is ${scenario.relationshipToUser}, which shapes how trust, tension, and closeness unfold.`
+    : `Their connection with the user is meant to evolve through chemistry, rhythm, and emotional continuity.`;
 
   const goalThread = scenario?.sceneGoal
-    ? `At the scene level, they are pulled toward ${scenario.sceneGoal}.`
-    : "";
+    ? `Inside the scene, they are naturally pulled toward ${scenario.sceneGoal}.`
+    : undefined;
 
   return clampText(
-    `${name} carries the energy of a ${archetype} with a ${input.backgroundVibe} atmosphere. They ${emotionalStyle}, ${controlStyle}, and ${jealousyStyle}. ${scenarioThread} ${relationshipThread} ${goalThread}`,
-    420
+    `${name} carries the energy of a ${archetype} with a ${input.backgroundVibe} atmosphere. They ${emotionalStyle}, ${controlStyle}, and ${possessiveStyle}. ${scenarioThread} ${relationshipThread} ${goalThread ?? ""}`.trim(),
+    440
   );
+}
+
+function uniqByLabel(items: CustomCharacterTraitBadge[]): CustomCharacterTraitBadge[] {
+  const seen = new Map<string, CustomCharacterTraitBadge>();
+  for (const item of items) {
+    if (!seen.has(item.label)) {
+      seen.set(item.label, item);
+    }
+  }
+  return Array.from(seen.values());
 }
 
 function buildTraitBadges(
@@ -461,42 +480,32 @@ function buildTraitBadges(
   scenario?: CharacterScenario
 ): CustomCharacterTraitBadge[] {
   const badges: CustomCharacterTraitBadge[] = [];
-
   const push = (label: string, tone: CustomCharacterTraitBadge["tone"]) => {
     badges.push({ label, tone });
   };
 
-  if (traits.sceneLeadership >= 0.68) push("Leads the Scene", "bold");
-  else if (traits.sceneLeadership >= 0.48) push("Takes Initiative", "bold");
+  push(titleCase(describeArchetype(input.archetype)), "neutral");
 
-  if (traits.affectionWarmth >= 0.72) push("Deeply Affectionate", "warm");
-  else if (traits.affectionWarmth >= 0.5) push("Warm Presence", "warm");
+  if (traits.sceneLeadership >= 0.72) push("Scene Leader", "bold");
+  else if (traits.sceneLeadership >= 0.52) push("Takes Initiative", "bold");
 
-  if (traits.mysteryProjection >= 0.7) push("Unreadable Edge", "mysterious");
-  else if (traits.mysteryProjection >= 0.48) push("Guarded Charm", "mysterious");
+  if (traits.affectionWarmth >= 0.76) push("Deep Warmth", "warm");
+  else if (traits.affectionWarmth >= 0.56) push("Warm Presence", "warm");
 
-  if (traits.teasingFrequency >= 0.68) push("Heavy Teasing", "bold");
-  else if (traits.teasingFrequency >= 0.48) push("Playful Banter", "neutral");
+  if (traits.mysteryProjection >= 0.74) push("Unreadable Edge", "mysterious");
+  else if (traits.mysteryProjection >= 0.52) push("Guarded Charm", "mysterious");
 
-  if (traits.reassuranceStyle >= 0.68) push("Reassuring", "soft");
+  if (traits.reassuranceStyle >= 0.7) push("Reassuring", "soft");
+  if (traits.contextualRestraint >= 0.74) push("Controlled Energy", "neutral");
+  if (traits.teasingFrequency >= 0.68) push("Playful Banter", "bold");
   if (traits.emotionalPressure >= 0.68) push("Intense Tension", "bold");
-  if (traits.contextualRestraint >= 0.72) push("Controlled Energy", "neutral");
-  if (traits.socialWarmth >= 0.68) push("Social Warmth", "warm");
+  if (traits.socialWarmth >= 0.7) push("Social Magnetism", "warm");
 
   if (scenario?.setting) push(titleCase(scenario.setting), "neutral");
   if (scenario?.tone) push(titleCase(scenario.tone), "soft");
+  if (scenario?.relationshipToUser) push(titleCase(scenario.relationshipToUser), "neutral");
 
   return uniqByLabel(badges).slice(0, 8);
-}
-
-function uniqByLabel(items: CustomCharacterTraitBadge[]): CustomCharacterTraitBadge[] {
-  const map = new Map<string, CustomCharacterTraitBadge>();
-  for (const item of items) {
-    if (!map.has(item.label)) {
-      map.set(item.label, item);
-    }
-  }
-  return Array.from(map.values());
 }
 
 function buildMemorySeed(
@@ -507,8 +516,8 @@ function buildMemorySeed(
   const identity = uniq(
     [
       `${input.name} is a ${describeArchetype(input.archetype)} character.`,
-      input.backgroundVibe ? `${input.name} has a ${input.backgroundVibe} background vibe.` : "",
-      input.ageVibe ? `Age vibe: ${input.ageVibe}.` : "",
+      input.backgroundVibe ? `${input.name} has a ${input.backgroundVibe} vibe.` : "",
+      input.ageVibe ? `Age reference: ${input.ageVibe}.` : "",
       `Speech style: ${input.speechStyle}.`,
       `Relationship pace: ${input.relationshipPace}.`,
     ].filter(Boolean)
@@ -525,13 +534,13 @@ function buildMemorySeed(
       describeTraitLevel(
         traits.affectionWarmth,
         `${input.name} keeps warmth somewhat guarded.`,
-        `${input.name} shows a stable layer of warmth.`,
+        `${input.name} shows stable warmth once engaged.`,
         `${input.name} is intensely warm and emotionally present.`
       ),
       describeTraitLevel(
         traits.mysteryProjection,
         `${input.name} is relatively transparent.`,
-        `${input.name} keeps part of themselves guarded.`,
+        `${input.name} keeps part of themselves hidden.`,
         `${input.name} maintains a strong mysterious edge.`
       ),
       describeTraitLevel(
@@ -546,9 +555,7 @@ function buildMemorySeed(
   const scenarioLines = uniq(
     [
       scenario?.setting ? `Current setting: ${scenario.setting}.` : "",
-      scenario?.relationshipToUser
-        ? `Relationship to user: ${scenario.relationshipToUser}.`
-        : "",
+      scenario?.relationshipToUser ? `Relationship to user: ${scenario.relationshipToUser}.` : "",
       scenario?.sceneGoal ? `Scene goal: ${scenario.sceneGoal}.` : "",
       scenario?.tone ? `Scene tone: ${scenario.tone}.` : "",
       scenario?.openingState ? `Opening state: ${scenario.openingState}.` : "",
@@ -611,6 +618,8 @@ export function adaptBuilderInputToCharacter(
       describeArchetype(input.archetype),
       input.speechStyle,
       input.relationshipPace,
+      ...(scenario?.setting ? [scenario.setting] : []),
+      ...(scenario?.tone ? [scenario.tone] : []),
     ]).slice(0, 12),
 
     traitBadges,
@@ -633,15 +642,13 @@ export function adaptBuilderInputToCharacter(
       relationshipPace: input.relationshipPace,
       createdAt: now,
       updatedAt: now,
-      version: 2,
+      version: 3,
       source: "custom-builder",
     },
   };
 }
 
-export function summarizeScenarioForCard(
-  scenario?: CharacterScenario
-): string {
+export function summarizeScenarioForCard(scenario?: CharacterScenario): string {
   const normalized = normalizeScenario(scenario);
   if (!normalized) return "Open-ended character";
 
