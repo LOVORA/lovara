@@ -1,21 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/supabase";
 
-export type ConversationRow = {
-  id: string;
-  user_id: string;
-  character_slug: string;
-  title: string;
-  updated_at: string;
-  created_at?: string;
-};
+type TypedSupabaseClient = SupabaseClient<Database>;
 
-export type DbMessageRow = {
-  id: string;
-  conversation_id: string;
-  role: "assistant" | "user" | "system";
-  content: string;
-  created_at: string;
-};
+export type ConversationRow = Database["public"]["Tables"]["conversations"]["Row"];
+export type DbMessageRow = Database["public"]["Tables"]["messages"]["Row"];
 
 export type CharacterChatConfig = {
   slug: string;
@@ -28,7 +17,7 @@ function buildConversationTitle(characterName: string): string {
 }
 
 async function findExistingConversation(
-  supabase: SupabaseClient,
+  supabase: TypedSupabaseClient,
   userId: string,
   characterSlug: string
 ): Promise<ConversationRow | null> {
@@ -44,12 +33,11 @@ async function findExistingConversation(
     throw new Error(error.message);
   }
 
-  const rows = (data as ConversationRow[] | null) ?? [];
-  return rows[0] ?? null;
+  return data?.[0] ?? null;
 }
 
 async function createConversation(
-  supabase: SupabaseClient,
+  supabase: TypedSupabaseClient,
   userId: string,
   character: CharacterChatConfig,
   firstAssistantMessage: string
@@ -70,7 +58,7 @@ async function createConversation(
     throw new Error(error?.message || "Could not create conversation.");
   }
 
-  const insertedConversation = data as ConversationRow;
+  const insertedConversation = data;
 
   const { error: greetingError } = await supabase.from("messages").insert({
     conversation_id: insertedConversation.id,
@@ -79,11 +67,7 @@ async function createConversation(
   });
 
   if (greetingError) {
-    await supabase
-      .from("conversations")
-      .delete()
-      .eq("id", insertedConversation.id);
-
+    await supabase.from("conversations").delete().eq("id", insertedConversation.id);
     throw new Error(greetingError.message);
   }
 
@@ -91,7 +75,7 @@ async function createConversation(
 }
 
 export async function getOrCreateConversationForCharacter(
-  supabase: SupabaseClient,
+  supabase: TypedSupabaseClient,
   userId: string,
   character: CharacterChatConfig
 ): Promise<ConversationRow> {
@@ -105,16 +89,11 @@ export async function getOrCreateConversationForCharacter(
     return existingConversation;
   }
 
-  return createConversation(
-    supabase,
-    userId,
-    character,
-    character.greeting
-  );
+  return createConversation(supabase, userId, character, character.greeting);
 }
 
 export async function createFreshConversationForCharacter(
-  supabase: SupabaseClient,
+  supabase: TypedSupabaseClient,
   userId: string,
   character: CharacterChatConfig,
   firstAssistantMessage?: string
@@ -128,7 +107,7 @@ export async function createFreshConversationForCharacter(
 }
 
 export async function loadConversationMessages(
-  supabase: SupabaseClient,
+  supabase: TypedSupabaseClient,
   conversationId: string,
   fallbackGreeting: string
 ): Promise<DbMessageRow[]> {
@@ -142,7 +121,7 @@ export async function loadConversationMessages(
     throw new Error(error.message);
   }
 
-  const messages = ((data as DbMessageRow[] | null) ?? []).filter(
+  const messages = (data ?? []).filter(
     (message) => message.role === "assistant" || message.role === "user"
   );
 
@@ -168,5 +147,5 @@ export async function loadConversationMessages(
     );
   }
 
-  return [greetingRow as DbMessageRow];
+  return [greetingRow];
 }

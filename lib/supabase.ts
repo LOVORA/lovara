@@ -1,4 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/supabase";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -11,13 +12,15 @@ if (!supabaseAnonKey) {
   throw new Error("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY");
 }
 
-const globalForSupabase = globalThis as unknown as {
-  __lovoraSupabase?: ReturnType<typeof createClient>;
+type TypedSupabaseClient = SupabaseClient<Database>;
+
+const globalForSupabase = globalThis as typeof globalThis & {
+  __lovoraSupabase?: TypedSupabaseClient;
 };
 
-export const supabase =
+export const supabase: TypedSupabaseClient =
   globalForSupabase.__lovoraSupabase ??
-  createClient(supabaseUrl, supabaseAnonKey, {
+  createClient<Database>(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
