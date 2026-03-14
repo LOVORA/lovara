@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   ensureGreetingMessage,
@@ -14,6 +15,10 @@ import {
   type DbCustomConversation,
   type DbCustomMessage,
 } from "@/lib/account";
+import {
+  getIdentitySummary,
+  getVisibilityFromPayload,
+} from "@/lib/custom-character-studio";
 
 const AuthGuard = dynamic(() => import("@/components/auth/auth-guard"), {
   ssr: false,
@@ -33,7 +38,7 @@ type BannerState =
   | { type: "success"; message: string }
   | null;
 
-type InsightTab = "scene" | "identity" | "memory";
+type InsightTab = "scene" | "identity" | "engine";
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -70,31 +75,15 @@ function formatRelativeTime(value: string) {
   return `${diffDays}d ago`;
 }
 
-function getStarterPrompts(character: DbCustomCharacter): string[] {
-  const setting = clean(character.scenario?.setting);
-  const sceneGoal = clean(character.scenario?.sceneGoal);
-  const relationship = clean(character.scenario?.relationshipToUser);
-
-  return [
-    setting ? `Lean into the ${setting} atmosphere.` : "Set the scene naturally.",
-    relationship
-      ? `Play with the ${relationship} dynamic.`
-      : "Show how this character sees me.",
-    sceneGoal
-      ? `Move the scene toward ${sceneGoal}.`
-      : "Create tension and momentum.",
-  ];
-}
-
 function MiniStat({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-      <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
         {label}
       </div>
-      <div className="mt-2 text-sm text-white/75">{value}</div>
+      <div className="mt-2 text-sm leading-6 text-white/75">{value}</div>
     </div>
   );
 }
@@ -116,7 +105,7 @@ function TabButton({
         "rounded-full px-4 py-2 text-sm transition",
         active
           ? "bg-white text-black"
-          : "border border-white/10 bg-white/5 text-white/75 hover:border-white/20 hover:bg-white/10",
+          : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10",
       )}
     >
       {children}
@@ -133,6 +122,11 @@ function InsightPanel({
   setActiveTab: (tab: InsightTab) => void;
   character: DbCustomCharacter;
 }) {
+  const payload =
+    typeof character.payload === "object" && character.payload
+      ? (character.payload as Record<string, unknown>)
+      : {};
+
   const sceneItems = [
     { label: "Setting", value: clean(character.scenario?.setting) },
     {
@@ -144,13 +138,23 @@ function InsightPanel({
     { label: "Opening", value: clean(character.scenario?.openingState) },
   ].filter((item) => item.value);
 
+  const identityItems = getIdentitySummary(payload);
+  const visibility = getVisibilityFromPayload(payload);
+
+  const engine =
+    typeof payload.engine === "object" && payload.engine
+      ? (payload.engine as Record<string, unknown>)
+      : null;
+
+  const systemPromptPreview =
+    engine && typeof engine.systemPrompt === "string"
+      ? engine.systemPrompt.slice(0, 500).trim()
+      : "";
+
   return (
-    <div className="rounded-[28px] border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-      <div className="flex flex-wrap items-center gap-2">
-        <TabButton
-          active={activeTab === "scene"}
-          onClick={() => setActiveTab("scene")}
-        >
+    <aside className="space-y-4 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+      <div className="flex flex-wrap gap-3">
+        <TabButton active={activeTab === "scene"} onClick={() => setActiveTab("scene")}>
           Scene
         </TabButton>
         <TabButton
@@ -159,71 +163,72 @@ function InsightPanel({
         >
           Identity
         </TabButton>
-        <TabButton
-          active={activeTab === "memory"}
-          onClick={() => setActiveTab("memory")}
-        >
-          Memory
+        <TabButton active={activeTab === "engine"} onClick={() => setActiveTab("engine")}>
+          Engine
         </TabButton>
       </div>
 
-      <div className="mt-5 space-y-4">
-        {activeTab === "scene" ? (
-          sceneItems.length > 0 ? (
-            <div className="grid gap-3">
-              {sceneItems.map((item) => (
-                <MiniStat key={item.label} label={item.label} value={item.value} />
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-white/50">
-              No explicit scene data was added for this character.
-            </p>
-          )
-        ) : null}
-
-        {activeTab === "identity" ? (
-          <div className="space-y-4">
-            <MiniStat label="Headline" value={clean(character.headline)} />
-            <MiniStat label="Description" value={clean(character.description)} />
-            <MiniStat label="Backstory" value={clean(character.backstory)} />
+      {activeTab === "scene" ? (
+        sceneItems.length > 0 ? (
+          <div className="grid gap-3">
+            {sceneItems.map((item) => (
+              <MiniStat key={item.label} label={item.label} value={item.value} />
+            ))}
           </div>
-        ) : null}
-
-        {activeTab === "memory" ? (
-          <div className="space-y-4">
-            <MiniStat
-              label="Greeting"
-              value={clean(character.greeting) || "No greeting stored."}
-            />
-            <MiniStat
-              label="Preview"
-              value={
-                clean(character.preview_message) || "No preview message stored."
-              }
-            />
-            <MiniStat
-              label="Tags"
-              value={
-                character.tags?.length ? character.tags.join(" • ") : "No tags"
-              }
-            />
+        ) : (
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
+            No explicit scene data was added for this character.
           </div>
-        ) : null}
-      </div>
-    </div>
+        )
+      ) : null}
+
+      {activeTab === "identity" ? (
+        <div className="space-y-3">
+          <MiniStat label="Archetype" value={character.archetype} />
+          <MiniStat label="Visibility" value={visibility} />
+          <MiniStat
+            label="Identity anchors"
+            value={identityItems.length > 0 ? identityItems.join(" • ") : "None"}
+          />
+          <MiniStat label="Headline" value={character.headline} />
+        </div>
+      ) : null}
+
+      {activeTab === "engine" ? (
+        <div className="space-y-3">
+          <MiniStat
+            label="Generated engine prompt"
+            value={
+              systemPromptPreview
+                ? `${systemPromptPreview}${systemPromptPreview.length >= 500 ? "…" : ""}`
+                : "No engine prompt saved on this character."
+            }
+          />
+          <MiniStat
+            label="Trait badges"
+            value={
+              character.trait_badges?.length
+                ? character.trait_badges.map((item) => item.label).join(" • ")
+                : "No trait badges"
+            }
+          />
+        </div>
+      ) : null}
+    </aside>
   );
 }
 
-export default function CustomCharacterChatPage({
-  params,
-}: {
-  params: { slug: string };
-}) {
+export default function CustomCharacterChatPage() {
+  const params = useParams<{ slug?: string | string[] }>();
+  const slug =
+    typeof params?.slug === "string"
+      ? params.slug
+      : Array.isArray(params?.slug)
+        ? params.slug[0]
+        : "";
+
   const [character, setCharacter] = useState<DbCustomCharacter | null>(null);
-  const [conversation, setConversation] = useState<DbCustomConversation | null>(
-    null,
-  );
+  const [conversation, setConversation] = useState<DbCustomConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
@@ -231,13 +236,16 @@ export default function CustomCharacterChatPage({
   const [resetting, setResetting] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
   const [activeTab, setActiveTab] = useState<InsightTab>("scene");
-
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const starterPrompts = useMemo(
-    () => (character ? getStarterPrompts(character) : []),
-    [character],
-  );
+  const identitySummary = useMemo(() => {
+    if (!character) return [];
+    const payload =
+      typeof character.payload === "object" && character.payload
+        ? (character.payload as Record<string, unknown>)
+        : {};
+    return getIdentitySummary(payload);
+  }, [character]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -247,18 +255,27 @@ export default function CustomCharacterChatPage({
     let cancelled = false;
 
     async function bootstrap() {
+      if (!slug) {
+        setLoading(false);
+        setBanner({
+          type: "error",
+          message: "Invalid or missing character slug.",
+        });
+        return;
+      }
+
       setLoading(true);
       setBanner(null);
 
       try {
-        const loadedCharacter = await getMyCustomCharacterBySlug(params.slug);
-
+        const loadedCharacter = await getMyCustomCharacterBySlug(slug);
         if (!loadedCharacter) {
           throw new Error("CHARACTER_NOT_FOUND");
         }
 
-        const loadedConversation =
-          await getOrCreateConversationForCharacter(loadedCharacter);
+        const loadedConversation = await getOrCreateConversationForCharacter(
+          loadedCharacter,
+        );
 
         const seededMessages = await ensureGreetingMessage(
           loadedConversation.id,
@@ -293,7 +310,7 @@ export default function CustomCharacterChatPage({
     return () => {
       cancelled = true;
     };
-  }, [params.slug]);
+  }, [slug]);
 
   async function refreshMessages(conversationId: string) {
     const latest = await listConversationMessages(conversationId);
@@ -302,6 +319,7 @@ export default function CustomCharacterChatPage({
 
   async function handleSend() {
     if (!character || !conversation) return;
+
     const trimmed = input.trim();
     if (!trimmed || sending) return;
 
@@ -350,9 +368,13 @@ export default function CustomCharacterChatPage({
               typeof character.metadata === "object" && character.metadata
                 ? character.metadata
                 : {},
+            payload:
+              typeof character.payload === "object" && character.payload
+                ? character.payload
+                : {},
             engine:
               typeof character.payload === "object" && character.payload
-                ? (character.payload as Record<string, unknown>).engine ?? null
+                ? ((character.payload as Record<string, unknown>).engine ?? null)
                 : null,
           },
           messages: apiMessages,
@@ -375,10 +397,7 @@ export default function CustomCharacterChatPage({
       const message =
         error instanceof Error ? error.message : "Could not send message.";
 
-      setBanner({
-        type: "error",
-        message,
-      });
+      setBanner({ type: "error", message });
     } finally {
       setSending(false);
     }
@@ -395,7 +414,6 @@ export default function CustomCharacterChatPage({
         conversation.id,
         character.greeting,
       );
-
       setMessages(nextMessages.map(mapDbMessage));
       setBanner({
         type: "success",
@@ -404,11 +422,7 @@ export default function CustomCharacterChatPage({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not reset conversation.";
-
-      setBanner({
-        type: "error",
-        message,
-      });
+      setBanner({ type: "error", message });
     } finally {
       setResetting(false);
     }
@@ -418,7 +432,7 @@ export default function CustomCharacterChatPage({
     return (
       <AuthGuard>
         <main className="min-h-screen bg-[#050816] px-6 py-10 text-white">
-          <div className="mx-auto max-w-6xl rounded-[28px] border border-white/10 bg-white/5 p-8 text-sm text-white/60">
+          <div className="mx-auto max-w-5xl rounded-[28px] border border-white/10 bg-white/[0.03] p-8 text-sm text-white/65">
             Loading custom chat...
           </div>
         </main>
@@ -430,19 +444,17 @@ export default function CustomCharacterChatPage({
     return (
       <AuthGuard>
         <main className="min-h-screen bg-[#050816] px-6 py-10 text-white">
-          <div className="mx-auto max-w-4xl rounded-[28px] border border-rose-400/20 bg-rose-400/10 p-8">
-            <h1 className="text-2xl font-semibold">Chat unavailable</h1>
-            <p className="mt-3 text-sm text-rose-100/85">
+          <div className="mx-auto max-w-4xl rounded-[28px] border border-white/10 bg-white/[0.03] p-8">
+            <h1 className="text-2xl font-semibold text-white">Chat unavailable</h1>
+            <p className="mt-3 text-sm text-white/60">
               {banner?.message || "This character could not be loaded."}
             </p>
-            <div className="mt-6">
-              <Link
-                href="/my-characters"
-                className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
-              >
-                Back to my characters
-              </Link>
-            </div>
+            <Link
+              href="/my-characters"
+              className="mt-6 inline-flex rounded-full bg-white px-5 py-3 text-sm font-medium text-black"
+            >
+              Back to my characters
+            </Link>
           </div>
         </main>
       </AuthGuard>
@@ -452,86 +464,46 @@ export default function CustomCharacterChatPage({
   return (
     <AuthGuard>
       <main className="min-h-screen bg-[#050816] text-white">
-        <div className="mx-auto max-w-7xl px-6 py-8">
-          <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-            <aside className="space-y-6">
-              <div className="rounded-[32px] border border-white/10 bg-gradient-to-br from-fuchsia-500/10 via-white/5 to-cyan-400/10 p-6 shadow-2xl shadow-fuchsia-500/10">
-                <div className="text-xs uppercase tracking-[0.2em] text-fuchsia-200/85">
+        <div className="mx-auto max-w-7xl px-6 py-10">
+          <div className="grid gap-8 xl:grid-cols-[1.02fr_0.98fr]">
+            <section className="space-y-6">
+              <div className="rounded-[32px] border border-white/10 bg-gradient-to-br from-white/[0.05] to-white/[0.02] p-8">
+                <div className="text-xs uppercase tracking-[0.22em] text-fuchsia-200/80">
                   Custom Character
                 </div>
-                <h1 className="mt-3 text-3xl font-semibold">{character.name}</h1>
-                <p className="mt-3 text-sm leading-7 text-white/65">
+                <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+                  {character.name}
+                </h1>
+                <p className="mt-3 max-w-3xl text-sm leading-7 text-white/60">
                   {character.headline || character.description}
                 </p>
 
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {(character.tags ?? []).slice(0, 6).map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                  <MiniStat label="Archetype" value={clean(character.archetype)} />
-                  <MiniStat
-                    label="Updated"
-                    value={formatRelativeTime(character.updated_at)}
-                  />
-                </div>
-              </div>
-
-              <InsightPanel
-                activeTab={activeTab}
-                setActiveTab={setActiveTab}
-                character={character}
-              />
-
-              <div className="rounded-[28px] border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-                <div className="text-sm font-medium text-white">
-                  Scene starters
-                </div>
-                <div className="mt-4 flex flex-col gap-3">
-                  {starterPrompts.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      onClick={() => setInput(prompt)}
-                      className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-left text-sm text-white/72 transition hover:border-white/20 hover:bg-black/35"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </aside>
-
-            <section className="flex min-h-[78vh] flex-col rounded-[32px] border border-white/10 bg-white/5 backdrop-blur-xl">
-              <div className="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
-                <div>
-                  <div className="text-sm font-medium text-white">
-                    Private chat
+                {identitySummary.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {identitySummary.map((item) => (
+                      <span
+                        key={item}
+                        className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100"
+                      >
+                        {item}
+                      </span>
+                    ))}
                   </div>
-                  <div className="text-xs text-white/45">
-                    Saved to your account conversation history
-                  </div>
-                </div>
+                ) : null}
 
-                <div className="flex items-center gap-2">
+                <div className="mt-6 flex flex-wrap gap-3">
                   <Link
                     href="/my-characters"
-                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
+                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
                   >
                     My characters
                   </Link>
+
                   <button
                     type="button"
                     onClick={handleReset}
                     disabled={resetting}
-                    className="rounded-full border border-amber-400/20 bg-amber-400/10 px-4 py-2 text-sm text-amber-100 transition hover:border-amber-400/30 hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="rounded-full border border-amber-400/20 bg-amber-400/10 px-4 py-2.5 text-sm text-amber-100 transition hover:border-amber-400/35 hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     {resetting ? "Resetting..." : "Reset"}
                   </button>
@@ -541,7 +513,7 @@ export default function CustomCharacterChatPage({
               {banner ? (
                 <div
                   className={cn(
-                    "mx-5 mt-4 rounded-2xl border px-4 py-3 text-sm",
+                    "rounded-2xl border px-4 py-3 text-sm",
                     banner.type === "success"
                       ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
                       : "border-rose-400/20 bg-rose-400/10 text-rose-100",
@@ -551,59 +523,67 @@ export default function CustomCharacterChatPage({
                 </div>
               ) : null}
 
-              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={cn(
-                      "max-w-[85%] rounded-[24px] px-4 py-3 text-sm leading-7",
-                      message.role === "assistant"
-                        ? "border border-white/10 bg-black/30 text-white/85"
-                        : "ml-auto bg-white text-black",
-                    )}
-                  >
-                    <div>{message.content}</div>
-                    <div
-                      className={cn(
-                        "mt-2 text-[11px]",
-                        message.role === "assistant"
-                          ? "text-white/35"
-                          : "text-black/45",
-                      )}
-                    >
-                      {formatRelativeTime(message.createdAt)}
+              <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                      Private chat
+                    </div>
+                    <div className="mt-1 text-sm text-white/60">
+                      Saved to your account conversation history
                     </div>
                   </div>
-                ))}
-                <div ref={bottomRef} />
-              </div>
+                </div>
 
-              <div className="border-t border-white/10 p-5">
-                <div className="flex gap-3">
+                <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={cn(
+                        "rounded-[24px] border px-4 py-3",
+                        message.role === "assistant"
+                          ? "border-fuchsia-400/15 bg-fuchsia-400/10"
+                          : "border-white/10 bg-black/25",
+                      )}
+                    >
+                      <div className="text-sm whitespace-pre-wrap leading-7 text-white/85">
+                        {message.content}
+                      </div>
+                      <div className="mt-2 text-xs text-white/35">
+                        {formatRelativeTime(message.createdAt)}
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={bottomRef} />
+                </div>
+
+                <div className="mt-5 rounded-[24px] border border-white/10 bg-black/25 p-3">
                   <textarea
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        handleSend();
-                      }
-                    }}
-                    placeholder={`Message ${character.name}...`}
-                    rows={3}
-                    className="min-h-[64px] flex-1 rounded-[22px] border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-fuchsia-400/30 focus:bg-black/40"
+                    placeholder="Write your next message..."
+                    rows={4}
+                    className="w-full resize-none bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-white/25"
                   />
-                  <button
-                    type="button"
-                    onClick={handleSend}
-                    disabled={sending || !input.trim()}
-                    className="self-end rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {sending ? "Sending..." : "Send"}
-                  </button>
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleSend}
+                      disabled={sending || !input.trim()}
+                      className="rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {sending ? "Sending..." : "Send"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
+
+            <InsightPanel
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              character={character}
+            />
           </div>
         </div>
       </main>

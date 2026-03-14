@@ -86,8 +86,8 @@ function cleanOptional(value?: string | null): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function slugify(value: string): string {
-  return value
+function slugify(value?: string | null): string {
+  return (value ?? "")
     .toLocaleLowerCase("en")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -512,40 +512,54 @@ export async function deleteMyCustomCharacter(id: string): Promise<void> {
 }
 
 export async function getOrCreateConversationForCharacter(
-  character: DbCustomCharacter
+  character: Pick<DbCustomCharacter, "id" | "name">,
 ): Promise<DbCustomConversation> {
   const user = await requireUser();
 
-  const { data: existing, error: findError } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from("custom_conversations")
     .select("*")
     .eq("user_id", user.id)
     .eq("custom_character_id", character.id)
     .maybeSingle();
 
-  if (findError) {
-    throw new Error(findError.message);
+  if (existingError) {
+    throw new Error(existingError.message);
   }
 
   if (existing) {
     return existing as DbCustomConversation;
   }
 
-  const { data, error } = await supabase
+  const { error: upsertError } = await supabase
     .from("custom_conversations")
-    .insert({
-      user_id: user.id,
-      custom_character_id: character.id,
-      title: character.name,
-    })
-    .select("*")
-    .single();
+    .upsert(
+      {
+        user_id: user.id,
+        custom_character_id: character.id,
+        title: clean(character.name) || "Custom character",
+      },
+      {
+        onConflict: "user_id,custom_character_id",
+      },
+    );
 
-  if (error || !data) {
-    throw new Error(error?.message || "Could not create conversation.");
+  if (upsertError) {
+    throw new Error(upsertError.message);
   }
 
-  return data as DbCustomConversation;
+  const { data: finalRow, error: finalRowError } = await supabase
+    .from("custom_conversations")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("custom_character_id", character.id)
+    .single();
+
+  if (finalRowError || !finalRow) {
+    throw new Error(finalRowError?.message || "Could not load conversation.");
+  }
+
+  return finalRow as DbCustomConversation;
 }
 
 export async function listConversationMessages(

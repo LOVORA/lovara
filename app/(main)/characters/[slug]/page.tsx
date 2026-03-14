@@ -2,9 +2,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import Footer from "../../../components/landing/footer";
-import Navbar from "../../../components/landing/navbar";
-import { characters, getCharacterBySlug } from "../../../lib/characters";
+import Footer from "@/components/landing/footer";
+import Navbar from "@/components/landing/navbar";
+import { ... } from "@/lib/characters";
 
 type PageProps = {
   params: Promise<{ slug: string }>;

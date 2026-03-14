@@ -1,5 +1,5 @@
-import Navbar from "../../components/landing/navbar";
-import ChatsPageClient from "./chats-page-client";
+import AuthGuard from "@/components/auth/auth-guard";
+import ChatsList from "@/components/chat/chats-list";
 
 export default function ChatsPage() {
   return (
