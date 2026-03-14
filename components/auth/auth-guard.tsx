@@ -1,8 +1,9 @@
 "use client";
 
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabase, sanitizeNextPath } from "@/lib/supabase";
 
 type AuthGuardProps = {
   children: ReactNode;
@@ -13,79 +14,83 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [isChecking, setIsChecking] = useState(true);
-  const [isAuthed, setIsAuthed] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [authed, setAuthed] = useState(false);
 
   const nextPath = useMemo(() => {
-    const qs = searchParams.toString();
-    return qs ? `${pathname}?${qs}` : pathname;
+    const query = searchParams.toString();
+    return sanitizeNextPath(query ? `${pathname}?${query}` : pathname);
   }, [pathname, searchParams]);
 
   useEffect(() => {
-    let isMounted = true;
+    let mounted = true;
 
-    async function redirectToLogin() {
-      if (!isMounted) return;
-      setIsAuthed(false);
-      setIsChecking(false);
-      router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
-    }
+    async function bootstrap() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    async function checkAuth() {
-      try {
-        const {
-          data: { user },
-          error,
-        } = await supabase.auth.getUser();
-
-        if (!isMounted) return;
-
-        if (error || !user) {
-          await redirectToLogin();
-          return;
-        }
-
-        setIsAuthed(true);
-        setIsChecking(false);
-      } catch {
-        if (!isMounted) return;
-        await redirectToLogin();
-      }
-    }
-
-    checkAuth();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!isMounted) return;
+      if (!mounted) return;
 
       if (!session?.user) {
-        setIsAuthed(false);
-        setIsChecking(false);
+        setAuthed(false);
+        setReady(true);
         router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
         return;
       }
 
-      setIsAuthed(true);
-      setIsChecking(false);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!mounted) return;
+
+      if (!user) {
+        setAuthed(false);
+        setReady(true);
+        router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+        return;
+      }
+
+      setAuthed(true);
+      setReady(true);
+    }
+
+    bootstrap();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+
+      if (!session?.user) {
+        setAuthed(false);
+        setReady(true);
+        router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+        return;
+      }
+
+      setAuthed(true);
+      setReady(true);
     });
 
     return () => {
-      isMounted = false;
+      mounted = false;
       subscription.unsubscribe();
     };
   }, [nextPath, router]);
 
-  if (isChecking) {
+  if (!ready) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center text-white/70">
-        Loading...
+      <div className="flex min-h-[50vh] items-center justify-center px-6">
+        <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-white/[0.04] p-6 text-center text-sm text-white/65 backdrop-blur">
+          Checking your account...
+        </div>
       </div>
     );
   }
 
-  if (!isAuthed) {
+  if (!authed) {
     return null;
   }
 

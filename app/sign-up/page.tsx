@@ -1,189 +1,69 @@
-"use client";
-
-import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import SignUpForm from "@/components/auth/signup-form";
 
 export default function SignUpPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const nextPath = useMemo(() => {
-    const raw = searchParams.get("next") || searchParams.get("redirect");
-    if (!raw) return "/my-characters";
-    return raw.startsWith("/") ? raw : "/my-characters";
-  }, [searchParams]);
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (isSubmitting) return;
-
-    setError(null);
-    setMessage(null);
-
-    const normalizedEmail = email.trim().toLowerCase();
-
-    if (!normalizedEmail || !password || !confirmPassword) {
-      setError("Please fill in all fields.");
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      const redirectTo =
-        typeof window !== "undefined"
-          ? `${window.location.origin}/login?next=${encodeURIComponent(nextPath)}`
-          : undefined;
-
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password,
-        options: redirectTo
-          ? {
-              emailRedirectTo: redirectTo,
-            }
-          : undefined,
-      });
-
-      if (signUpError) {
-        setError(signUpError.message || "Sign up failed.");
-        return;
-      }
-
-      if (data.session) {
-        router.replace(nextPath);
-        router.refresh();
-        return;
-      }
-
-      setMessage(
-        "Account created. Check your email to confirm your account, then sign in."
-      );
-    } catch {
-      setError("Something went wrong while creating your account.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl items-center px-6 py-16">
-      <div className="w-full rounded-[2rem] border border-white/10 bg-black/40 p-8 text-white backdrop-blur">
-        <div className="mb-8 space-y-2">
-          <p className="text-sm uppercase tracking-[0.3em] text-white/50">
-            Lovora
-          </p>
-          <h1 className="text-3xl font-semibold">Create your account</h1>
-          <p className="text-white/60">
-            Sign up to save chats, access premium character flow, and continue
-            where you left off.
-          </p>
-        </div>
+    <main className="min-h-screen overflow-hidden bg-[#07070b] px-6 py-16 text-white">
+      <div className="mx-auto max-w-6xl">
+        <div className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+          <section className="relative overflow-hidden rounded-[36px] border border-white/10 bg-white/[0.04] p-8 backdrop-blur md:p-10">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.05),transparent_30%)]" />
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-2">
-            <label htmlFor="email" className="block text-sm text-white/80">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none transition focus:border-white/30 disabled:opacity-60"
-              placeholder="you@example.com"
-              required
-              disabled={isSubmitting}
-            />
-          </div>
+            <div className="relative space-y-6">
+              <div className="inline-flex rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-[11px] uppercase tracking-[0.28em] text-white/55">
+                Lovora Account
+              </div>
 
-          <div className="space-y-2">
-            <label htmlFor="password" className="block text-sm text-white/80">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none transition focus:border-white/30 disabled:opacity-60"
-              placeholder="At least 6 characters"
-              required
-              disabled={isSubmitting}
-            />
-          </div>
+              <div className="space-y-4">
+                <h1 className="max-w-2xl text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl">
+                  Build once, keep everything attached to your identity
+                </h1>
+                <p className="max-w-2xl text-base leading-7 text-white/65 sm:text-lg">
+                  Create your account and keep your profile, characters, and private chat
+                  history under one email across devices.
+                </p>
+              </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="confirmPassword"
-              className="block text-sm text-white/80"
-            >
-              Confirm password
-            </label>
-            <input
-              id="confirmPassword"
-              type="password"
-              autoComplete="new-password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none transition focus:border-white/30 disabled:opacity-60"
-              placeholder="Repeat your password"
-              required
-              disabled={isSubmitting}
-            />
-          </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-xs uppercase tracking-[0.24em] text-white/40">
+                    Characters
+                  </div>
+                  <div className="mt-3 text-sm text-white/80">
+                    Every custom character belongs to your account.
+                  </div>
+                </div>
 
-          {error ? (
-            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-              {error}
+                <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-xs uppercase tracking-[0.24em] text-white/40">
+                    Conversations
+                  </div>
+                  <div className="mt-3 text-sm text-white/80">
+                    Your private chats stay tied to the same identity.
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-xs uppercase tracking-[0.24em] text-white/40">
+                    Control
+                  </div>
+                  <div className="mt-3 text-sm text-white/80">
+                    Manage your profile, password, and sessions from one place.
+                  </div>
+                </div>
+              </div>
             </div>
-          ) : null}
+          </section>
 
-          {message ? (
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {message}
+          <section className="rounded-[36px] border border-white/10 bg-white/[0.03] p-6 backdrop-blur md:p-8">
+            <div className="mb-6 space-y-2">
+              <h2 className="text-2xl font-semibold tracking-tight">Create account</h2>
+              <p className="text-sm leading-6 text-white/60">
+                Use a real email so your characters and chats stay synced across devices.
+              </p>
             </div>
-          ) : null}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full rounded-2xl bg-white px-4 py-3 font-semibold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSubmitting ? "Creating account..." : "Create account"}
-          </button>
-        </form>
-
-        <div className="mt-6 text-sm text-white/60">
-          Already have an account?{" "}
-          <Link
-            href={`/login?next=${encodeURIComponent(nextPath)}`}
-            className="text-white underline underline-offset-4"
-          >
-            Sign in
-          </Link>
+            <SignUpForm />
+          </section>
         </div>
       </div>
     </main>
