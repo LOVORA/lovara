@@ -5,7 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Flame, Search, Sparkles, Star } from "lucide-react";
 
 import { characters } from "@/lib/characters";
-import { listPublicCustomCharacters, type PublicCustomCharacter } from "@/lib/public-characters";
+import {
+  listPublicCustomCharacters,
+  type PublicCustomCharacter,
+} from "@/lib/public-characters";
 import { getPublicShareHref } from "@/lib/custom-character-studio";
 
 type CharacterLike = {
@@ -16,7 +19,9 @@ type CharacterLike = {
   description?: string;
   greeting?: string;
   category?: string;
-  tags?: Array<string | { name?: string; label?: string; value?: string; category?: string }>;
+  tags?: Array<
+    string | { name?: string; label?: string; value?: string; category?: string }
+  >;
 };
 
 type FilterKey = "all" | "romance" | "dark" | "soft" | "elite" | "fantasy";
@@ -75,6 +80,7 @@ function getTagLabels(character: CharacterLike): string[] {
   return character.tags
     .map((tag) => {
       if (typeof tag === "string") return tag.trim();
+
       if (tag && typeof tag === "object") {
         return (
           normalizeText(tag.label) ||
@@ -83,6 +89,7 @@ function getTagLabels(character: CharacterLike): string[] {
           normalizeText(tag.category)
         );
       }
+
       return "";
     })
     .filter(Boolean)
@@ -143,17 +150,22 @@ function buildStatText(total: number, shown: number): string {
 }
 
 function mapBuiltInCharacters(source: CharacterLike[]): DiscoverCharacter[] {
-  return source.map((character, index) => ({
-    id: `built-in-${index}-${normalizeText(character.slug) || normalizeText(character.name)}`,
-    slug: normalizeText(character.slug),
-    name: getCharacterName(character),
-    headline: getCharacterHeadline(character),
-    description: getCharacterDescription(character),
-    category: normalizeText(character.category) || "Built-in",
-    tags: getTagLabels(character),
-    href: normalizeText(character.slug) ? `/characters/${normalizeText(character.slug)}` : "/characters",
-    source: "built-in",
-  }));
+  return source.map((character, index) => {
+    const slug = normalizeText(character.slug);
+    const name = getCharacterName(character);
+
+    return {
+      id: `built-in-${index}-${slug || name}`,
+      slug,
+      name,
+      headline: getCharacterHeadline(character),
+      description: getCharacterDescription(character),
+      category: normalizeText(character.category) || "Built-in",
+      tags: getTagLabels(character),
+      href: slug ? `/characters/${slug}` : "/characters",
+      source: "built-in",
+    };
+  });
 }
 
 function mapPublicCustomCharacters(source: PublicCustomCharacter[]): DiscoverCharacter[] {
@@ -183,7 +195,7 @@ function mapPublicCustomCharacters(source: PublicCustomCharacter[]): DiscoverCha
 }
 
 export default function CharactersPage() {
-  const builtInSource = (characters as CharacterLike[]) ?? [];
+  const builtInSource = useMemo(() => (characters as CharacterLike[]) ?? [], []);
 
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
@@ -193,11 +205,12 @@ export default function CharactersPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadPublic() {
+    async function loadPublicCharacters() {
       try {
         const data = await listPublicCustomCharacters();
+
         if (!cancelled) {
-          setPublicCharacters(data);
+          setPublicCharacters(Array.isArray(data) ? data : []);
         }
       } catch {
         if (!cancelled) {
@@ -210,7 +223,7 @@ export default function CharactersPage() {
       }
     }
 
-    loadPublic();
+    loadPublicCharacters();
 
     return () => {
       cancelled = true;
@@ -218,9 +231,10 @@ export default function CharactersPage() {
   }, []);
 
   const source = useMemo<DiscoverCharacter[]>(() => {
-    const builtIn = mapBuiltInCharacters(builtInSource);
-    const publicCustom = mapPublicCustomCharacters(publicCharacters);
-    return [...publicCustom, ...builtIn];
+    const builtInCharacters = mapBuiltInCharacters(builtInSource);
+    const publicCustomCharacters = mapPublicCustomCharacters(publicCharacters);
+
+    return [...publicCustomCharacters, ...builtInCharacters];
   }, [builtInSource, publicCharacters]);
 
   const filtered = useMemo(() => {
@@ -229,7 +243,9 @@ export default function CharactersPage() {
     return source.filter((character) => {
       const inFilter = matchesFilter(character, activeFilter);
       if (!inFilter) return false;
+
       if (!normalizedQuery) return true;
+
       return getFilterSignals(character).includes(normalizedQuery);
     });
   }, [activeFilter, query, source]);
@@ -247,10 +263,12 @@ export default function CharactersPage() {
                 <Sparkles className="h-4 w-4" />
                 Discover premium roleplay characters
               </div>
+
               <div className="space-y-4">
                 <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-white md:text-5xl lg:text-6xl">
                   Find a character that already feels alive before the first message.
                 </h1>
+
                 <p className="max-w-2xl text-base leading-7 text-white/68 md:text-lg">
                   Explore Lovora’s built-in cast and public custom characters through mood,
                   chemistry, power, softness, and fantasy.
@@ -263,13 +281,15 @@ export default function CharactersPage() {
                 <div className="text-sm text-white/55">Library</div>
                 <div className="mt-2 text-2xl font-semibold">{source.length}</div>
               </div>
+
               <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
                 <div className="text-sm text-white/55">Public custom</div>
                 <div className="mt-2 text-2xl font-semibold">
                   {loadingPublic ? "..." : publicCharacters.length}
                 </div>
               </div>
-              <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur col-span-2 sm:col-span-1">
+
+              <div className="col-span-2 rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur sm:col-span-1">
                 <div className="text-sm text-white/55">Fast path</div>
                 <div className="mt-2 text-2xl font-semibold">Create + chat</div>
               </div>
@@ -307,6 +327,7 @@ export default function CharactersPage() {
         <div className="flex flex-wrap gap-3">
           {FILTERS.map((filter) => {
             const selected = activeFilter === filter.key;
+
             return (
               <button
                 key={filter.key}
@@ -334,9 +355,12 @@ export default function CharactersPage() {
             <div className="rounded-full border border-white/10 bg-white/6 p-2">
               <Flame className="h-4 w-4 text-white" />
             </div>
+
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">Featured picks</h2>
-              <p className="text-sm text-white/55">Built-in and public custom characters together.</p>
+              <p className="text-sm text-white/55">
+                Built-in and public custom characters together.
+              </p>
             </div>
           </div>
 
@@ -352,9 +376,14 @@ export default function CharactersPage() {
                       <Star className="h-3.5 w-3.5" />
                       {character.source === "public-custom" ? "Public custom" : "Featured"}
                     </div>
-                    <h3 className="mt-4 text-2xl font-semibold tracking-tight">{character.name}</h3>
+
+                    <h3 className="mt-4 text-2xl font-semibold tracking-tight">
+                      {character.name}
+                    </h3>
+
                     <p className="mt-2 text-sm text-white/62">{character.headline}</p>
                   </div>
+
                   <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/58">
                     {character.category || "Lovora"}
                   </div>
@@ -389,6 +418,7 @@ export default function CharactersPage() {
                     Open character
                     <ArrowRight className="h-4 w-4" />
                   </Link>
+
                   <Link
                     href="/create-character"
                     className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
@@ -410,6 +440,7 @@ export default function CharactersPage() {
               Public custom characters appear here only when published.
             </p>
           </div>
+
           <Link
             href="/create-character"
             className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
@@ -421,10 +452,15 @@ export default function CharactersPage() {
 
         {filtered.length === 0 ? (
           <div className="rounded-[32px] border border-dashed border-white/12 bg-white/[0.03] px-6 py-16 text-center">
-            <h3 className="text-2xl font-semibold tracking-tight">No characters match this search yet.</h3>
+            <h3 className="text-2xl font-semibold tracking-tight">
+              No characters match this search yet.
+            </h3>
+
             <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-white/58">
-              Try a broader mood, remove a search term, or create a custom character that fits exactly what you want.
+              Try a broader mood, remove a search term, or create a custom character that fits
+              exactly what you want.
             </p>
+
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <button
                 type="button"
@@ -436,6 +472,7 @@ export default function CharactersPage() {
               >
                 Reset filters
               </button>
+
               <Link
                 href="/create-character"
                 className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:border-white/18 hover:bg-white/8"
@@ -456,6 +493,7 @@ export default function CharactersPage() {
                     <h3 className="text-xl font-semibold tracking-tight">{character.name}</h3>
                     <p className="mt-2 text-sm text-white/60">{character.headline}</p>
                   </div>
+
                   <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-white/48">
                     {character.source === "public-custom" ? "Public custom" : "Built-in"}
                   </div>
@@ -484,8 +522,11 @@ export default function CharactersPage() {
 
                 <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
                   <span className="text-sm text-white/45">
-                    {character.source === "public-custom" ? "Public community character" : "Built-in Lovora character"}
+                    {character.source === "public-custom"
+                      ? "Public community character"
+                      : "Built-in Lovora character"}
                   </span>
+
                   <Link
                     href={character.href}
                     className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"

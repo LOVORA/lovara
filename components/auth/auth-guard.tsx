@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+
 import { supabase, sanitizeNextPath } from "@/lib/supabase";
 
 type AuthGuardProps = {
@@ -12,15 +13,23 @@ type AuthGuardProps = {
 export default function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
+  const [currentSearch, setCurrentSearch] = useState("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setCurrentSearch(window.location.search ?? "");
+    }
+  }, []);
 
   const nextPath = useMemo(() => {
-    const query = searchParams.toString();
+    const query = currentSearch.startsWith("?")
+      ? currentSearch.slice(1)
+      : currentSearch;
+
     return sanitizeNextPath(query ? `${pathname}?${query}` : pathname);
-  }, [pathname, searchParams]);
+  }, [pathname, currentSearch]);
 
   useEffect(() => {
     let mounted = true;
@@ -82,10 +91,8 @@ export default function AuthGuard({ children }: AuthGuardProps) {
 
   if (!ready) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center px-6">
-        <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-white/[0.04] p-6 text-center text-sm text-white/65 backdrop-blur">
-          Checking your account...
-        </div>
+      <div className="flex min-h-[40vh] items-center justify-center text-sm text-white/70">
+        Checking your account...
       </div>
     );
   }
