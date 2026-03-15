@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 
 import { characters } from "@/lib/characters";
+import { CHARACTER_IMAGES_BUCKET } from "@/lib/character-images";
+import { supabase } from "@/lib/supabase";
 import {
   listPublicCustomCharacters,
   type PublicCustomCharacter,
@@ -55,6 +57,17 @@ type DiscoverCharacter = {
   source: "built-in" | "public-custom";
   createdAt?: string;
   updatedAt?: string;
+};
+
+type AvatarUrlMap = Record<string, string>;
+
+type CharacterImageLookupRow = {
+  id: string;
+  character_id: string;
+  storage_path: string | null;
+  public_url: string | null;
+  is_primary: boolean;
+  created_at: string;
 };
 
 const FAVORITES_STORAGE_KEY = "lovora.favorite.characters";
@@ -321,15 +334,103 @@ function renderBadgeIcon(icon: "favorite" | "new" | "community" | "built-in" | "
   }
 }
 
+function CharacterCover({
+  character,
+  avatarUrl,
+}: {
+  character: DiscoverCharacter;
+  avatarUrl?: string;
+}) {
+  return (
+    <div className="relative h-56 w-full overflow-hidden border-b border-white/10 bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt={`${character.name} avatar`}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.18),transparent_30%),radial-gradient(circle_at_bottom,rgba(255,255,255,0.08),transparent_28%)]" />
+      )}
+
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(10,11,18,0.72),transparent_45%)]" />
+
+      <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
+        <div>
+          <div className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/68 backdrop-blur">
+            {character.source === "public-custom" ? "Public custom" : "Built-in"}
+          </div>
+        </div>
+
+        {!avatarUrl ? (
+          <div className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] text-white/60 backdrop-blur">
+            No avatar yet
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function CharactersPage() {
   const builtInSource = useMemo(() => (characters as CharacterLike[]) ?? [], []);
 
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const [publicCharacters, setPublicCharacters] = useState<PublicCustomCharacter[]>([]);
+  const [avatarUrlMap, setAvatarUrlMap] = useState<AvatarUrlMap>({});
   const [loadingPublic, setLoadingPublic] = useState(true);
   const [favoriteKeys, setFavoriteKeys] = useState<string[]>([]);
   const [recentKeys, setRecentKeys] = useState<string[]>([]);
+
+  async function loadAvatarState(sourceRows: PublicCustomCharacter[]) {
+    try {
+      if (sourceRows.length === 0) {
+        setAvatarUrlMap({});
+        return;
+      }
+
+      const characterIds = sourceRows.map((item) => item.id);
+      const db = supabase as any;
+
+      const { data: rowsRaw, error } = await db
+        .from("character_images")
+        .select("id, character_id, storage_path, public_url, is_primary, created_at")
+        .in("character_id", characterIds)
+        .eq("is_primary", true);
+
+      if (error) {
+        setAvatarUrlMap({});
+        return;
+      }
+
+      const rows = (rowsRaw as CharacterImageLookupRow[] | null) ?? [];
+      const nextMap: AvatarUrlMap = {};
+
+      await Promise.all(
+        rows.map(async (row) => {
+          if (row.public_url) {
+            nextMap[row.character_id] = row.public_url;
+            return;
+          }
+
+          if (!row.storage_path) return;
+
+          const { data: signedData, error: signedError } = await supabase.storage
+            .from(CHARACTER_IMAGES_BUCKET)
+            .createSignedUrl(row.storage_path, 60 * 60);
+
+          if (!signedError && signedData?.signedUrl) {
+            nextMap[row.character_id] = signedData.signedUrl;
+          }
+        }),
+      );
+
+      setAvatarUrlMap(nextMap);
+    } catch {
+      setAvatarUrlMap({});
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -337,13 +438,16 @@ export default function CharactersPage() {
     async function loadPublicCharacters() {
       try {
         const data = await listPublicCustomCharacters();
+        const nextRows = Array.isArray(data) ? data : [];
 
         if (!cancelled) {
-          setPublicCharacters(Array.isArray(data) ? data : []);
+          setPublicCharacters(nextRows);
+          await loadAvatarState(nextRows);
         }
       } catch {
         if (!cancelled) {
           setPublicCharacters([]);
+          setAvatarUrlMap({});
         }
       } finally {
         if (!cancelled) {
@@ -440,6 +544,11 @@ export default function CharactersPage() {
       const next = [key, ...current.filter((item) => item !== key)];
       return next.slice(0, 12);
     });
+  }
+
+  function getAvatarUrl(character: DiscoverCharacter) {
+    if (character.source !== "public-custom") return undefined;
+    return avatarUrlMap[character.id];
   }
 
   return (
@@ -567,81 +676,86 @@ export default function CharactersPage() {
                 isRecent: true,
                 favoriteCount: favoriteCharacters.length,
               });
+              const avatarUrl = getAvatarUrl(character);
 
               return (
                 <article
                   key={`recent-${character.id}`}
-                  className="flex h-full flex-col rounded-[28px] border border-white/10 bg-white/[0.04] p-5 transition hover:border-white/18 hover:bg-white/[0.06]"
+                  className="flex h-full flex-col overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] transition hover:border-white/18 hover:bg-white/[0.06]"
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/60">
-                        Recent
+                  <CharacterCover character={character} avatarUrl={avatarUrl} />
+
+                  <div className="flex flex-1 flex-col p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/60">
+                          Recent
+                        </div>
+                        <h3 className="mt-3 text-xl font-semibold tracking-tight">{character.name}</h3>
+                        <p className="mt-2 text-sm text-white/60">{character.headline}</p>
                       </div>
-                      <h3 className="mt-3 text-xl font-semibold tracking-tight">{character.name}</h3>
-                      <p className="mt-2 text-sm text-white/60">{character.headline}</p>
+
+                      <button
+                        type="button"
+                        onClick={() => toggleFavorite(character)}
+                        aria-label={favorited ? "Remove favorite" : "Add favorite"}
+                        className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
+                      >
+                        <Heart
+                          className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
+                        />
+                      </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => toggleFavorite(character)}
-                      aria-label={favorited ? "Remove favorite" : "Add favorite"}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
-                    >
-                      <Heart
-                        className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
-                      />
-                    </button>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {badges.map((badge) => (
-                      <span
-                        key={`${character.id}-${badge.label}`}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
-                      >
-                        {renderBadgeIcon(badge.icon)}
-                        {badge.label}
-                      </span>
-                    ))}
-                  </div>
-
-                  <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
-                    {character.description}
-                  </p>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {character.tags.length > 0 ? (
-                      character.tags.map((tag) => (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {badges.map((badge) => (
                         <span
-                          key={`${character.id}-${tag}`}
-                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                          key={`${character.id}-${badge.label}`}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
                         >
-                          {tag}
+                          {renderBadgeIcon(badge.icon)}
+                          {badge.label}
                         </span>
-                      ))
-                    ) : (
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
-                        Recently viewed
+                      ))}
+                    </div>
+
+                    <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
+                      {character.description}
+                    </p>
+
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {character.tags.length > 0 ? (
+                        character.tags.map((tag) => (
+                          <span
+                            key={`${character.id}-${tag}`}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                          >
+                            {tag}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
+                          Recently viewed
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
+                      <span className="text-sm text-white/45">
+                        {character.source === "public-custom"
+                          ? "Public community character"
+                          : "Built-in Lovora character"}
                       </span>
-                    )}
-                  </div>
 
-                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
-                    <span className="text-sm text-white/45">
-                      {character.source === "public-custom"
-                        ? "Public community character"
-                        : "Built-in Lovora character"}
-                    </span>
-
-                    <Link
-                      href={character.href}
-                      onClick={() => registerRecent(character)}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-                    >
-                      View
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
+                      <Link
+                        href={character.href}
+                        onClick={() => registerRecent(character)}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+                      >
+                        View
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
                   </div>
                 </article>
               );
@@ -673,81 +787,86 @@ export default function CharactersPage() {
                 isRecent: isRecent(character),
                 favoriteCount: favoriteCharacters.length,
               });
+              const avatarUrl = getAvatarUrl(character);
 
               return (
                 <article
                   key={`favorite-${character.id}`}
-                  className="flex h-full flex-col rounded-[28px] border border-white/10 bg-white/[0.04] p-5 transition hover:border-white/18 hover:bg-white/[0.06]"
+                  className="flex h-full flex-col overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] transition hover:border-white/18 hover:bg-white/[0.06]"
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/60">
-                        Favorite
+                  <CharacterCover character={character} avatarUrl={avatarUrl} />
+
+                  <div className="flex flex-1 flex-col p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/60">
+                          Favorite
+                        </div>
+                        <h3 className="mt-3 text-xl font-semibold tracking-tight">{character.name}</h3>
+                        <p className="mt-2 text-sm text-white/60">{character.headline}</p>
                       </div>
-                      <h3 className="mt-3 text-xl font-semibold tracking-tight">{character.name}</h3>
-                      <p className="mt-2 text-sm text-white/60">{character.headline}</p>
+
+                      <button
+                        type="button"
+                        onClick={() => toggleFavorite(character)}
+                        aria-label={favorited ? "Remove favorite" : "Add favorite"}
+                        className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
+                      >
+                        <Heart
+                          className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
+                        />
+                      </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => toggleFavorite(character)}
-                      aria-label={favorited ? "Remove favorite" : "Add favorite"}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
-                    >
-                      <Heart
-                        className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
-                      />
-                    </button>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {badges.map((badge) => (
-                      <span
-                        key={`${character.id}-${badge.label}`}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
-                      >
-                        {renderBadgeIcon(badge.icon)}
-                        {badge.label}
-                      </span>
-                    ))}
-                  </div>
-
-                  <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
-                    {character.description}
-                  </p>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {character.tags.length > 0 ? (
-                      character.tags.map((tag) => (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {badges.map((badge) => (
                         <span
-                          key={`${character.id}-${tag}`}
-                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                          key={`${character.id}-${badge.label}`}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
                         >
-                          {tag}
+                          {renderBadgeIcon(badge.icon)}
+                          {badge.label}
                         </span>
-                      ))
-                    ) : (
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
-                        Saved favorite
+                      ))}
+                    </div>
+
+                    <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
+                      {character.description}
+                    </p>
+
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {character.tags.length > 0 ? (
+                        character.tags.map((tag) => (
+                          <span
+                            key={`${character.id}-${tag}`}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                          >
+                            {tag}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
+                          Saved favorite
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
+                      <span className="text-sm text-white/45">
+                        {character.source === "public-custom"
+                          ? "Public community character"
+                          : "Built-in Lovora character"}
                       </span>
-                    )}
-                  </div>
 
-                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
-                    <span className="text-sm text-white/45">
-                      {character.source === "public-custom"
-                        ? "Public community character"
-                        : "Built-in Lovora character"}
-                    </span>
-
-                    <Link
-                      href={character.href}
-                      onClick={() => registerRecent(character)}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-                    >
-                      View
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
+                      <Link
+                        href={character.href}
+                        onClick={() => registerRecent(character)}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+                      >
+                        View
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
                   </div>
                 </article>
               );
@@ -779,93 +898,98 @@ export default function CharactersPage() {
                 isRecent: isRecent(character),
                 favoriteCount: favoriteCharacters.length,
               });
+              const avatarUrl = getAvatarUrl(character);
 
               return (
                 <article
                   key={character.id}
-                  className="group rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-6 transition hover:border-white/16 hover:bg-[linear-gradient(180deg,rgba(255,255,255,0.12),rgba(255,255,255,0.04))]"
+                  className="group flex flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] transition hover:border-white/16 hover:bg-[linear-gradient(180deg,rgba(255,255,255,0.12),rgba(255,255,255,0.04))]"
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs text-white/70">
-                        <Star className="h-3.5 w-3.5" />
-                        {character.source === "public-custom" ? "Public custom" : "Featured"}
+                  <CharacterCover character={character} avatarUrl={avatarUrl} />
+
+                  <div className="flex flex-1 flex-col p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs text-white/70">
+                          <Star className="h-3.5 w-3.5" />
+                          {character.source === "public-custom" ? "Public custom" : "Featured"}
+                        </div>
+
+                        <h3 className="mt-4 text-2xl font-semibold tracking-tight">
+                          {character.name}
+                        </h3>
+
+                        <p className="mt-2 text-sm text-white/62">{character.headline}</p>
                       </div>
 
-                      <h3 className="mt-4 text-2xl font-semibold tracking-tight">
-                        {character.name}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/58">
+                          {character.category || "Lovora"}
+                        </div>
 
-                      <p className="mt-2 text-sm text-white/62">{character.headline}</p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/58">
-                        {character.category || "Lovora"}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => toggleFavorite(character)}
-                        aria-label={favorited ? "Remove favorite" : "Add favorite"}
-                        className="rounded-2xl border border-white/10 bg-white/6 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
-                      >
-                        <Heart
-                          className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {badges.map((badge) => (
-                      <span
-                        key={`${character.id}-${badge.label}`}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
-                      >
-                        {renderBadgeIcon(badge.icon)}
-                        {badge.label}
-                      </span>
-                    ))}
-                  </div>
-
-                  <p className="mt-5 line-clamp-4 text-sm leading-7 text-white/68">
-                    {character.description}
-                  </p>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {character.tags.length > 0 ? (
-                      character.tags.map((tag) => (
-                        <span
-                          key={`${character.id}-${tag}`}
-                          className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/70"
+                        <button
+                          type="button"
+                          onClick={() => toggleFavorite(character)}
+                          aria-label={favorited ? "Remove favorite" : "Add favorite"}
+                          className="rounded-2xl border border-white/10 bg-white/6 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
                         >
-                          {tag}
+                          <Heart
+                            className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {badges.map((badge) => (
+                        <span
+                          key={`${character.id}-${badge.label}`}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
+                        >
+                          {renderBadgeIcon(badge.icon)}
+                          {badge.label}
                         </span>
-                      ))
-                    ) : (
-                      <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/55">
-                        Premium roleplay
-                      </span>
-                    )}
-                  </div>
+                      ))}
+                    </div>
 
-                  <div className="mt-6 flex items-center gap-3">
-                    <Link
-                      href={character.href}
-                      onClick={() => registerRecent(character)}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-                    >
-                      Open character
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
+                    <p className="mt-5 line-clamp-4 text-sm leading-7 text-white/68">
+                      {character.description}
+                    </p>
 
-                    <Link
-                      href="/create-character"
-                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
-                    >
-                      Create your own
-                    </Link>
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {character.tags.length > 0 ? (
+                        character.tags.map((tag) => (
+                          <span
+                            key={`${character.id}-${tag}`}
+                            className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/70"
+                          >
+                            {tag}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/55">
+                          Premium roleplay
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-6 flex items-center gap-3">
+                      <Link
+                        href={character.href}
+                        onClick={() => registerRecent(character)}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+                      >
+                        Open character
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+
+                      <Link
+                        href="/create-character"
+                        className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
+                      >
+                        Create your own
+                      </Link>
+                    </div>
                   </div>
                 </article>
               );
@@ -932,84 +1056,89 @@ export default function CharactersPage() {
                 isRecent: isRecent(character),
                 favoriteCount: favoriteCharacters.length,
               });
+              const avatarUrl = getAvatarUrl(character);
 
               return (
                 <article
                   key={character.id}
-                  className="flex h-full flex-col rounded-[28px] border border-white/10 bg-white/[0.04] p-5 transition hover:border-white/18 hover:bg-white/[0.06]"
+                  className="flex h-full flex-col overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] transition hover:border-white/18 hover:bg-white/[0.06]"
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="text-xl font-semibold tracking-tight">{character.name}</h3>
-                      <p className="mt-2 text-sm text-white/60">{character.headline}</p>
-                    </div>
+                  <CharacterCover character={character} avatarUrl={avatarUrl} />
 
-                    <div className="flex items-center gap-2">
-                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-white/48">
-                        {character.source === "public-custom" ? "Public custom" : "Built-in"}
+                  <div className="flex flex-1 flex-col p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-xl font-semibold tracking-tight">{character.name}</h3>
+                        <p className="mt-2 text-sm text-white/60">{character.headline}</p>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => toggleFavorite(character)}
-                        aria-label={favorited ? "Remove favorite" : "Add favorite"}
-                        className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
-                      >
-                        <Heart
-                          className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
-                        />
-                      </button>
-                    </div>
-                  </div>
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-white/48">
+                          {character.source === "public-custom" ? "Public custom" : "Built-in"}
+                        </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {badges.map((badge) => (
-                      <span
-                        key={`${character.id}-${badge.label}`}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
-                      >
-                        {renderBadgeIcon(badge.icon)}
-                        {badge.label}
-                      </span>
-                    ))}
-                  </div>
-
-                  <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
-                    {character.description}
-                  </p>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {character.tags.length > 0 ? (
-                      character.tags.map((tag) => (
-                        <span
-                          key={`${character.id}-${tag}`}
-                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                        <button
+                          type="button"
+                          onClick={() => toggleFavorite(character)}
+                          aria-label={favorited ? "Remove favorite" : "Add favorite"}
+                          className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
                         >
-                          {tag}
+                          <Heart
+                            className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {badges.map((badge) => (
+                        <span
+                          key={`${character.id}-${badge.label}`}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
+                        >
+                          {renderBadgeIcon(badge.icon)}
+                          {badge.label}
                         </span>
-                      ))
-                    ) : (
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
-                        Distinct tone
+                      ))}
+                    </div>
+
+                    <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
+                      {character.description}
+                    </p>
+
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {character.tags.length > 0 ? (
+                        character.tags.map((tag) => (
+                          <span
+                            key={`${character.id}-${tag}`}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                          >
+                            {tag}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
+                          Distinct tone
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
+                      <span className="text-sm text-white/45">
+                        {character.source === "public-custom"
+                          ? "Public community character"
+                          : "Built-in Lovora character"}
                       </span>
-                    )}
-                  </div>
 
-                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
-                    <span className="text-sm text-white/45">
-                      {character.source === "public-custom"
-                        ? "Public community character"
-                        : "Built-in Lovora character"}
-                    </span>
-
-                    <Link
-                      href={character.href}
-                      onClick={() => registerRecent(character)}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-                    >
-                      View
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
+                      <Link
+                        href={character.href}
+                        onClick={() => registerRecent(character)}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+                      >
+                        View
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
                   </div>
                 </article>
               );

@@ -18,6 +18,7 @@ import {
   type CharacterDraftInput,
   type DbCustomCharacter,
 } from "@/lib/account";
+import { CHARACTER_IMAGES_BUCKET } from "@/lib/character-images";
 import type { Json } from "@/types/supabase";
 import { supabase } from "@/lib/supabase";
 import {
@@ -49,6 +50,8 @@ type MemoryStateMap = Record<
   }
 >;
 
+type AvatarUrlMap = Record<string, string>;
+
 type CustomConversationLookupRow = {
   id: string;
   custom_character_id: string;
@@ -61,6 +64,15 @@ type ConversationMemoryLookupRow = {
 
 type CustomMessageLookupRow = {
   conversation_id: string;
+};
+
+type CharacterImageLookupRow = {
+  id: string;
+  character_id: string;
+  storage_path: string | null;
+  public_url: string | null;
+  is_primary: boolean;
+  created_at: string;
 };
 
 type EditDraftState = {
@@ -194,10 +206,14 @@ function StatusPill({
     <span
       className={cn(
         "inline-flex rounded-full border px-3 py-1 text-xs",
-        tone === "success" && "border-emerald-400/20 bg-emerald-400/10 text-emerald-100",
-        tone === "warm" && "border-amber-400/20 bg-amber-400/10 text-amber-100",
-        tone === "cyan" && "border-cyan-400/20 bg-cyan-400/10 text-cyan-100",
-        tone === "danger" && "border-rose-400/20 bg-rose-400/10 text-rose-100",
+        tone === "success" &&
+          "border-emerald-400/20 bg-emerald-400/10 text-emerald-100",
+        tone === "warm" &&
+          "border-amber-400/20 bg-amber-400/10 text-amber-100",
+        tone === "cyan" &&
+          "border-cyan-400/20 bg-cyan-400/10 text-cyan-100",
+        tone === "danger" &&
+          "border-rose-400/20 bg-rose-400/10 text-rose-100",
         tone === "neutral" && "border-white/10 bg-white/5 text-white/70",
       )}
     >
@@ -212,7 +228,7 @@ function LoadingSkeleton() {
       {Array.from({ length: 4 }).map((_, index) => (
         <div
           key={index}
-          className="h-[320px] animate-pulse rounded-[30px] border border-white/10 bg-white/[0.04]"
+          className="h-[420px] animate-pulse rounded-[30px] border border-white/10 bg-white/[0.04]"
         />
       ))}
     </div>
@@ -227,8 +243,9 @@ function EmptyVaultState() {
         Your character vault is empty.
       </h2>
       <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-white/62">
-        Create your first character, save it to your account, and come back here to manage
-        visibility, public sharing, duplication, editing, and chat continuity.
+        Create your first character, save it to your account, and come back here
+        to manage visibility, public sharing, duplication, editing, and chat
+        continuity.
       </p>
       <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
         <Link
@@ -256,8 +273,8 @@ function EmptyResultsState({ query }: { query: string }) {
         Nothing matched your filters.
       </h2>
       <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-white/62">
-        No saved characters matched “{query || "your current filters"}”. Try another name,
-        tag, or visibility filter.
+        No saved characters matched “{query || "your current filters"}”. Try
+        another name, tag, or visibility filter.
       </p>
     </div>
   );
@@ -266,6 +283,7 @@ function EmptyResultsState({ query }: { query: string }) {
 export default function MyCharactersPage() {
   const [characters, setCharacters] = useState<DbCustomCharacter[]>([]);
   const [memoryMap, setMemoryMap] = useState<MemoryStateMap>({});
+  const [avatarUrlMap, setAvatarUrlMap] = useState<AvatarUrlMap>({});
   const [loading, setLoading] = useState(true);
   const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [visibilityFilter, setVisibilityFilter] =
@@ -278,6 +296,55 @@ export default function MyCharactersPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState<EditDraftState | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  async function loadAvatarState(charactersList: DbCustomCharacter[]) {
+    try {
+      if (charactersList.length === 0) {
+        setAvatarUrlMap({});
+        return;
+      }
+
+      const characterIds = charactersList.map((item) => item.id);
+      const db = supabase as any;
+
+      const { data: rowsRaw, error } = await db
+        .from("character_images")
+        .select("id, character_id, storage_path, public_url, is_primary, created_at")
+        .in("character_id", characterIds)
+        .eq("is_primary", true);
+
+      if (error) {
+        setAvatarUrlMap({});
+        return;
+      }
+
+      const rows = (rowsRaw as CharacterImageLookupRow[] | null) ?? [];
+      const nextMap: AvatarUrlMap = {};
+
+      await Promise.all(
+        rows.map(async (row) => {
+          if (row.public_url) {
+            nextMap[row.character_id] = row.public_url;
+            return;
+          }
+
+          if (!row.storage_path) return;
+
+          const { data: signedData, error: signedError } = await supabase.storage
+            .from(CHARACTER_IMAGES_BUCKET)
+            .createSignedUrl(row.storage_path, 60 * 60);
+
+          if (!signedError && signedData?.signedUrl) {
+            nextMap[row.character_id] = signedData.signedUrl;
+          }
+        }),
+      );
+
+      setAvatarUrlMap(nextMap);
+    } catch {
+      setAvatarUrlMap({});
+    }
+  }
 
   async function loadMemoryState(charactersList: DbCustomCharacter[]) {
     try {
@@ -298,7 +365,8 @@ export default function MyCharactersPage() {
         .eq("user_id", user.id)
         .in("custom_character_id", characterIds);
 
-      const conversations = (conversationsRaw as CustomConversationLookupRow[] | null) ?? [];
+      const conversations =
+        (conversationsRaw as CustomConversationLookupRow[] | null) ?? [];
 
       if (conversationsError) {
         setMemoryMap({});
@@ -318,7 +386,8 @@ export default function MyCharactersPage() {
         .eq("user_id", user.id)
         .in("conversation_id", conversationIds);
 
-      const memoryRows = (memoryRowsRaw as ConversationMemoryLookupRow[] | null) ?? [];
+      const memoryRows =
+        (memoryRowsRaw as ConversationMemoryLookupRow[] | null) ?? [];
 
       const { data: messageRowsRaw } = await supabase
         .from("custom_messages")
@@ -384,7 +453,7 @@ export default function MyCharactersPage() {
     try {
       const data = await listMyCustomCharacters();
       setCharacters(data);
-      await loadMemoryState(data);
+      await Promise.all([loadMemoryState(data), loadAvatarState(data)]);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not load your characters.";
@@ -425,6 +494,11 @@ export default function MyCharactersPage() {
         delete next[character.id];
         return next;
       });
+      setAvatarUrlMap((current) => {
+        const next = { ...current };
+        delete next[character.id];
+        return next;
+      });
 
       setBanner({
         type: "success",
@@ -452,7 +526,8 @@ export default function MyCharactersPage() {
       ...currentPayload,
       visibility: nextVisibility,
       publicShareId:
-        typeof currentPayload.publicShareId === "string" && currentPayload.publicShareId.trim()
+        typeof currentPayload.publicShareId === "string" &&
+        currentPayload.publicShareId.trim()
           ? currentPayload.publicShareId
           : `share_${character.id.replace(/-/g, "").slice(0, 18)}`,
     } as Json;
@@ -697,8 +772,9 @@ export default function MyCharactersPage() {
                 Your private character vault
               </h1>
               <p className="mt-4 max-w-3xl text-sm leading-7 text-white/62 md:text-base">
-                These characters are tied to your account. Manage visibility, public sharing,
-                duplication, editing, and chat continuity from one clean dashboard.
+                These characters are tied to your account. Manage visibility,
+                public sharing, duplication, editing, and chat continuity from
+                one clean dashboard.
               </p>
             </div>
 
@@ -815,14 +891,31 @@ export default function MyCharactersPage() {
                   const identity = getIdentitySummary(payload);
                   const shareHref = getPublicShareHref(payload);
                   const memoryState = memoryMap[character.id];
+                  const avatarUrl = avatarUrlMap[character.id];
 
                   return (
                     <article
                       key={character.id}
-                      className="flex h-full flex-col rounded-[30px] border border-white/10 bg-white/[0.04] p-6 transition hover:border-white/18 hover:bg-white/[0.06]"
+                      className="flex h-full flex-col overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] transition hover:border-white/18 hover:bg-white/[0.06]"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="flex flex-wrap gap-2">
+                      <div className="relative h-56 w-full border-b border-white/10 bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
+                        {avatarUrl ? (
+                          <img
+                            src={avatarUrl}
+                            alt={`${character.name} avatar`}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-end p-6">
+                            <div className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-xs text-white/70 backdrop-blur">
+                              No avatar yet
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,22,0.65),transparent_45%)]" />
+
+                        <div className="absolute left-6 top-5 flex flex-wrap gap-2">
                           <StatusPill
                             label={visibility === "public" ? "Public" : "Private"}
                             tone={visibility === "public" ? "cyan" : "neutral"}
@@ -838,143 +931,148 @@ export default function MyCharactersPage() {
                           )}
                         </div>
 
-                        <div className="text-xs text-white/45">
-                          {formatRelativeDate(character.updated_at)}
+                        <div className="absolute bottom-5 left-6 right-6 flex items-end justify-between gap-3">
+                          <div>
+                            <h2 className="text-2xl font-semibold tracking-tight text-white">
+                              {character.name}
+                            </h2>
+                            <div className="mt-2 text-xs text-white/60">
+                              {formatRelativeDate(character.updated_at)}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
-                      <h2 className="mt-5 text-2xl font-semibold tracking-tight text-white">
-                        {character.name}
-                      </h2>
+                      <div className="flex flex-1 flex-col p-6">
+                        <p className="text-sm leading-7 text-white/62">
+                          {truncate(character.headline || character.description || "", 130)}
+                        </p>
 
-                      <p className="mt-3 text-sm leading-7 text-white/62">
-                        {truncate(character.headline || character.description || "", 130)}
-                      </p>
-
-                      {identity.length > 0 ? (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {identity.map((item) => (
-                            <span
-                              key={item}
-                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
-                            >
-                              {item}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      <div className="mt-5 rounded-[24px] border border-white/10 bg-black/20 p-4">
-                        <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                          Scenario
-                        </div>
-                        <div className="mt-2 text-sm leading-7 text-white/74">
-                          {getScenarioSummary(character)}
-                        </div>
-                      </div>
-
-                      <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4">
-                        <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                          Chat status
-                        </div>
-                        <div className="mt-2 text-sm leading-7 text-white/74">
-                          {!memoryState?.hasConversation
-                            ? "No conversation started yet."
-                            : memoryState.isFresh
-                              ? "Conversation exists and is still fresh."
-                              : memoryState.hasMemory
-                                ? `Memory is active across ${memoryState.messageCount ?? 0} messages.`
-                                : "Conversation is active."}
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {(character.tags ?? []).slice(0, 6).map((tag) => (
-                          <span
-                            key={`${character.id}-${tag}`}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                        {(!character.tags || character.tags.length === 0) && (
-                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
-                            No tags added
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="mt-6 flex flex-wrap gap-2">
-                        <Link
-                          href={`/chat/custom/${character.slug}`}
-                          className="rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-white/90"
-                        >
-                          {memoryState?.hasConversation ? "Open chat" : "Start chat"}
-                        </Link>
-
-                        <button
-                          type="button"
-                          onClick={() => openEdit(character)}
-                          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                          Edit
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleDuplicate(character)}
-                          disabled={duplicatingId === character.id}
-                          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <PlusSquare className="h-4 w-4" />
-                          {duplicatingId === character.id ? "Duplicating..." : "Duplicate"}
-                        </button>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleVisibilityToggle(character)}
-                          disabled={publishingId === character.id}
-                          className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2.5 text-sm text-cyan-100 transition hover:border-cyan-400/35 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          {publishingId === character.id
-                            ? "Updating..."
-                            : visibility === "public"
-                              ? "Make private"
-                              : "Publish"}
-                        </button>
-
-                        {visibility === "public" && shareHref ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleCopyShareLink(character)}
-                              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
-                            >
-                              <Copy className="h-4 w-4" />
-                              Copy public link
-                            </button>
-
-                            <Link
-                              href={shareHref}
-                              className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
-                            >
-                              View public
-                            </Link>
-                          </>
+                        {identity.length > 0 ? (
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {identity.map((item) => (
+                              <span
+                                key={item}
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
+                              >
+                                {item}
+                              </span>
+                            ))}
+                          </div>
                         ) : null}
 
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(character)}
-                          disabled={deletingId === character.id}
-                          className="inline-flex items-center gap-2 rounded-full border border-rose-400/20 bg-rose-400/10 px-4 py-2.5 text-sm text-rose-100 transition hover:border-rose-400/30 hover:bg-rose-400/15 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          {deletingId === character.id ? "Deleting..." : "Delete"}
-                        </button>
+                        <div className="mt-5 rounded-[24px] border border-white/10 bg-black/20 p-4">
+                          <div className="text-xs uppercase tracking-[0.18em] text-white/40">
+                            Scenario
+                          </div>
+                          <div className="mt-2 text-sm leading-7 text-white/74">
+                            {getScenarioSummary(character)}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4">
+                          <div className="text-xs uppercase tracking-[0.18em] text-white/40">
+                            Chat status
+                          </div>
+                          <div className="mt-2 text-sm leading-7 text-white/74">
+                            {!memoryState?.hasConversation
+                              ? "No conversation started yet."
+                              : memoryState.isFresh
+                                ? "Conversation exists and is still fresh."
+                                : memoryState.hasMemory
+                                  ? `Memory is active across ${memoryState.messageCount ?? 0} messages.`
+                                  : "Conversation is active."}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {(character.tags ?? []).slice(0, 6).map((tag) => (
+                            <span
+                              key={`${character.id}-${tag}`}
+                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                          {(!character.tags || character.tags.length === 0) && (
+                            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
+                              No tags added
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-6 flex flex-wrap gap-2">
+                          <Link
+                            href={`/chat/custom/${character.slug}`}
+                            className="rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-white/90"
+                          >
+                            {memoryState?.hasConversation ? "Open chat" : "Start chat"}
+                          </Link>
+
+                          <button
+                            type="button"
+                            onClick={() => openEdit(character)}
+                            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicate(character)}
+                            disabled={duplicatingId === character.id}
+                            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <PlusSquare className="h-4 w-4" />
+                            {duplicatingId === character.id ? "Duplicating..." : "Duplicate"}
+                          </button>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleVisibilityToggle(character)}
+                            disabled={publishingId === character.id}
+                            className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2.5 text-sm text-cyan-100 transition hover:border-cyan-400/35 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            {publishingId === character.id
+                              ? "Updating..."
+                              : visibility === "public"
+                                ? "Make private"
+                                : "Publish"}
+                          </button>
+
+                          {visibility === "public" && shareHref ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyShareLink(character)}
+                                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
+                              >
+                                <Copy className="h-4 w-4" />
+                                Copy public link
+                              </button>
+
+                              <Link
+                                href={shareHref}
+                                className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
+                              >
+                                View public
+                              </Link>
+                            </>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(character)}
+                            disabled={deletingId === character.id}
+                            className="inline-flex items-center gap-2 rounded-full border border-rose-400/20 bg-rose-400/10 px-4 py-2.5 text-sm text-rose-100 transition hover:border-rose-400/30 hover:bg-rose-400/15 disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            {deletingId === character.id ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
                       </div>
                     </article>
                   );

@@ -1,13 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+  type FormEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   createMyCustomCharacter,
   type CharacterDraftInput,
 } from "@/lib/account";
+import {
+  createCharacterImageJob,
+  markCharacterImageJobCompleted,
+  uploadGeneratedCharacterImage,
+} from "@/lib/character-images";
+import {
+  getDefaultImageProvider,
+  requestImageGeneration,
+  type CharacterImagePromptInput as ProviderCharacterImagePromptInput,
+  type CharacterImageSafetyInput,
+  type ImageProvider,
+} from "@/lib/image-provider";
 import {
   ARCHETYPE_OPTIONS,
   CORE_VIBE_OPTIONS,
@@ -39,6 +57,23 @@ type StudioStep =
   | "publish";
 
 type TemplateMode = "quick" | "deep";
+
+type AvatarJobLifecycle =
+  | "idle"
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed";
+
+type ProviderJobStatusResponse = {
+  ok: boolean;
+  status?: "queued" | "processing" | "completed" | "failed";
+  imageUrl?: string | null;
+  externalJobId?: string | null;
+  errorMessage?: string | null;
+  revisedPrompt?: string | null;
+  revisedNegativePrompt?: string | null;
+};
 
 type CharacterTemplate = {
   id: string;
@@ -1005,7 +1040,11 @@ function SelectField<T extends string>({
         className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition focus:border-fuchsia-400/30 focus:bg-black/40"
       >
         {options.map((option) => (
-          <option key={option.value} value={option.value} className="bg-[#0d1020]">
+          <option
+            key={option.value}
+            value={option.value}
+            className="bg-[#0d1020]"
+          >
             {option.label}
           </option>
         ))}
@@ -1109,6 +1148,33 @@ export default function CreateCharacterPage() {
   const [activeStep, setActiveStep] = useState<StudioStep>("identity");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
+  const [avatarGenerating, setAvatarGenerating] = useState(false);
+  const [avatarProvider, setAvatarProvider] = useState<ImageProvider>(
+    getDefaultImageProvider(),
+  );
+  const [generatedAvatarUrl, setGeneratedAvatarUrl] = useState<string | null>(
+    null,
+  );
+  const [avatarResultMessage, setAvatarResultMessage] = useState<string | null>(
+    null,
+  );
+  const [avatarQueuedExternalJobId, setAvatarQueuedExternalJobId] = useState<
+    string | null
+  >(null);
+  const [queuedJobProvider, setQueuedJobProvider] = useState<ImageProvider | null>(
+    null,
+  );
+  const [avatarJobStatus, setAvatarJobStatus] =
+    useState<AvatarJobLifecycle>("idle");
+  const [lastAvatarPromptInput, setLastAvatarPromptInput] =
+    useState<ProviderCharacterImagePromptInput | null>(null);
+  const [lastAvatarResolvedPrompt, setLastAvatarResolvedPrompt] = useState<
+    string | null
+  >(null);
+  const [lastAvatarNegativePrompt, setLastAvatarNegativePrompt] = useState<
+    string | null
+  >(null);
+
   const isQuickMode = form.mode === "quick";
 
   const structuredKeys = [
@@ -1153,46 +1219,94 @@ export default function CreateCharacterPage() {
     return extractStructuredLine(form.customNotes, prefix);
   }
 
-  const regionNote = useMemo(() => getStructured("Region note"), [form.customNotes]);
-  const visualNote = useMemo(() => getStructured("Visual aura"), [form.customNotes]);
-  const interestNote = useMemo(() => getStructured("Interest anchors"), [form.customNotes]);
+  const regionNote = useMemo(
+    () => getStructured("Region note"),
+    [form.customNotes],
+  );
+  const visualNote = useMemo(
+    () => getStructured("Visual aura"),
+    [form.customNotes],
+  );
+  const interestNote = useMemo(
+    () => getStructured("Interest anchors"),
+    [form.customNotes],
+  );
   const responseDirective = useMemo(
     () => getStructured("Response directive"),
     [form.customNotes],
   );
-  const keyMemories = useMemo(() => getStructured("Key memories"), [form.customNotes]);
-  const exampleMessage = useMemo(() => getStructured("Example message"), [form.customNotes]);
+  const keyMemories = useMemo(
+    () => getStructured("Key memories"),
+    [form.customNotes],
+  );
+  const exampleMessage = useMemo(
+    () => getStructured("Example message"),
+    [form.customNotes],
+  );
   const userRole = useMemo(() => getStructured("User role"), [form.customNotes]);
-  const nickname = useMemo(() => getStructured("Nickname for user"), [form.customNotes]);
-  const boundaries = useMemo(() => getStructured("Boundaries"), [form.customNotes]);
-  const greetingStyle = useMemo(() => getStructured("Greeting style"), [form.customNotes]);
+  const nickname = useMemo(
+    () => getStructured("Nickname for user"),
+    [form.customNotes],
+  );
+  const boundaries = useMemo(
+    () => getStructured("Boundaries"),
+    [form.customNotes],
+  );
+  const greetingStyle = useMemo(
+    () => getStructured("Greeting style"),
+    [form.customNotes],
+  );
   const chatMode = useMemo(() => getStructured("Chat mode"), [form.customNotes]);
-  const avatarStyle = useMemo(() => getStructured("Avatar style"), [form.customNotes]);
+  const avatarStyle = useMemo(
+    () => getStructured("Avatar style"),
+    [form.customNotes],
+  );
   const hair = useMemo(() => getStructured("Hair"), [form.customNotes]);
   const eyes = useMemo(() => getStructured("Eyes"), [form.customNotes]);
   const outfit = useMemo(() => getStructured("Outfit"), [form.customNotes]);
   const palette = useMemo(() => getStructured("Palette"), [form.customNotes]);
   const camera = useMemo(() => getStructured("Camera"), [form.customNotes]);
-  const photoPack = useMemo(() => getStructured("Photo pack"), [form.customNotes]);
-  const imagePrompt = useMemo(() => getStructured("Image prompt"), [form.customNotes]);
+  const photoPack = useMemo(
+    () => getStructured("Photo pack"),
+    [form.customNotes],
+  );
+  const imagePrompt = useMemo(
+    () => getStructured("Image prompt"),
+    [form.customNotes],
+  );
   const relationshipStage = useMemo(
     () => getStructured("Relationship stage"),
     [form.customNotes],
   );
   const jealousy = useMemo(() => getStructured("Jealousy"), [form.customNotes]);
-  const attachment = useMemo(() => getStructured("Attachment"), [form.customNotes]);
-  const protectiveness = useMemo(() => getStructured("Protectiveness"), [form.customNotes]);
+  const attachment = useMemo(
+    () => getStructured("Attachment"),
+    [form.customNotes],
+  );
+  const protectiveness = useMemo(
+    () => getStructured("Protectiveness"),
+    [form.customNotes],
+  );
   const conversationInitiative = useMemo(
     () => getStructured("Conversation initiative"),
     [form.customNotes],
   );
-  const affectionStyle = useMemo(() => getStructured("Affection style"), [form.customNotes]);
-  const conflictStyle = useMemo(() => getStructured("Conflict style"), [form.customNotes]);
+  const affectionStyle = useMemo(
+    () => getStructured("Affection style"),
+    [form.customNotes],
+  );
+  const conflictStyle = useMemo(
+    () => getStructured("Conflict style"),
+    [form.customNotes],
+  );
   const emotionalAvailability = useMemo(
     () => getStructured("Emotional availability"),
     [form.customNotes],
   );
-  const messageFormat = useMemo(() => getStructured("Message format"), [form.customNotes]);
+  const messageFormat = useMemo(
+    () => getStructured("Message format"),
+    [form.customNotes],
+  );
   const linguisticFlavor = useMemo(
     () => getStructured("Linguistic flavor"),
     [form.customNotes],
@@ -1201,10 +1315,22 @@ export default function CreateCharacterPage() {
     () => getStructured("Chemistry template"),
     [form.customNotes],
   );
-  const currentEnergy = useMemo(() => getStructured("Current energy"), [form.customNotes]);
-  const publicTagline = useMemo(() => getStructured("Public tagline"), [form.customNotes]);
-  const publicTeaser = useMemo(() => getStructured("Public teaser"), [form.customNotes]);
-  const publicTags = useMemo(() => getStructured("Public tags"), [form.customNotes]);
+  const currentEnergy = useMemo(
+    () => getStructured("Current energy"),
+    [form.customNotes],
+  );
+  const publicTagline = useMemo(
+    () => getStructured("Public tagline"),
+    [form.customNotes],
+  );
+  const publicTeaser = useMemo(
+    () => getStructured("Public teaser"),
+    [form.customNotes],
+  );
+  const publicTags = useMemo(
+    () => getStructured("Public tags"),
+    [form.customNotes],
+  );
 
   const bodyNotes = useMemo(() => {
     let result = form.customNotes;
@@ -1309,6 +1435,164 @@ export default function CreateCharacterPage() {
       isQuickMode,
     ],
   );
+
+  function clearAvatarPreview() {
+    setGeneratedAvatarUrl(null);
+    setAvatarResultMessage(null);
+    setAvatarQueuedExternalJobId(null);
+    setQueuedJobProvider(null);
+    setAvatarJobStatus("idle");
+    setLastAvatarPromptInput(null);
+    setLastAvatarResolvedPrompt(null);
+    setLastAvatarNegativePrompt(null);
+  }
+
+  async function fetchProviderJobStatus(args: {
+    provider: ImageProvider;
+    externalJobId: string;
+  }): Promise<ProviderJobStatusResponse> {
+    const response = await fetch(
+      `/api/image/status?provider=${encodeURIComponent(args.provider)}&jobId=${encodeURIComponent(args.externalJobId)}`,
+      {
+        method: "GET",
+        cache: "no-store",
+      },
+    );
+
+    const payload = (await response.json().catch(() => null)) as
+      | ProviderJobStatusResponse
+      | null;
+
+    if (!response.ok) {
+      throw new Error(
+        payload?.errorMessage || "Could not refresh avatar generation status.",
+      );
+    }
+
+    if (!payload) {
+      throw new Error("Invalid status response from image provider.");
+    }
+
+    return payload;
+  }
+
+ useEffect(() => {
+  if (
+    avatarQueuedExternalJobId === null ||
+    queuedJobProvider === null ||
+    generatedAvatarUrl
+  ) {
+    return;
+  }
+
+  const safeExternalJobId: string = avatarQueuedExternalJobId;
+  const safeProvider: ImageProvider = queuedJobProvider;
+
+  let cancelled = false;
+
+  async function pollOnce(provider: ImageProvider, externalJobId: string) {
+    try {
+      const result = await fetchProviderJobStatus({
+        provider,
+        externalJobId,
+      });
+
+      if (cancelled) return;
+
+      if (!result.ok) {
+        throw new Error(result.errorMessage || "Avatar polling failed.");
+      }
+
+      if (result.revisedPrompt) {
+        setLastAvatarResolvedPrompt(result.revisedPrompt);
+      }
+
+      if (typeof result.revisedNegativePrompt === "string") {
+        setLastAvatarNegativePrompt(result.revisedNegativePrompt);
+      }
+
+      if (result.status === "queued") {
+        setAvatarJobStatus("queued");
+        setAvatarResultMessage(
+          "Avatar request is queued. Waiting for provider response...",
+        );
+        return;
+      }
+
+      if (result.status === "processing") {
+        setAvatarJobStatus("processing");
+        setAvatarResultMessage(
+          "Avatar is being generated. Preview will appear automatically.",
+        );
+        return;
+      }
+
+      if (result.status === "completed") {
+        setAvatarJobStatus("completed");
+
+        if (result.imageUrl) {
+          setGeneratedAvatarUrl(result.imageUrl);
+          setAvatarQueuedExternalJobId(null);
+          setQueuedJobProvider(null);
+          setAvatarResultMessage("Avatar preview generated successfully.");
+          setBanner({
+            type: "success",
+            message:
+              "Avatar preview is ready. It will be attached when you create the character.",
+          });
+          return;
+        }
+
+        setAvatarQueuedExternalJobId(null);
+        setQueuedJobProvider(null);
+        setAvatarResultMessage(
+          "Generation completed, but no preview image URL was returned.",
+        );
+        setBanner({
+          type: "error",
+          message:
+            "The provider completed the job without returning a preview image.",
+        });
+        return;
+      }
+
+      if (result.status === "failed") {
+        setAvatarJobStatus("failed");
+        setAvatarQueuedExternalJobId(null);
+        setQueuedJobProvider(null);
+        setAvatarResultMessage(null);
+        setBanner({
+          type: "error",
+          message:
+            result.errorMessage || "Avatar generation failed at the provider.",
+        });
+      }
+    } catch (error) {
+      if (cancelled) return;
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not refresh avatar status.";
+
+      setBanner({
+        type: "error",
+        message,
+      });
+    }
+  }
+
+  void pollOnce(safeProvider, safeExternalJobId);
+
+  const intervalId = window.setInterval(() => {
+    void pollOnce(safeProvider, safeExternalJobId);
+  }, 4000);
+
+  return () => {
+    cancelled = true;
+    window.clearInterval(intervalId);
+  };
+}, [avatarQueuedExternalJobId, queuedJobProvider, generatedAvatarUrl]);
 
   function rebuildCustomNotes(
     next: Partial<Record<(typeof structuredKeys)[number], string>>,
@@ -1533,11 +1817,76 @@ export default function CreateCharacterPage() {
   }, [isQuickMode]);
 
   const activeStepIndex = visibleSteps.findIndex((step) => step.id === activeStep);
-  const previousStep = activeStepIndex > 0 ? visibleSteps[activeStepIndex - 1] : null;
+  const previousStep =
+    activeStepIndex > 0 ? visibleSteps[activeStepIndex - 1] : null;
   const nextStep =
     activeStepIndex >= 0 && activeStepIndex < visibleSteps.length - 1
       ? visibleSteps[activeStepIndex + 1]
       : null;
+
+  const avatarSafetyInput = useMemo<CharacterImageSafetyInput>(
+    () => ({
+      isAdultOnly: true,
+      subjectDeclared18Plus: true,
+      consentConfirmed: true,
+      depictsRealPerson: false,
+      depictsPublicFigure: false,
+      nonConsensualFlag: false,
+      underageRiskFlag: false,
+      illegalContentFlag: false,
+    }),
+    [],
+  );
+
+  function buildAvatarPromptInput(): ProviderCharacterImagePromptInput {
+    const parsedPublicTags = parseCsv(publicTags);
+    const firstExpression =
+      currentEnergy ||
+      (form.tone.includes("playful")
+        ? "playful"
+        : form.tone.includes("cold")
+          ? "guarded"
+          : "composed");
+    const bodyType = parsedPublicTags.find((tag) =>
+      ["athletic", "slim", "curvy", "lean", "toned"].includes(
+        tag.toLowerCase(),
+      ),
+    );
+
+    return {
+      characterName: form.name.trim() || "Untitled character",
+      archetype: form.archetype || undefined,
+      visualAura: visualNote || undefined,
+      ageBand:
+        ageValue <= 20
+          ? "18-20"
+          : ageValue <= 24
+            ? "21-24"
+            : ageValue <= 29
+              ? "25-29"
+              : ageValue <= 39
+                ? "30-39"
+                : "40+",
+      genderPresentation: form.genderPresentation || undefined,
+      region: form.region.trim() || undefined,
+      hair: hair || undefined,
+      eyes: eyes || undefined,
+      outfit: outfit || undefined,
+      palette: palette || undefined,
+      camera: camera || undefined,
+      avatarStyle: avatarStyle || undefined,
+      bodyType: bodyType || undefined,
+      pose:
+        relationshipStage === "rivals"
+          ? "confident pose"
+          : relationshipStage === "lovers"
+            ? "intimate pose"
+            : "composed portrait pose",
+      expression: firstExpression,
+      environment: form.setting || undefined,
+      nsfwLevel: "adult",
+    };
+  }
 
   function setField<K extends keyof StudioFormState>(
     key: K,
@@ -1556,10 +1905,13 @@ export default function CreateCharacterPage() {
     setDynamism(68);
     setActiveStep("identity");
     setSelectedTemplateId("");
+    clearAvatarPreview();
   }
 
   function applyCharacterTemplate(template: CharacterTemplate) {
     setSelectedTemplateId(template.id);
+    clearAvatarPreview();
+
     setForm((current) => ({
       ...current,
       mode: template.mode,
@@ -1602,7 +1954,9 @@ export default function CreateCharacterPage() {
 
   function applyRandomTemplate() {
     const random =
-      CHARACTER_TEMPLATES[Math.floor(Math.random() * CHARACTER_TEMPLATES.length)];
+      CHARACTER_TEMPLATES[
+        Math.floor(Math.random() * CHARACTER_TEMPLATES.length)
+      ];
     applyCharacterTemplate(random);
   }
 
@@ -1675,6 +2029,156 @@ export default function CreateCharacterPage() {
     }
   }
 
+  async function handleGenerateAvatar() {
+    if (avatarGenerating) return;
+
+    if (!form.name.trim()) {
+      setBanner({
+        type: "error",
+        message: "Set a character name before generating an avatar.",
+      });
+      setActiveStep("identity");
+      return;
+    }
+
+    if (!form.age.trim() || !form.region.trim()) {
+      setBanner({
+        type: "error",
+        message: "Age and region are required before generating an avatar.",
+      });
+      setActiveStep("identity");
+      return;
+    }
+
+    setAvatarGenerating(true);
+    setAvatarResultMessage(null);
+    setAvatarQueuedExternalJobId(null);
+    setQueuedJobProvider(null);
+    setAvatarJobStatus("idle");
+
+    try {
+      const promptInput = buildAvatarPromptInput();
+
+      const result = await requestImageGeneration({
+        provider: avatarProvider,
+        kind: "avatar",
+        characterId: `draft-${(form.name || "character")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")}`,
+        promptInput,
+        safety: avatarSafetyInput,
+      });
+
+      if (!result.ok) {
+        throw new Error(result.errorMessage || "Avatar generation failed.");
+      }
+
+      setLastAvatarPromptInput(promptInput);
+      setLastAvatarResolvedPrompt(result.revisedPrompt ?? null);
+      setLastAvatarNegativePrompt(result.revisedNegativePrompt ?? null);
+
+      if (result.imageUrl) {
+        setGeneratedAvatarUrl(result.imageUrl);
+        setAvatarJobStatus("completed");
+        setAvatarResultMessage("Avatar preview generated successfully.");
+        setBanner({
+          type: "success",
+          message:
+            "Avatar preview generated. It will be attached when you create the character.",
+        });
+      } else if (result.externalJobId) {
+        setAvatarQueuedExternalJobId(result.externalJobId);
+        setQueuedJobProvider(avatarProvider);
+        setGeneratedAvatarUrl(null);
+        setAvatarJobStatus("queued");
+        setAvatarResultMessage(
+          "Generation request was accepted and queued by the provider.",
+        );
+        setBanner({
+          type: "success",
+          message:
+            "Avatar request queued successfully. The preview will refresh automatically when it is ready.",
+        });
+      } else {
+        setAvatarResultMessage(
+          "Generation completed without a preview URL from the provider.",
+        );
+        setAvatarJobStatus("failed");
+        setBanner({
+          type: "error",
+          message:
+            "The provider did not return a preview image. Try again or switch provider later.",
+        });
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not generate avatar.";
+      setAvatarResultMessage(null);
+      setGeneratedAvatarUrl(null);
+      setAvatarQueuedExternalJobId(null);
+      setQueuedJobProvider(null);
+      setAvatarJobStatus("failed");
+      setBanner({
+        type: "error",
+        message,
+      });
+    } finally {
+      setAvatarGenerating(false);
+    }
+  }
+
+  async function persistGeneratedAvatar(args: {
+    characterId: string;
+    provider: ImageProvider;
+  }) {
+    if (!generatedAvatarUrl || !lastAvatarPromptInput) {
+      return;
+    }
+
+    const job = await createCharacterImageJob({
+      characterId: args.characterId,
+      promptInput: lastAvatarPromptInput,
+      model: args.provider === "mage" ? "mage" : "sd3.5-medium",
+      workflowName:
+        args.provider === "mage" ? "mage-avatar-v1" : "character-avatar-v1",
+    });
+
+    const imageResponse = await fetch(generatedAvatarUrl);
+    if (!imageResponse.ok) {
+      throw new Error("Could not download generated avatar.");
+    }
+
+    const blob = await imageResponse.blob();
+    const mimeType = blob.type || "image/png";
+    const extension =
+      mimeType === "image/webp"
+        ? "webp"
+        : mimeType === "image/jpeg"
+          ? "jpg"
+          : "png";
+
+    await uploadGeneratedCharacterImage({
+      characterId: args.characterId,
+      jobId: job.id,
+      imageId: crypto.randomUUID(),
+      blob,
+      extension,
+      mimeType,
+      model: args.provider === "mage" ? "mage" : "sd3.5-medium",
+      workflowName:
+        args.provider === "mage" ? "mage-avatar-v1" : "character-avatar-v1",
+      promptInput: lastAvatarPromptInput,
+      resolvedPrompt: lastAvatarResolvedPrompt ?? undefined,
+      negativePrompt: lastAvatarNegativePrompt ?? undefined,
+      isPrimary: true,
+    });
+
+    await markCharacterImageJobCompleted({
+      jobId: job.id,
+    });
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) return;
@@ -1703,7 +2207,11 @@ export default function CreateCharacterPage() {
       return;
     }
 
-    if (!form.setting.trim() || !form.relationshipToUser.trim() || !form.sceneGoal.trim()) {
+    if (
+      !form.setting.trim() ||
+      !form.relationshipToUser.trim() ||
+      !form.sceneGoal.trim()
+    ) {
       setBanner({
         type: "error",
         message: "Setting, relationship, and scene goal are required.",
@@ -1717,6 +2225,18 @@ export default function CreateCharacterPage() {
 
     try {
       const created = await createMyCustomCharacter(draft);
+
+      if (generatedAvatarUrl && lastAvatarPromptInput) {
+        try {
+          await persistGeneratedAvatar({
+            characterId: created.id,
+            provider: queuedJobProvider || avatarProvider,
+          });
+        } catch (avatarError) {
+          console.error("Avatar persistence failed:", avatarError);
+        }
+      }
+
       setBanner({
         type: "success",
         message: `"${created.name}" created successfully.`,
@@ -1751,6 +2271,21 @@ export default function CreateCharacterPage() {
     readinessScore,
     isQuickMode,
   );
+
+  const canGenerateAvatar = Boolean(
+    form.name.trim() && form.region.trim() && form.age.trim(),
+  );
+
+  const avatarStatusLabel =
+    avatarJobStatus === "queued"
+      ? "Queued"
+      : avatarJobStatus === "processing"
+        ? "Processing"
+        : avatarJobStatus === "completed"
+          ? "Completed"
+          : avatarJobStatus === "failed"
+            ? "Failed"
+            : "Idle";
 
   return (
     <AuthGuard>
@@ -1846,7 +2381,12 @@ export default function CreateCharacterPage() {
                   key={step.id}
                   title={step.label}
                   active={activeStep === step.id}
-                  complete={getStepCompletion(step.id, form, readinessScore, isQuickMode)}
+                  complete={getStepCompletion(
+                    step.id,
+                    form,
+                    readinessScore,
+                    isQuickMode,
+                  )}
                   onClick={() => goToStep(step.id)}
                 />
               ))}
@@ -1854,7 +2394,8 @@ export default function CreateCharacterPage() {
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <div className="text-sm text-white/60">
-                Current section: <span className="text-white/85">{activeStep}</span> •{" "}
+                Current section:{" "}
+                <span className="text-white/85">{activeStep}</span> •{" "}
                 {activeStepComplete ? "ready" : "still needs input"}
               </div>
 
@@ -1935,7 +2476,14 @@ export default function CreateCharacterPage() {
                     active={form.mode === "quick"}
                     onClick={() => {
                       setField("mode", "quick");
-                      if (!["identity", "personality", "scenario", "publish"].includes(activeStep)) {
+                      if (
+                        ![
+                          "identity",
+                          "personality",
+                          "scenario",
+                          "publish",
+                        ].includes(activeStep)
+                      ) {
                         setActiveStep("identity");
                       }
                     }}
@@ -1995,7 +2543,9 @@ export default function CreateCharacterPage() {
                         max={55}
                         step={1}
                         value={ageValue}
-                        onChange={(event) => setAgeFromSlider(Number(event.target.value))}
+                        onChange={(event) =>
+                          setAgeFromSlider(Number(event.target.value))
+                        }
                         className="w-full accent-cyan-400"
                       />
                       <div className="mt-2 flex items-center justify-between text-xs text-white/35">
@@ -2043,7 +2593,9 @@ export default function CreateCharacterPage() {
                         <InputField
                           label="Region note (optional)"
                           value={regionNote}
-                          onChange={(value) => rebuildCustomNotes({ "Region note": value })}
+                          onChange={(value) =>
+                            rebuildCustomNotes({ "Region note": value })
+                          }
                           placeholder="coastal Brazilian, urban Turkish, old-money Roman, etc."
                         />
                       </div>
@@ -2141,7 +2693,8 @@ export default function CreateCharacterPage() {
                               active={visualNote === option}
                               onClick={() =>
                                 rebuildCustomNotes({
-                                  "Visual aura": visualNote === option ? "" : option,
+                                  "Visual aura":
+                                    visualNote === option ? "" : option,
                                 })
                               }
                             />
@@ -2152,7 +2705,9 @@ export default function CreateCharacterPage() {
                           <InputField
                             label="Custom visual aura (optional)"
                             value={visualNote}
-                            onChange={(value) => rebuildCustomNotes({ "Visual aura": value })}
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Visual aura": value })
+                            }
                             placeholder="sharp cheekbones, understated luxury, dangerous sleepy eyes, etc."
                           />
                         </div>
@@ -2215,7 +2770,9 @@ export default function CreateCharacterPage() {
                           <SelectField
                             label="Relationship pace"
                             value={form.relationshipPace}
-                            onChange={(value) => setField("relationshipPace", value)}
+                            onChange={(value) =>
+                              setField("relationshipPace", value)
+                            }
                             options={RELATIONSHIP_PACE_OPTIONS}
                           />
                           <SelectField
@@ -2332,7 +2889,9 @@ export default function CreateCharacterPage() {
                         <InputField
                           label="Relationship to user"
                           value={form.relationshipToUser}
-                          onChange={(value) => setField("relationshipToUser", value)}
+                          onChange={(value) =>
+                            setField("relationshipToUser", value)
+                          }
                           placeholder="best friend with tension"
                         />
                         <InputField
@@ -2378,7 +2937,9 @@ export default function CreateCharacterPage() {
                                 INITIATIVE_OPTIONS[1]) as (typeof INITIATIVE_OPTIONS)[number]
                             }
                             onChange={(value) =>
-                              rebuildCustomNotes({ "Conversation initiative": value })
+                              rebuildCustomNotes({
+                                "Conversation initiative": value,
+                              })
                             }
                             options={INITIATIVE_OPTIONS.map((v) => ({
                               value: v,
@@ -2420,7 +2981,9 @@ export default function CreateCharacterPage() {
                                 EMOTIONAL_AVAILABILITY_OPTIONS[1]) as (typeof EMOTIONAL_AVAILABILITY_OPTIONS)[number]
                             }
                             onChange={(value) =>
-                              rebuildCustomNotes({ "Emotional availability": value })
+                              rebuildCustomNotes({
+                                "Emotional availability": value,
+                              })
                             }
                             options={EMOTIONAL_AVAILABILITY_OPTIONS.map((v) => ({
                               value: v,
@@ -2462,7 +3025,9 @@ export default function CreateCharacterPage() {
                             label="Protectiveness"
                             value={Number(protectiveness || 54)}
                             onChange={(value) =>
-                              rebuildCustomNotes({ Protectiveness: String(value) })
+                              rebuildCustomNotes({
+                                Protectiveness: String(value),
+                              })
                             }
                           />
                         </div>
@@ -2590,7 +3155,9 @@ export default function CreateCharacterPage() {
                           <InputField
                             label="Relationship to user"
                             value={form.relationshipToUser}
-                            onChange={(value) => setField("relationshipToUser", value)}
+                            onChange={(value) =>
+                              setField("relationshipToUser", value)
+                            }
                             placeholder="emotionally guarded co-worker"
                           />
                           <InputField
@@ -2674,10 +3241,7 @@ export default function CreateCharacterPage() {
                     </div>
                   </Section>
 
-                  <Section
-                    title="Creator intent"
-                    description="Use this for extra nuance."
-                  >
+                  <Section title="Creator intent" description="Use this for extra nuance.">
                     <div className="grid gap-4">
                       <InputField
                         label="Tags"
@@ -2720,39 +3284,55 @@ export default function CreateCharacterPage() {
                     />
                     <SelectField
                       label="Hair"
-                      value={(hair || HAIR_OPTIONS[0]) as (typeof HAIR_OPTIONS)[number]}
+                      value={
+                        (hair || HAIR_OPTIONS[0]) as (typeof HAIR_OPTIONS)[number]
+                      }
                       onChange={(value) => rebuildCustomNotes({ Hair: value })}
                       options={HAIR_OPTIONS.map((v) => ({ value: v, label: v }))}
                     />
                     <SelectField
                       label="Eyes"
-                      value={(eyes || EYE_OPTIONS[0]) as (typeof EYE_OPTIONS)[number]}
+                      value={
+                        (eyes || EYE_OPTIONS[0]) as (typeof EYE_OPTIONS)[number]
+                      }
                       onChange={(value) => rebuildCustomNotes({ Eyes: value })}
                       options={EYE_OPTIONS.map((v) => ({ value: v, label: v }))}
                     />
                     <SelectField
                       label="Outfit"
                       value={
-                        (outfit || OUTFIT_OPTIONS[0]) as (typeof OUTFIT_OPTIONS)[number]
+                        (outfit ||
+                          OUTFIT_OPTIONS[0]) as (typeof OUTFIT_OPTIONS)[number]
                       }
                       onChange={(value) => rebuildCustomNotes({ Outfit: value })}
-                      options={OUTFIT_OPTIONS.map((v) => ({ value: v, label: v }))}
+                      options={OUTFIT_OPTIONS.map((v) => ({
+                        value: v,
+                        label: v,
+                      }))}
                     />
                     <SelectField
                       label="Palette"
                       value={
-                        (palette || PALETTE_OPTIONS[0]) as (typeof PALETTE_OPTIONS)[number]
+                        (palette ||
+                          PALETTE_OPTIONS[0]) as (typeof PALETTE_OPTIONS)[number]
                       }
                       onChange={(value) => rebuildCustomNotes({ Palette: value })}
-                      options={PALETTE_OPTIONS.map((v) => ({ value: v, label: v }))}
+                      options={PALETTE_OPTIONS.map((v) => ({
+                        value: v,
+                        label: v,
+                      }))}
                     />
                     <SelectField
                       label="Camera framing"
                       value={
-                        (camera || CAMERA_OPTIONS[0]) as (typeof CAMERA_OPTIONS)[number]
+                        (camera ||
+                          CAMERA_OPTIONS[0]) as (typeof CAMERA_OPTIONS)[number]
                       }
                       onChange={(value) => rebuildCustomNotes({ Camera: value })}
-                      options={CAMERA_OPTIONS.map((v) => ({ value: v, label: v }))}
+                      options={CAMERA_OPTIONS.map((v) => ({
+                        value: v,
+                        label: v,
+                      }))}
                     />
                     <SelectField
                       label="Photo pack style"
@@ -2784,6 +3364,87 @@ export default function CreateCharacterPage() {
                 </Section>
               )}
 
+              {(activeStep === "visual" || activeStep === "publish") && (
+                <Section
+                  title="AI avatar preview"
+                  description="Generate a provider-backed avatar preview now. If a preview image is returned, it will be attached automatically after character creation."
+                  accent="cyan"
+                >
+                  <div className="grid gap-4">
+                    <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <SegmentButton
+                          active={avatarProvider === "mage"}
+                          onClick={() => setAvatarProvider("mage")}
+                        >
+                          Mage
+                        </SegmentButton>
+                        <SegmentButton
+                          active={avatarProvider === "self-hosted-comfy"}
+                          onClick={() => setAvatarProvider("self-hosted-comfy")}
+                        >
+                          Self-hosted ComfyUI
+                        </SegmentButton>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleGenerateAvatar}
+                        disabled={avatarGenerating || !canGenerateAvatar}
+                        className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {avatarGenerating ? "Generating..." : "Generate Avatar"}
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <StatPill label="Avatar status" value={avatarStatusLabel} />
+                      <StatPill
+                        label="Provider"
+                        value={
+                          queuedJobProvider
+                            ? queuedJobProvider === "mage"
+                              ? "Mage"
+                              : "Self-hosted ComfyUI"
+                            : avatarProvider === "mage"
+                              ? "Mage"
+                              : "Self-hosted ComfyUI"
+                        }
+                      />
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-7 text-white/65">
+                      Adult-only fictional avatar flow is enabled. The preview generator is blocked for minors, real people, public figures, non-consensual scenarios, and illegal content.
+                    </div>
+
+                    {avatarResultMessage ? (
+                      <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100">
+                        {avatarResultMessage}
+                        {avatarQueuedExternalJobId
+                          ? ` External job: ${avatarQueuedExternalJobId}`
+                          : ""}
+                      </div>
+                    ) : null}
+
+                    {generatedAvatarUrl ? (
+                      <div className="overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.03]">
+                        <img
+                          src={generatedAvatarUrl}
+                          alt="Generated avatar preview"
+                          className="h-[420px] w-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.02] p-8 text-sm text-white/45">
+                        {avatarQueuedExternalJobId
+                          ? "Avatar job is being monitored. Preview will appear automatically when ready."
+                          : "No avatar preview yet. Set name, age, and region, then generate."}
+                      </div>
+                    )}
+                  </div>
+                </Section>
+              )}
+
               {activeStep === "publish" && (
                 <Section
                   title="Publish setup"
@@ -2808,8 +3469,9 @@ export default function CreateCharacterPage() {
                         </SegmentButton>
                       </div>
                       <p className="mt-3 text-sm leading-6 text-white/55">
-                        Private characters stay in your vault only. Public characters
-                        keep the same internal structure but can be shared on a public page.
+                        Private characters stay in your vault only. Public
+                        characters keep the same internal structure but can be
+                        shared on a public page.
                       </p>
                     </div>
 
@@ -2843,9 +3505,10 @@ export default function CreateCharacterPage() {
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm leading-7 text-white/60">
-                        Quick Mode keeps publish settings minimal on purpose.
-                        You still keep full payload compatibility, public/private control,
-                        and can deepen the character later without rebuilding it.
+                        Quick Mode keeps publish settings minimal on purpose. You
+                        still keep full payload compatibility, public/private
+                        control, and can deepen the character later without
+                        rebuilding it.
                       </div>
                     )}
                   </div>
@@ -2896,7 +3559,11 @@ export default function CreateCharacterPage() {
                   {selectedTemplateId ? (
                     <div className="mt-3 inline-flex rounded-full border border-fuchsia-400/20 bg-fuchsia-400/10 px-3 py-1 text-xs text-fuchsia-100">
                       Template applied:{" "}
-                      {CHARACTER_TEMPLATES.find((item) => item.id === selectedTemplateId)?.title}
+                      {
+                        CHARACTER_TEMPLATES.find(
+                          (item) => item.id === selectedTemplateId,
+                        )?.title
+                      }
                     </div>
                   ) : null}
 
@@ -2939,37 +3606,45 @@ export default function CreateCharacterPage() {
                     </div>
                   </div>
 
-                  {!isQuickMode ? (
-                    <>
-                      <DividerLabel label="Visual concept" />
-                      <div className="mt-4 rounded-[24px] border border-white/10 bg-gradient-to-br from-fuchsia-400/10 via-white/[0.02] to-cyan-400/10 p-4">
-                        <div className="mt-4 grid grid-cols-[110px_1fr] gap-4">
-                          <div className="relative overflow-hidden rounded-[22px] border border-white/10 bg-gradient-to-br from-fuchsia-500/25 via-slate-800 to-cyan-500/25">
-                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.2),transparent_35%),radial-gradient(circle_at_bottom,rgba(255,255,255,0.08),transparent_30%)]" />
-                            <div className="absolute left-1/2 top-5 h-16 w-16 -translate-x-1/2 rounded-full border border-white/15 bg-white/10" />
-                            <div className="absolute bottom-4 left-1/2 h-24 w-24 -translate-x-1/2 rounded-[20px] border border-white/10 bg-white/5" />
-                          </div>
+                  <DividerLabel label="Avatar preview" />
+                  <div className="mt-4 rounded-[24px] border border-white/10 bg-gradient-to-br from-fuchsia-400/10 via-white/[0.02] to-cyan-400/10 p-4">
+                    {generatedAvatarUrl ? (
+                      <img
+                        src={generatedAvatarUrl}
+                        alt="Avatar preview"
+                        className="h-[340px] w-full rounded-[20px] object-cover"
+                      />
+                    ) : (
+                      <div className="mt-4 grid grid-cols-[110px_1fr] gap-4">
+                        <div className="relative overflow-hidden rounded-[22px] border border-white/10 bg-gradient-to-br from-fuchsia-500/25 via-slate-800 to-cyan-500/25">
+                          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.2),transparent_35%),radial-gradient(circle_at_bottom,rgba(255,255,255,0.08),transparent_30%)]" />
+                          <div className="absolute left-1/2 top-5 h-16 w-16 -translate-x-1/2 rounded-full border border-white/15 bg-white/10" />
+                          <div className="absolute bottom-4 left-1/2 h-24 w-24 -translate-x-1/2 rounded-[20px] border border-white/10 bg-white/5" />
+                        </div>
 
-                          <div className="space-y-2">
-                            <div className="text-sm text-white/80">
-                              {visualSummary || "Visual prep not fully set yet"}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {[avatarStyle, hair, eyes, outfit, palette, camera, photoPack]
-                                .filter(Boolean)
-                                .map((item) => (
-                                  <span
-                                    key={item}
-                                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
-                                  >
-                                    {item}
-                                  </span>
-                                ))}
-                            </div>
+                        <div className="space-y-2">
+                          <div className="text-sm text-white/80">
+                            {visualSummary || "Visual prep not fully set yet"}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {[avatarStyle, hair, eyes, outfit, palette, camera, photoPack]
+                              .filter(Boolean)
+                              .map((item) => (
+                                <span
+                                  key={item}
+                                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
+                                >
+                                  {item}
+                                </span>
+                              ))}
                           </div>
                         </div>
                       </div>
+                    )}
+                  </div>
 
+                  {!isQuickMode ? (
+                    <>
                       {imagePrompt ? (
                         <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                           <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
@@ -3007,19 +3682,25 @@ export default function CreateCharacterPage() {
                       <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
                         Softer
                       </div>
-                      <p className="mt-2 text-sm leading-7 text-white/75">{firstReplySoft}</p>
+                      <p className="mt-2 text-sm leading-7 text-white/75">
+                        {firstReplySoft}
+                      </p>
                     </div>
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
                         Flirtier
                       </div>
-                      <p className="mt-2 text-sm leading-7 text-white/75">{firstReplyFlirty}</p>
+                      <p className="mt-2 text-sm leading-7 text-white/75">
+                        {firstReplyFlirty}
+                      </p>
                     </div>
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
                         Colder
                       </div>
-                      <p className="mt-2 text-sm leading-7 text-white/75">{firstReplyCold}</p>
+                      <p className="mt-2 text-sm leading-7 text-white/75">
+                        {firstReplyCold}
+                      </p>
                     </div>
                   </div>
 
@@ -3028,7 +3709,9 @@ export default function CreateCharacterPage() {
                       <DividerLabel label="Public showcase" />
                       <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                         {publicTagline ? (
-                          <div className="text-base font-medium text-white">{publicTagline}</div>
+                          <div className="text-base font-medium text-white">
+                            {publicTagline}
+                          </div>
                         ) : null}
                         {publicTeaser ? (
                           <p className="mt-2 text-sm leading-7 text-white/70">
@@ -3116,6 +3799,8 @@ export default function CreateCharacterPage() {
                     <li>• Basic traits</li>
                     <li>• Short scenario</li>
                     <li>• Publish visibility</li>
+                    <li>• Avatar preview generation</li>
+                    <li>• Avatar queue polling</li>
                   </ul>
                 ) : (
                   <ul className="space-y-3 text-sm text-white/68">
@@ -3132,6 +3817,8 @@ export default function CreateCharacterPage() {
                     <li>• Public card customization</li>
                     <li>• First-message variants preview</li>
                     <li>• Visual lab prep</li>
+                    <li>• Avatar preview generation</li>
+                    <li>• Avatar queue polling</li>
                   </ul>
                 )}
               </Section>

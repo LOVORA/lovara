@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 
 import { createMyCustomCharacter, type CharacterDraftInput } from "@/lib/account";
+import { CHARACTER_IMAGES_BUCKET } from "@/lib/character-images";
+import { supabase } from "@/lib/supabase";
 import {
   getIdentitySummary,
   getVisibilityFromPayload,
@@ -27,6 +29,15 @@ type BannerState =
   | { type: "success"; message: string }
   | { type: "error"; message: string }
   | null;
+
+type CharacterImageLookupRow = {
+  id: string;
+  character_id: string;
+  storage_path: string | null;
+  public_url: string | null;
+  is_primary: boolean;
+  created_at: string;
+};
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -94,10 +105,56 @@ export default function PublicCharacterDetailPage() {
         : "";
 
   const [character, setCharacter] = useState<PublicCustomCharacter | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [duplicating, setDuplicating] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
   const [duplicateSuccess, setDuplicateSuccess] = useState(false);
+
+  async function loadPrimaryAvatar(characterId: string) {
+    try {
+      const db = supabase as any;
+
+      const { data: rowRaw, error } = await db
+        .from("character_images")
+        .select("id, character_id, storage_path, public_url, is_primary, created_at")
+        .eq("character_id", characterId)
+        .eq("is_primary", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !rowRaw) {
+        setAvatarUrl(null);
+        return;
+      }
+
+      const row = rowRaw as CharacterImageLookupRow;
+
+      if (row.public_url) {
+        setAvatarUrl(row.public_url);
+        return;
+      }
+
+      if (!row.storage_path) {
+        setAvatarUrl(null);
+        return;
+      }
+
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from(CHARACTER_IMAGES_BUCKET)
+        .createSignedUrl(row.storage_path, 60 * 60);
+
+      if (!signedError && signedData?.signedUrl) {
+        setAvatarUrl(signedData.signedUrl);
+        return;
+      }
+
+      setAvatarUrl(null);
+    } catch {
+      setAvatarUrl(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +163,7 @@ export default function PublicCharacterDetailPage() {
       setLoading(true);
       setBanner(null);
       setDuplicateSuccess(false);
+      setAvatarUrl(null);
 
       try {
         const found = await getPublicCustomCharacterByShareId(shareId);
@@ -116,6 +174,7 @@ export default function PublicCharacterDetailPage() {
           setCharacter(null);
         } else {
           setCharacter(found);
+          await loadPrimaryAvatar(found.id);
         }
       } catch (error) {
         if (!cancelled) {
@@ -317,6 +376,26 @@ export default function PublicCharacterDetailPage() {
                   ))}
                 </div>
               ) : null}
+
+              <div className="overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04]">
+                <div className="relative h-[360px] w-full bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={`${character.name} avatar`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-end p-6">
+                      <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-xs text-white/70 backdrop-blur">
+                        No avatar yet
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(5,5,10,0.55),transparent_45%)]" />
+                </div>
+              </div>
 
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
