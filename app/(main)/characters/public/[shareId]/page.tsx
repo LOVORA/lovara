@@ -2,593 +2,403 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Flame, Search, Sparkles, Star } from "lucide-react";
-
-import { characters } from "@/lib/characters";
+import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
-  getPublicCharacterDetailHref,
-  getPublicShareIdFromPayload,
-  listPublicCustomCharacters,
+  createMyCustomCharacter,
+  type CharacterDraftInput,
+} from "@/lib/account";
+import {
+  getIdentitySummary,
+  getVisibilityFromPayload,
+} from "@/lib/custom-character-studio";
+import {
+  getPublicCustomCharacterByShareId,
   type PublicCustomCharacter,
 } from "@/lib/public-characters";
 
-type CharacterLike = {
-  slug?: string;
-  name?: string;
-  title?: string;
-  headline?: string;
-  description?: string;
-  greeting?: string;
-  category?: string;
-  tags?: Array<
-    string | { name?: string; label?: string; value?: string; category?: string }
-  >;
-};
+const AuthGuard = dynamic(() => import("@/components/auth/auth-guard"), {
+  ssr: false,
+});
 
-type FilterKey = "all" | "romance" | "dark" | "soft" | "elite" | "fantasy";
+type BannerState =
+  | { type: "success"; message: string }
+  | { type: "error"; message: string }
+  | null;
 
-type DiscoverCharacter = {
-  id: string;
-  slug: string;
-  name: string;
-  headline: string;
-  description: string;
-  category: string;
-  tags: string[];
-  href: string;
-  source: "built-in" | "public-custom";
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-const FILTERS: Array<{ key: FilterKey; label: string; helper: string }> = [
-  { key: "all", label: "All characters", helper: "Browse the full Lovora collection" },
-  { key: "romance", label: "Romance", helper: "Chemistry, tension, intimacy" },
-  { key: "dark", label: "Dark", helper: "Danger, obsession, control" },
-  { key: "soft", label: "Soft", helper: "Warmth, care, comfort" },
-  { key: "elite", label: "Elite", helper: "Luxury, power, status" },
-  { key: "fantasy", label: "Fantasy", helper: "Impossible worlds and vibes" },
-];
-
-function normalizeText(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function getCharacterName(character: CharacterLike): string {
-  return normalizeText(character.name) || normalizeText(character.title) || "Untitled character";
+function truncate(value: string, max: number) {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trim()}…`;
 }
 
-function getCharacterHeadline(character: CharacterLike): string {
-  return (
-    normalizeText(character.headline) ||
-    normalizeText(character.description) ||
-    normalizeText(character.greeting) ||
-    "A premium Lovora character built for immersive roleplay."
-  );
-}
+function formatRelativeDate(value?: string): string {
+  if (!value) return "Recently updated";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recently updated";
 
-function getCharacterDescription(character: CharacterLike): string {
-  return (
-    normalizeText(character.description) ||
-    normalizeText(character.greeting) ||
-    "Crafted to feel distinct, emotionally readable, and instantly usable in chat."
-  );
-}
+  const diffMs = Date.now() - date.getTime();
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
 
-function getTagLabels(character: CharacterLike): string[] {
-  if (!Array.isArray(character.tags)) return [];
+  if (diffMs < hour) {
+    const mins = Math.max(1, Math.floor(diffMs / minute));
+    return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  }
 
-  return character.tags
-    .map((tag) => {
-      if (typeof tag === "string") return tag.trim();
-      if (tag && typeof tag === "object") {
-        return (
-          normalizeText(tag.label) ||
-          normalizeText(tag.name) ||
-          normalizeText(tag.value) ||
-          normalizeText(tag.category)
-        );
-      }
-      return "";
-    })
-    .filter(Boolean)
-    .slice(0, 4);
-}
+  if (diffMs < day) {
+    const hours = Math.max(1, Math.floor(diffMs / hour));
+    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
 
-function getFilterSignals(character: DiscoverCharacter): string {
-  return [
-    character.name,
-    character.headline,
-    character.description,
-    character.category,
-    ...character.tags,
-  ]
-    .join(" ")
-    .toLowerCase();
-}
+  const days = Math.max(1, Math.floor(diffMs / day));
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
 
-function matchesFilter(character: DiscoverCharacter, filter: FilterKey): boolean {
-  if (filter === "all") return true;
-
-  const haystack = getFilterSignals(character);
-
-  const terms: Record<Exclude<FilterKey, "all">, string[]> = {
-    romance: [
-      "romance",
-      "romantic",
-      "lover",
-      "chemistry",
-      "flirty",
-      "intimate",
-      "girlfriend",
-      "boyfriend",
-      "slow burn",
-      "slowburn",
-    ],
-    dark: [
-      "dark",
-      "obsessive",
-      "danger",
-      "dangerous",
-      "mafia",
-      "possessive",
-      "dominant",
-      "villain",
-      "obsession",
-    ],
-    soft: [
-      "soft",
-      "warm",
-      "comfort",
-      "kind",
-      "gentle",
-      "caring",
-      "sweet",
-      "nurturing",
-    ],
-    elite: [
-      "elite",
-      "luxury",
-      "wealth",
-      "billionaire",
-      "ceo",
-      "royal",
-      "high status",
-      "old-money",
-      "elegant",
-    ],
-    fantasy: [
-      "fantasy",
-      "myth",
-      "dragon",
-      "kingdom",
-      "supernatural",
-      "immortal",
-      "vampire",
-      "magic",
-    ],
-  };
-
-  return terms[filter].some((term) => haystack.includes(term));
-}
-
-function buildStatText(total: number, shown: number): string {
-  if (total === 0) return "No characters found yet";
-  if (shown === total) return `${total} characters ready to explore`;
-  return `${shown} of ${total} characters shown`;
-}
-
-function mapBuiltInCharacters(input: CharacterLike[]): DiscoverCharacter[] {
-  return input.map((character, index) => {
-    const slug = normalizeText(character.slug);
-
-    return {
-      id: `built-in-${slug || index}`,
-      slug,
-      name: getCharacterName(character),
-      headline: getCharacterHeadline(character),
-      description: getCharacterDescription(character),
-      category: normalizeText(character.category) || "Built-in",
-      tags: getTagLabels(character),
-      href: slug ? `/characters/${slug}` : "/characters",
-      source: "built-in",
-    };
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   });
 }
 
-function mapPublicCustomCharacters(input: PublicCustomCharacter[]): DiscoverCharacter[] {
-  return input
-    .map((character) => {
-      const shareId = getPublicShareIdFromPayload(character.payload);
-      if (!shareId) return null;
+function getScenarioSummary(character: PublicCustomCharacter) {
+  const parts = [
+    character.scenario?.setting,
+    character.scenario?.relationshipToUser,
+    character.scenario?.sceneGoal,
+    character.scenario?.tone,
+  ].filter(Boolean);
 
-      const scenarioTags = [
-        character.scenario?.tone,
-        character.scenario?.setting,
-        character.scenario?.relationshipToUser,
-      ].filter((item): item is string => Boolean(item && item.trim()));
-
-      return {
-        id: `public-custom-${character.id}`,
-        slug: character.slug,
-        name: character.name || "Untitled character",
-        headline:
-          character.headline ||
-          character.description ||
-          "A public custom Lovora character ready to explore.",
-        description:
-          character.description ||
-          character.greeting ||
-          "Shared publicly from the custom character studio.",
-        category: character.archetype || "Custom",
-        tags: Array.from(
-          new Set([...(character.tags ?? []), ...scenarioTags]),
-        ).slice(0, 4),
-        href: getPublicCharacterDetailHref(shareId),
-        source: "public-custom" as const,
-        createdAt: character.created_at,
-        updatedAt: character.updated_at,
-      };
-    })
-    .filter((item): item is DiscoverCharacter => item !== null);
+  return parts.length > 0 ? parts.join(" • ") : "Open-ended roleplay dynamic";
 }
 
-export default function CharactersPage() {
-  const builtInSource = (characters as CharacterLike[]) ?? [];
+function getPayloadValue(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === "string" ? value.trim() : "";
+}
 
-  const [query, setQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
-  const [publicCharacters, setPublicCharacters] = useState<PublicCustomCharacter[]>([]);
-  const [loadingPublic, setLoadingPublic] = useState(true);
+export default function PublicCharacterDetailPage() {
+  const params = useParams<{ shareId?: string | string[] }>();
+  const shareId =
+    typeof params?.shareId === "string"
+      ? params.shareId
+      : Array.isArray(params?.shareId)
+        ? params.shareId[0]
+        : "";
+
+  const [character, setCharacter] = useState<PublicCustomCharacter | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [duplicating, setDuplicating] = useState(false);
+  const [banner, setBanner] = useState<BannerState>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadPublicCharacters() {
-      setLoadingPublic(true);
+    async function load() {
+      setLoading(true);
+      setBanner(null);
 
       try {
-        const data = await listPublicCustomCharacters();
-        if (!cancelled) {
-          setPublicCharacters(data);
+        const found = await getPublicCustomCharacterByShareId(shareId);
+
+        if (cancelled) return;
+
+        if (!found || getVisibilityFromPayload(found.payload) !== "public") {
+          setCharacter(null);
+        } else {
+          setCharacter(found);
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setPublicCharacters([]);
+          setBanner({
+            type: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Could not load this public character.",
+          });
         }
       } finally {
-        if (!cancelled) {
-          setLoadingPublic(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     }
 
-    loadPublicCharacters();
+    if (shareId) {
+      load();
+    } else {
+      setLoading(false);
+    }
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [shareId]);
 
-  const source = useMemo(() => {
-    const builtIns = mapBuiltInCharacters(builtInSource);
-    const publicCustoms = mapPublicCustomCharacters(publicCharacters);
+  const identitySummary = useMemo(() => {
+    if (!character) return [];
+    return getIdentitySummary(character.payload);
+  }, [character]);
 
-    return [...publicCustoms, ...builtIns];
-  }, [builtInSource, publicCharacters]);
+  const publicTagline = character
+    ? getPayloadValue(character.payload, "publicTagline")
+    : "";
+  const publicTeaser = character
+    ? getPayloadValue(character.payload, "publicTeaser")
+    : "";
+  const publicTags = character
+    ? getPayloadValue(character.payload, "publicTags")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
 
-  const filtered = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+  async function handleDuplicate() {
+    if (!character || duplicating) return;
 
-    return source.filter((character) => {
-      const inFilter = matchesFilter(character, activeFilter);
-      if (!inFilter) return false;
-      if (!normalizedQuery) return true;
+    setDuplicating(true);
+    setBanner(null);
 
-      return getFilterSignals(character).includes(normalizedQuery);
-    });
-  }, [activeFilter, query, source]);
+    try {
+      const nextPayload: Record<string, unknown> = {
+        ...character.payload,
+        visibility: "private",
+      };
 
-  const featured = filtered.slice(0, 3);
-  const gridCharacters = filtered.slice(3);
+      delete nextPayload.publicShareId;
+
+      const input: CharacterDraftInput = {
+        name: `${character.name} Copy`,
+        archetype: character.archetype || "custom",
+        headline: character.headline || "",
+        description: character.description || "",
+        greeting: character.greeting || "",
+        previewMessage: character.greeting || "",
+        backstory: character.backstory || "",
+        tags: character.tags ?? [],
+        traitBadges: [],
+        scenario: character.scenario ?? {},
+        payload: nextPayload,
+      };
+
+      const created = await createMyCustomCharacter(input);
+
+      setBanner({
+        type: "success",
+        message: `"${created.name}" was added to your library.`,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not duplicate character.";
+
+      setBanner({
+        type: "error",
+        message:
+          message === "AUTH_REQUIRED"
+            ? "You need to log in before adding this character to your library."
+            : message,
+      });
+    } finally {
+      setDuplicating(false);
+    }
+  }
+
+  async function handleCopyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setBanner({
+        type: "success",
+        message: "Public link copied.",
+      });
+    } catch {
+      setBanner({
+        type: "error",
+        message: "Could not copy link.",
+      });
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-[#050816] px-6 py-10 text-white">
+        <div className="mx-auto max-w-6xl rounded-[32px] border border-white/10 bg-white/[0.03] p-8 text-white/65">
+          Loading public character...
+        </div>
+      </main>
+    );
+  }
+
+  if (!character) {
+    return (
+      <main className="min-h-screen bg-[#050816] px-6 py-10 text-white">
+        <div className="mx-auto max-w-5xl rounded-[32px] border border-white/10 bg-white/[0.03] p-8">
+          <div className="text-xs uppercase tracking-[0.22em] text-rose-200/80">
+            Unavailable
+          </div>
+          <h1 className="mt-4 text-3xl font-semibold">This public character is unavailable.</h1>
+          <p className="mt-3 text-sm leading-7 text-white/60">
+            The character may have been made private, removed, or the link may be invalid.
+          </p>
+          <div className="mt-6">
+            <Link
+              href="/characters"
+              className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black"
+            >
+              Back to Discover
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-white">
-      <section className="border-b border-white/10 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.14),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0))]">
-        <div className="mx-auto flex max-w-7xl flex-col gap-10 px-6 py-16 md:px-8 lg:px-10 lg:py-20">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl space-y-5">
-              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-white/12 bg-white/6 px-4 py-2 text-sm text-white/80 backdrop-blur">
-                <Sparkles className="h-4 w-4" />
-                Discover premium roleplay characters
+    <main className="min-h-screen bg-[#050816] text-white">
+      <div className="mx-auto max-w-7xl px-6 py-10">
+        <section className="rounded-[36px] border border-white/10 bg-gradient-to-br from-fuchsia-500/10 via-white/[0.04] to-cyan-400/10 p-8">
+          <div className="flex flex-wrap items-start justify-between gap-6">
+            <div className="max-w-4xl">
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-100">
+                  Public character
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
+                  {character.archetype || "custom"}
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
+                  Updated {formatRelativeDate(character.updated_at)}
+                </span>
               </div>
-              <div className="space-y-4">
-                <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-white md:text-5xl lg:text-6xl">
-                  Find a character that already feels alive before the first message.
-                </h1>
-                <p className="max-w-2xl text-base leading-7 text-white/68 md:text-lg">
-                  Explore Lovora’s built-in cast and public custom characters through mood,
-                  chemistry, power, softness, and fantasy.
-                </p>
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:min-w-[420px]">
-              <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
-                <div className="text-sm text-white/55">Library</div>
-                <div className="mt-2 text-2xl font-semibold">{source.length}</div>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
-                <div className="text-sm text-white/55">Public customs</div>
-                <div className="mt-2 text-2xl font-semibold">{publicCharacters.length}</div>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur col-span-2 sm:col-span-1">
-                <div className="text-sm text-white/55">Fast path</div>
-                <div className="mt-2 text-2xl font-semibold">Discover + duplicate</div>
-              </div>
-            </div>
-          </div>
+              <h1 className="mt-4 text-4xl font-semibold tracking-tight">
+                {character.name}
+              </h1>
 
-          <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="rounded-[28px] border border-white/10 bg-white/6 p-4 backdrop-blur md:p-5">
-              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/25 px-4 py-3">
-                <Search className="h-4 w-4 text-white/45" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search by name, mood, energy, fantasy, romance..."
-                  className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-white/6 p-5 backdrop-blur">
-              <div className="text-sm text-white/55">Visible collection</div>
-              <div className="mt-2 text-lg font-medium text-white">
-                {buildStatText(source.length, filtered.length)}
-              </div>
-              <div className="mt-2 text-sm leading-6 text-white/55">
-                {loadingPublic
-                  ? "Loading public custom characters..."
-                  : "Built-in and public custom characters are shown together here."}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 py-8 md:px-8 lg:px-10">
-        <div className="flex flex-wrap gap-3">
-          {FILTERS.map((filter) => {
-            const selected = activeFilter === filter.key;
-            return (
-              <button
-                key={filter.key}
-                type="button"
-                onClick={() => setActiveFilter(filter.key)}
-                className={`rounded-2xl border px-4 py-3 text-left transition ${
-                  selected
-                    ? "border-white/20 bg-white text-black shadow-[0_10px_40px_rgba(255,255,255,0.1)]"
-                    : "border-white/10 bg-white/5 text-white hover:border-white/18 hover:bg-white/8"
-                }`}
-              >
-                <div className="text-sm font-medium">{filter.label}</div>
-                <div className={`mt-1 text-xs ${selected ? "text-black/65" : "text-white/50"}`}>
-                  {filter.helper}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {featured.length > 0 ? (
-        <section className="mx-auto max-w-7xl px-6 pb-8 md:px-8 lg:px-10">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="rounded-full border border-white/10 bg-white/6 p-2">
-              <Flame className="h-4 w-4 text-white" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-semibold tracking-tight">Featured picks</h2>
-              <p className="text-sm text-white/55">
-                A tighter first row for the strongest first impression.
+              <p className="mt-3 max-w-3xl text-base leading-8 text-white/65">
+                {publicTagline || character.headline || truncate(character.description, 220)}
               </p>
-            </div>
-          </div>
 
-          <div className="grid gap-5 lg:grid-cols-3">
-            {featured.map((character) => (
-              <article
-                key={character.id}
-                className="group rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-6 transition hover:border-white/16 hover:bg-[linear-gradient(180deg,rgba(255,255,255,0.12),rgba(255,255,255,0.04))]"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs text-white/70">
-                      <Star className="h-3.5 w-3.5" />
-                      Featured
-                    </div>
-                    <h3 className="mt-4 text-2xl font-semibold tracking-tight">
-                      {character.name}
-                    </h3>
-                    <p className="mt-2 text-sm text-white/62">{character.headline}</p>
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/58">
-                      {character.category}
-                    </div>
-                    <div
-                      className={`rounded-2xl border px-3 py-2 text-[10px] uppercase tracking-[0.18em] ${
-                        character.source === "public-custom"
-                          ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100"
-                          : "border-white/10 bg-white/5 text-white/55"
-                      }`}
+              {identitySummary.length > 0 ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {identitySummary.map((item) => (
+                    <span
+                      key={item}
+                      className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100"
                     >
-                      {character.source === "public-custom" ? "Public custom" : "Built-in"}
-                    </div>
-                  </div>
-                </div>
-
-                <p className="mt-5 line-clamp-4 text-sm leading-7 text-white/68">
-                  {character.description}
-                </p>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {character.tags.length > 0 ? (
-                    character.tags.map((tag) => (
-                      <span
-                        key={`${character.id}-${tag}`}
-                        className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/70"
-                      >
-                        {tag}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/55">
-                      Premium roleplay
+                      {item}
                     </span>
-                  )}
+                  ))}
                 </div>
+              ) : null}
 
-                <div className="mt-6 flex items-center gap-3">
-                  <Link
-                    href={character.href}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-                  >
-                    Open character
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleDuplicate}
+                  disabled={duplicating}
+                  className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black disabled:opacity-70"
+                >
+                  {duplicating ? "Adding..." : "Add to My Characters"}
+                </button>
 
-                  <Link
-                    href="/create-character"
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
-                  >
-                    Create your own
-                  </Link>
-                </div>
-              </article>
-            ))}
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/80"
+                >
+                  Copy link
+                </button>
+
+                <Link
+                  href="/characters"
+                  className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/80"
+                >
+                  Back to Discover
+                </Link>
+              </div>
+            </div>
           </div>
         </section>
-      ) : null}
 
-      <section className="mx-auto max-w-7xl px-6 pb-20 md:px-8 lg:px-10">
-        <div className="mb-5 flex items-end justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-semibold tracking-tight">Browse all characters</h2>
-            <p className="mt-2 text-sm text-white/55">
-              Built-in and public custom characters, all in one place.
-            </p>
-          </div>
-
-          <Link
-            href="/create-character"
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
+        {banner ? (
+          <div
+            className={cn(
+              "mt-6 rounded-2xl border px-4 py-3 text-sm",
+              banner.type === "success"
+                ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
+                : "border-rose-400/20 bg-rose-400/10 text-rose-100",
+            )}
           >
-            Build custom character
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
+            {banner.message}
+          </div>
+        ) : null}
 
-        {filtered.length === 0 ? (
-          <div className="rounded-[32px] border border-dashed border-white/12 bg-white/[0.03] px-6 py-16 text-center">
-            <h3 className="text-2xl font-semibold tracking-tight">
-              No characters match this search yet.
-            </h3>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-white/58">
-              Try a broader mood, remove a search term, or create a custom character
-              that fits exactly what you want.
-            </p>
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setQuery("");
-                  setActiveFilter("all");
-                }}
-                className="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-              >
-                Reset filters
-              </button>
-              <Link
-                href="/create-character"
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:border-white/18 hover:bg-white/8"
-              >
-                Create custom character
-              </Link>
+        <div className="mt-8 grid gap-8 xl:grid-cols-[1fr_0.95fr]">
+          <section className="space-y-6">
+            <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-6">
+              <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                Overview
+              </div>
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-8 text-white/78">
+                {publicTeaser || character.description || character.greeting}
+              </p>
             </div>
-          </div>
-        ) : (
-          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {gridCharacters.map((character) => (
-              <article
-                key={character.id}
-                className="flex h-full flex-col rounded-[28px] border border-white/10 bg-white/[0.04] p-5 transition hover:border-white/18 hover:bg-white/[0.06]"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-semibold tracking-tight">{character.name}</h3>
-                    <p className="mt-2 text-sm text-white/60">{character.headline}</p>
-                  </div>
 
-                  <div className="flex flex-col gap-2">
-                    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-white/48">
-                      {character.category}
-                    </div>
-                    <div
-                      className={`rounded-xl border px-3 py-2 text-[10px] uppercase tracking-[0.18em] ${
-                        character.source === "public-custom"
-                          ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100"
-                          : "border-white/10 bg-white/5 text-white/55"
-                      }`}
-                    >
-                      {character.source === "public-custom" ? "Public custom" : "Built-in"}
-                    </div>
-                  </div>
+            <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-6">
+              <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                Scenario
+              </div>
+              <p className="mt-3 text-sm leading-8 text-white/78">
+                {getScenarioSummary(character)}
+              </p>
+            </div>
+
+            {character.backstory ? (
+              <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-6">
+                <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                  Backstory
                 </div>
-
-                <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
-                  {character.description}
+                <p className="mt-3 whitespace-pre-wrap text-sm leading-8 text-white/78">
+                  {character.backstory}
                 </p>
+              </div>
+            ) : null}
+          </section>
 
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {character.tags.length > 0 ? (
-                    character.tags.map((tag) => (
-                      <span
-                        key={`${character.id}-${tag}`}
-                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
-                      >
-                        {tag}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
-                      Distinct tone
-                    </span>
-                  )}
-                </div>
+          <aside className="space-y-6">
+            <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-6">
+              <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                Character greeting
+              </div>
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-8 text-white/78">
+                {character.greeting || "No greeting saved."}
+              </p>
+            </div>
 
-                <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
-                  <span className="text-sm text-white/45">
-                    {character.source === "public-custom"
-                      ? "Open public detail page"
-                      : "Open details to start chatting"}
-                  </span>
-
-                  <Link
-                    href={character.href}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+            <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-6">
+              <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                Tags
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {[...publicTags, ...(character.tags ?? [])].slice(0, 12).map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75"
                   >
-                    View
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+                    {tag}
+                  </span>
+                ))}
+                {publicTags.length === 0 && (!character.tags || character.tags.length === 0) ? (
+                  <span className="text-xs text-white/40">No tags added</span>
+                ) : null}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
     </main>
   );
 }
