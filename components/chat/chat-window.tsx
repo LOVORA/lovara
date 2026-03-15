@@ -2,13 +2,13 @@
 
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "../../lib/supabase";
-import { getCharacterBySlug } from "../../lib/characters";
+import { supabase } from "@/lib/supabase";
+import { getCharacterBySlug } from "@/lib/characters";
 import {
   getOrCreateConversationForCharacter,
   loadConversationMessages,
   type DbMessageRow,
-} from "../../lib/chat";
+} from "@/lib/chat";
 
 type ChatWindowProps = {
   characterSlug: string;
@@ -20,6 +20,42 @@ type Message = {
   content: string;
 };
 
+type SessionState = "fresh" | "active";
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function getSessionState(messages: Message[]): SessionState {
+  const nonGreetingMessages = messages.filter((message, index) => {
+    if (index === 0 && message.role === "assistant") return false;
+    return true;
+  });
+
+  return nonGreetingMessages.length === 0 ? "fresh" : "active";
+}
+
+function StatusBadge({
+  label,
+  tone = "neutral",
+}: {
+  label: string;
+  tone?: "neutral" | "success" | "warm";
+}) {
+  return (
+    <span
+      className={cn(
+        "rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.16em]",
+        tone === "success" && "border-emerald-400/20 bg-emerald-400/10 text-emerald-100",
+        tone === "warm" && "border-amber-400/20 bg-amber-400/10 text-amber-100",
+        tone === "neutral" && "border-white/10 bg-white/5 text-white/60",
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
 export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
@@ -27,7 +63,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
   const character = useMemo(
     () => getCharacterBySlug(characterSlug) ?? null,
-    [characterSlug]
+    [characterSlug],
   );
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -37,8 +73,11 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   const [isResetting, setIsResetting] = useState(false);
   const [chatStatus, setChatStatus] = useState("");
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
-    null
+    null,
   );
+  const [justReset, setJustReset] = useState(false);
+
+  const sessionState = useMemo(() => getSessionState(messages), [messages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -63,6 +102,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       setChatStatus("Loading chat...");
       setMessages([]);
       setActiveConversationId(null);
+      setJustReset(false);
 
       try {
         const {
@@ -85,7 +125,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
             slug: character.slug,
             name: character.name,
             greeting: character.greeting,
-          }
+          },
         );
 
         if (!isMounted || initIdRef.current !== currentInitId) return;
@@ -95,7 +135,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         const dbMessages = await loadConversationMessages(
           supabase,
           conversation.id,
-          character.greeting
+          character.greeting,
         );
 
         if (!isMounted || initIdRef.current !== currentInitId) return;
@@ -113,7 +153,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                 content: message.content,
               },
             ];
-          }
+          },
         );
 
         setMessages(formattedMessages);
@@ -171,7 +211,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     }
 
     const confirmed = window.confirm(
-      "This will clear the current chat and start again from the first message. Continue?"
+      "This will clear the current chat and start again from the first message. Continue?",
     );
 
     if (!confirmed) return;
@@ -187,7 +227,19 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
       if (deleteMessagesError) {
         setChatStatus(
-          `Could not clear chat messages: ${deleteMessagesError.message}`
+          `Could not clear chat messages: ${deleteMessagesError.message}`,
+        );
+        return;
+      }
+
+      const { error: deleteMemoryError } = await supabase
+        .from("conversation_memory_state")
+        .delete()
+        .eq("conversation_id", activeConversationId);
+
+      if (deleteMemoryError) {
+        setChatStatus(
+          `Messages were cleared, but memory could not be reset: ${deleteMemoryError.message}`,
         );
         return;
       }
@@ -207,6 +259,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         .from("conversations")
         .update({
           title: `Chat with ${character.name}`,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", activeConversationId);
 
@@ -218,10 +271,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         },
       ]);
 
+      setJustReset(true);
+
       if (updateConversationError) {
-        setChatStatus("Chat reset, but conversation title could not be updated.");
+        setChatStatus("Chat reset, but conversation metadata could not be updated.");
       } else {
-        setChatStatus("Chat reset successfully.");
+        setChatStatus("Reset completed. This chat is fresh again.");
       }
     } catch (error) {
       console.error(error);
@@ -261,6 +316,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     setInput("");
     setIsTyping(true);
     setChatStatus("");
+    setJustReset(false);
 
     try {
       const { error: userMessageError } = await supabase.from("messages").insert({
@@ -273,6 +329,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         setChatStatus("Message sent, but the user message could not be saved.");
       }
 
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token ?? "";
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -280,6 +342,8 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         },
         body: JSON.stringify({
           slug: character.slug,
+          conversationId: activeConversationId,
+          accessToken,
           messages: nextMessages.map((message) => ({
             role: message.role,
             content: message.content,
@@ -328,16 +392,6 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
       setMessages((prev) => [...prev, assistantReply]);
 
-      const { error: assistantMessageError } = await supabase.from("messages").insert({
-        conversation_id: activeConversationId,
-        role: "assistant",
-        content: reply,
-      });
-
-      if (assistantMessageError) {
-        setChatStatus("Reply received, but the assistant message could not be saved.");
-      }
-
       const nextTitle =
         trimmedMessage.length > 40
           ? `${trimmedMessage.slice(0, 40)}...`
@@ -347,12 +401,13 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         .from("conversations")
         .update({
           title: nextTitle,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", activeConversationId);
 
       if (updateConversationError) {
-        setChatStatus("Reply saved, but conversation title could not be updated.");
-      } else if (!assistantMessageError) {
+        setChatStatus("Reply received, but conversation title could not be updated.");
+      } else {
         setChatStatus("");
       }
     } catch (error) {
@@ -410,9 +465,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-white/60">
-              {activeConversationId ? "Private chat saved" : "Private chat"}
-            </div>
+            <StatusBadge label="Private chat saved" />
+            <StatusBadge
+              label={sessionState === "fresh" ? "Fresh chat" : "Memory active"}
+              tone={sessionState === "fresh" ? "warm" : "success"}
+            />
+            {justReset ? <StatusBadge label="Reset completed" tone="success" /> : null}
 
             <button
               type="button"

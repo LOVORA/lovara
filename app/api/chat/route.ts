@@ -1,5 +1,14 @@
 import { NextResponse } from "next/server";
-import { getCharacterBySlug } from "../../../lib/characters";
+import { getCharacterBySlug } from "@/lib/characters";
+import { buildMemoryPromptBlock, type MemoryChatMessage } from "@/lib/conversation-memory";
+import {
+  getConversationMemoryState,
+  getOrCreateBuiltInConversation,
+  insertBuiltInConversationMessage,
+  listBuiltInConversationMessages,
+  toBuiltInMemoryMessages,
+  upsertConversationMemoryState,
+} from "@/lib/chat-conversations";
 
 type IncomingMessage = {
   role: "system" | "user" | "assistant";
@@ -24,20 +33,12 @@ function isValidIncomingMessage(message: unknown): message is IncomingMessage {
   );
 }
 
-function getOptionalString(
-  source: Record<string, unknown>,
-  key: string
-): string | null {
+function getOptionalString(source: Record<string, unknown>, key: string): string | null {
   const value = source[key];
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function getOptionalBoolean(
-  source: Record<string, unknown>,
-  key: string
-): boolean | null {
+function getOptionalBoolean(source: Record<string, unknown>, key: string): boolean | null {
   const value = source[key];
   return typeof value === "boolean" ? value : null;
 }
@@ -106,10 +107,7 @@ function formatMemory(source: Record<string, unknown>): string | null {
   if (!isRecord(memory)) return null;
 
   const remembersName = getOptionalBoolean(memory, "remembersName");
-  const remembersPreferences = getOptionalBoolean(
-    memory,
-    "remembersPreferences"
-  );
+  const remembersPreferences = getOptionalBoolean(memory, "remembersPreferences");
   const remembersPastChats = getOptionalBoolean(memory, "remembersPastChats");
 
   const entries: string[] = [];
@@ -119,9 +117,7 @@ function formatMemory(source: Record<string, unknown>): string | null {
   }
 
   if (remembersPreferences !== null) {
-    entries.push(
-      `Remembers preferences: ${remembersPreferences ? "yes" : "no"}`
-    );
+    entries.push(`Remembers preferences: ${remembersPreferences ? "yes" : "no"}`);
   }
 
   if (remembersPastChats !== null) {
@@ -131,7 +127,7 @@ function formatMemory(source: Record<string, unknown>): string | null {
   return entries.length > 0 ? entries.join(", ") : null;
 }
 
-function buildCharacterContext(slug: string) {
+function buildCharacterContext(slug: string, memoryBlock?: string) {
   const character = getCharacterBySlug(slug);
 
   if (!character) return null;
@@ -166,7 +162,7 @@ function buildCharacterContext(slug: string) {
 Character profile:
 ${details.join("\n")}
 
-Behavior guidance:
+${memoryBlock ? `${memoryBlock}\n\n` : ""}Behavior guidance:
 - Stay fully in character as ${character.name}.
 - Match the emotional tone and intensity of the user's latest message.
 - Keep replies natural, immersive, personal, and non-generic.
@@ -196,44 +192,25 @@ export async function POST(req: Request) {
     const body: unknown = await req.json();
 
     if (!isRecord(body)) {
-      return NextResponse.json(
-        { error: "Invalid request body." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
     }
 
     const slug = typeof body.slug === "string" ? body.slug.trim() : "";
     const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+    const accessToken =
+      typeof body.accessToken === "string" ? body.accessToken.trim() : "";
+    const conversationId =
+      typeof body.conversationId === "string" ? body.conversationId.trim() : "";
 
     if (!slug || rawMessages.length === 0) {
       return NextResponse.json(
         { error: "Missing or invalid slug/messages payload." },
-        { status: 400 }
-      );
-    }
-
-    const characterContext = buildCharacterContext(slug);
-
-    if (!characterContext) {
-      return NextResponse.json(
-        { error: "Character not found." },
-        { status: 404 }
-      );
-    }
-
-    const openRouterApiKey = process.env.OPENROUTER_API_KEY;
-
-    if (!openRouterApiKey) {
-      return NextResponse.json(
-        { error: "Missing OPENROUTER_API_KEY." },
-        { status: 500 }
+        { status: 400 },
       );
     }
 
     const safeMessages: IncomingMessage[] = rawMessages
-      .filter((message): message is IncomingMessage =>
-        isValidIncomingMessage(message)
-      )
+      .filter((message): message is IncomingMessage => isValidIncomingMessage(message))
       .map((message) => ({
         role: message.role,
         content: message.content.trim(),
@@ -242,11 +219,61 @@ export async function POST(req: Request) {
     if (safeMessages.length === 0) {
       return NextResponse.json(
         { error: "No valid chat messages were provided." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const recentMessages = safeMessages.slice(-MAX_CONTEXT_MESSAGES);
+    const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+    if (!openRouterApiKey) {
+      return NextResponse.json({ error: "Missing OPENROUTER_API_KEY." }, { status: 500 });
+    }
+
+    let persistentConversationId = conversationId;
+    let persistentMessages: MemoryChatMessage[] | null = null;
+    let memoryBlock = "";
+
+    if (accessToken) {
+      try {
+        const conversation =
+          persistentConversationId
+            ? { id: persistentConversationId }
+            : await getOrCreateBuiltInConversation(accessToken, slug, slug);
+
+        persistentConversationId = conversation.id;
+
+        const dbMessages = await listBuiltInConversationMessages(
+          accessToken,
+          persistentConversationId,
+        );
+
+        persistentMessages = toBuiltInMemoryMessages(dbMessages);
+
+        const storedMemory = await getConversationMemoryState(
+          accessToken,
+          persistentConversationId,
+        );
+
+        if (storedMemory) {
+          memoryBlock = buildMemoryPromptBlock(storedMemory);
+        }
+      } catch (error) {
+        console.error("Built-in persistent chat bootstrap failed:", error);
+      }
+    }
+
+    const recentMessages =
+      persistentMessages && persistentMessages.length > 0
+        ? persistentMessages.slice(-MAX_CONTEXT_MESSAGES)
+        : safeMessages.slice(-MAX_CONTEXT_MESSAGES).map((message) => ({
+            role: message.role,
+            content: message.content,
+          }));
+
+    const characterContext = buildCharacterContext(slug, memoryBlock);
+
+    if (!characterContext) {
+      return NextResponse.json({ error: "Character not found." }, { status: 404 });
+    }
 
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
@@ -293,7 +320,7 @@ export async function POST(req: Request) {
                 ? data.message
                 : "OpenRouter request failed.",
         },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -310,21 +337,47 @@ export async function POST(req: Request) {
         : null;
 
     if (!assistantMessage || !assistantMessage.trim()) {
-      return NextResponse.json(
-        { error: "No assistant response received." },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "No assistant response received." }, { status: 500 });
+    }
+
+    const reply = assistantMessage.trim();
+
+    if (accessToken && persistentConversationId) {
+      try {
+        await insertBuiltInConversationMessage(
+          accessToken,
+          persistentConversationId,
+          "assistant",
+          reply,
+        );
+
+        const updatedMessages = await listBuiltInConversationMessages(
+          accessToken,
+          persistentConversationId,
+        );
+
+        await upsertConversationMemoryState({
+          accessToken,
+          conversationId: persistentConversationId,
+          conversationType: "built_in",
+          messages: toBuiltInMemoryMessages(updatedMessages),
+        });
+      } catch (error) {
+        console.error("Built-in memory persistence failed:", error);
+      }
     }
 
     return NextResponse.json({
-      reply: assistantMessage.trim(),
+      reply,
+      conversationId: persistentConversationId || null,
+      memoryActive: Boolean(accessToken && persistentConversationId),
     });
   } catch (error) {
     console.error("Chat route error:", error);
 
     return NextResponse.json(
       { error: "Something went wrong while generating the reply." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

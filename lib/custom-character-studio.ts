@@ -654,7 +654,7 @@ function buildEngineSystemPrompt(
     "IDENTITY CORE",
     `Name: ${clean(form.name) || "Unnamed character"}`,
     `Archetype: ${archetypeLabel}`,
-    `Age profile: ${clean(form.age) || "mid-20s"}`,
+    `Age profile: ${clean(form.age) || "25"}`,
     `Region / aesthetic influence: ${clean(form.region) || "global / unspecified"}`,
     `Presentation: ${form.genderPresentation}`,
     "",
@@ -718,7 +718,7 @@ function buildMemorySeedPayload(
   return {
     identity: [
       `Name: ${clean(form.name) || "Unnamed character"}`,
-      `Age profile: ${clean(form.age) || "mid-20s"}`,
+      `Age profile: ${clean(form.age) || "25"}`,
       `Region influence: ${clean(form.region) || "global / unspecified"}`,
       `Archetype: ${formatArchetypeLabel(form.archetype)}`,
       `Presentation: ${form.genderPresentation}`,
@@ -752,10 +752,8 @@ function buildScenarioSummary(scene: SceneProfile): string {
 function buildBuilderInput(form: StudioFormState): CharacterBuilderInput {
   const scores = buildScores(form);
   const tags = parseTags(form.tags);
-
   const regionTag = clean(form.region);
   const ageTag = clean(form.age);
-
   const scenario = buildScenario(form);
 
   const customNotes = [
@@ -773,7 +771,7 @@ function buildBuilderInput(form: StudioFormState): CharacterBuilderInput {
     name: clean(form.name),
     archetype: form.archetype,
     genderPresentation: form.genderPresentation,
-    ageVibe: ageTag || "mid-20s",
+    ageVibe: ageTag || "25",
     backgroundVibe: buildBackgroundVibe(form),
     playful: scores.playful,
     romantic: scores.romantic,
@@ -967,7 +965,7 @@ export function getEnginePromptFromPayload(
 export function defaultStudioForm(): StudioFormState {
   return {
     name: "",
-    age: "mid-20s",
+    age: "25",
     region: "",
     archetype: "best-friend-lover",
     genderPresentation: "feminine",

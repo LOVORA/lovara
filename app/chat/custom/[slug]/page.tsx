@@ -19,6 +19,7 @@ import {
   getIdentitySummary,
   getVisibilityFromPayload,
 } from "@/lib/custom-character-studio";
+import { supabase } from "@/lib/supabase";
 
 const AuthGuard = dynamic(() => import("@/components/auth/auth-guard"), {
   ssr: false,
@@ -39,6 +40,7 @@ type BannerState =
   | null;
 
 type InsightTab = "scene" | "identity" | "engine";
+type SessionState = "fresh" | "active";
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -73,6 +75,36 @@ function formatRelativeTime(value: string) {
 
   const diffDays = Math.round(diffHours / 24);
   return `${diffDays}d ago`;
+}
+
+function getSessionState(messages: ChatMessage[]): SessionState {
+  const nonGreetingMessages = messages.filter((message, index) => {
+    if (index === 0 && message.role === "assistant") return false;
+    return true;
+  });
+
+  return nonGreetingMessages.length === 0 ? "fresh" : "active";
+}
+
+function StatusBadge({
+  label,
+  tone = "neutral",
+}: {
+  label: string;
+  tone?: "neutral" | "success" | "warm";
+}) {
+  return (
+    <span
+      className={cn(
+        "rounded-full border px-3 py-1 text-xs",
+        tone === "success" && "border-emerald-400/20 bg-emerald-400/10 text-emerald-100",
+        tone === "warm" && "border-amber-400/20 bg-amber-400/10 text-amber-100",
+        tone === "neutral" && "border-white/10 bg-white/5 text-white/70",
+      )}
+    >
+      {label}
+    </span>
+  );
 }
 
 function MiniStat({ label, value }: { label: string; value?: string }) {
@@ -236,6 +268,7 @@ export default function CustomCharacterChatPage() {
   const [resetting, setResetting] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
   const [activeTab, setActiveTab] = useState<InsightTab>("scene");
+  const [justReset, setJustReset] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const identitySummary = useMemo(() => {
@@ -246,6 +279,8 @@ export default function CustomCharacterChatPage() {
         : {};
     return getIdentitySummary(payload);
   }, [character]);
+
+  const sessionState = useMemo(() => getSessionState(messages), [messages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -266,6 +301,7 @@ export default function CustomCharacterChatPage() {
 
       setLoading(true);
       setBanner(null);
+      setJustReset(false);
 
       try {
         const loadedCharacter = await getMyCustomCharacterBySlug(slug);
@@ -325,6 +361,7 @@ export default function CustomCharacterChatPage() {
 
     setSending(true);
     setBanner(null);
+    setJustReset(false);
 
     const optimisticUserMessage: ChatMessage = {
       id: `temp-user-${Date.now()}`,
@@ -345,12 +382,20 @@ export default function CustomCharacterChatPage() {
         content: message.content,
       }));
 
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token ?? "";
+
       const response = await fetch("/api/chat/custom", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          conversationId: conversation.id,
+          accessToken,
           character: {
             id: character.id,
             slug: character.slug,
@@ -387,7 +432,6 @@ export default function CustomCharacterChatPage() {
         throw new Error(data?.error || "Could not generate reply.");
       }
 
-      await insertConversationMessage(conversation.id, "assistant", data.reply);
       await refreshMessages(conversation.id);
     } catch (error) {
       setMessages((current) =>
@@ -414,10 +458,12 @@ export default function CustomCharacterChatPage() {
         conversation.id,
         character.greeting,
       );
+
       setMessages(nextMessages.map(mapDbMessage));
+      setJustReset(true);
       setBanner({
         type: "success",
-        message: "Conversation reset successfully.",
+        message: "Reset completed. This chat is fresh again.",
       });
     } catch (error) {
       const message =
@@ -491,6 +537,15 @@ export default function CustomCharacterChatPage() {
                   </div>
                 ) : null}
 
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <StatusBadge label="Private chat saved" />
+                  <StatusBadge
+                    label={sessionState === "fresh" ? "Fresh chat" : "Memory active"}
+                    tone={sessionState === "fresh" ? "warm" : "success"}
+                  />
+                  {justReset ? <StatusBadge label="Reset completed" tone="success" /> : null}
+                </div>
+
                 <div className="mt-6 flex flex-wrap gap-3">
                   <Link
                     href="/my-characters"
@@ -546,7 +601,7 @@ export default function CustomCharacterChatPage() {
                           : "border-white/10 bg-black/25",
                       )}
                     >
-                      <div className="text-sm whitespace-pre-wrap leading-7 text-white/85">
+                      <div className="whitespace-pre-wrap text-sm leading-7 text-white/85">
                         {message.content}
                       </div>
                       <div className="mt-2 text-xs text-white/35">

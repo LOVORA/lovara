@@ -104,8 +104,8 @@ function normalizeTags(tags: string[]): string[] {
       tags
         .map((tag) => clean(tag))
         .filter(Boolean)
-        .slice(0, 16)
-    )
+        .slice(0, 16),
+    ),
   );
 }
 
@@ -176,7 +176,7 @@ function toScenario(value: Json | null | undefined): CharacterScenario {
 }
 
 function toTraitBadges(
-  value: Json | null | undefined
+  value: Json | null | undefined,
 ): Array<{ label: string; tone?: string }> {
   if (!Array.isArray(value)) {
     return [];
@@ -193,9 +193,7 @@ function toTraitBadges(
 
       return tone ? { label, tone } : { label };
     })
-    .filter(
-      (item): item is { label: string; tone?: string } => item !== null
-    );
+    .filter((item): item is { label: string; tone?: string } => item !== null);
 }
 
 function mapCharacterRow(row: CustomCharacterRow): DbCustomCharacter {
@@ -373,7 +371,7 @@ export async function listMyCustomCharacters(): Promise<DbCustomCharacter[]> {
 }
 
 export async function getMyCustomCharacterBySlug(
-  slug: string
+  slug: string,
 ): Promise<DbCustomCharacter | null> {
   const user = await requireUser();
 
@@ -392,7 +390,7 @@ export async function getMyCustomCharacterBySlug(
 }
 
 export async function createMyCustomCharacter(
-  input: CharacterDraftInput
+  input: CharacterDraftInput,
 ): Promise<DbCustomCharacter> {
   const user = await requireUser();
   const slug = await makeUniqueSlug(user.id, input.name);
@@ -434,7 +432,7 @@ export async function createMyCustomCharacter(
 
 export async function updateMyCustomCharacter(
   id: string,
-  input: CharacterDraftInput
+  input: CharacterDraftInput,
 ): Promise<DbCustomCharacter> {
   const user = await requireUser();
 
@@ -458,8 +456,7 @@ export async function updateMyCustomCharacter(
     nextSlug = await makeUniqueSlug(user.id, input.name);
   }
 
-  const currentMetadata =
-    isPlainObject(current.metadata) ? current.metadata : {};
+  const currentMetadata = isPlainObject(current.metadata) ? current.metadata : {};
 
   const updatePayload: CustomCharacterUpdate = {
     slug: nextSlug,
@@ -563,7 +560,7 @@ export async function getOrCreateConversationForCharacter(
 }
 
 export async function listConversationMessages(
-  conversationId: string
+  conversationId: string,
 ): Promise<DbCustomMessage[]> {
   const user = await requireUser();
 
@@ -584,7 +581,7 @@ export async function listConversationMessages(
 export async function insertConversationMessage(
   conversationId: string,
   role: "user" | "assistant",
-  content: string
+  content: string,
 ): Promise<DbCustomMessage> {
   const user = await requireUser();
 
@@ -608,7 +605,7 @@ export async function insertConversationMessage(
 
 export async function ensureGreetingMessage(
   conversationId: string,
-  greeting: string
+  greeting: string,
 ): Promise<DbCustomMessage[]> {
   const existing = await listConversationMessages(conversationId);
 
@@ -622,20 +619,43 @@ export async function ensureGreetingMessage(
 
 export async function resetConversation(
   conversationId: string,
-  greeting: string
+  greeting: string,
 ): Promise<DbCustomMessage[]> {
   const user = await requireUser();
 
-  const { error: deleteError } = await supabase
+  const { error: deleteMessagesError } = await supabase
     .from("custom_messages")
     .delete()
     .eq("user_id", user.id)
     .eq("conversation_id", conversationId);
 
-  if (deleteError) {
-    throw new Error(deleteError.message);
+  if (deleteMessagesError) {
+    throw new Error(deleteMessagesError.message);
+  }
+
+  const { error: deleteMemoryError } = await supabase
+    .from("conversation_memory_state")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("conversation_id", conversationId);
+
+  if (deleteMemoryError) {
+    throw new Error(deleteMemoryError.message);
   }
 
   await insertConversationMessage(conversationId, "assistant", greeting);
+
+  const { error: updateConversationError } = await supabase
+    .from("custom_conversations")
+    .update({
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", conversationId)
+    .eq("user_id", user.id);
+
+  if (updateConversationError) {
+    throw new Error(updateConversationError.message);
+  }
+
   return listConversationMessages(conversationId);
 }

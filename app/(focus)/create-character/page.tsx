@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useState,
+  type ReactNode,
+  type FormEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
@@ -29,6 +34,14 @@ type BannerState =
   | { type: "success"; message: string }
   | { type: "error"; message: string }
   | null;
+
+type StudioStep =
+  | "identity"
+  | "personality"
+  | "scenario"
+  | "advanced"
+  | "visual"
+  | "publish";
 
 const REGION_OPTIONS = [
   "Latin",
@@ -124,11 +137,7 @@ const CHAT_MODE_OPTIONS = [
   "slow-burn",
 ] as const;
 
-const INITIATIVE_OPTIONS = [
-  "reactive",
-  "balanced",
-  "proactive",
-] as const;
+const INITIATIVE_OPTIONS = ["reactive", "balanced", "proactive"] as const;
 
 const AFFECTION_STYLE_OPTIONS = [
   "verbal",
@@ -487,6 +496,34 @@ function calculateReadinessScore(
   return Math.min(100, score);
 }
 
+function getStepCompletion(
+  step: StudioStep,
+  form: StudioFormState,
+  readinessScore: number,
+  isQuickMode: boolean,
+) {
+  switch (step) {
+    case "identity":
+      return Boolean(form.name.trim() && form.age.trim() && form.region.trim());
+    case "personality":
+      return form.coreVibes.length >= 2;
+    case "scenario":
+      return Boolean(
+        form.setting.trim() &&
+          form.relationshipToUser.trim() &&
+          form.sceneGoal.trim(),
+      );
+    case "advanced":
+      return isQuickMode ? true : readinessScore >= 60;
+    case "visual":
+      return isQuickMode ? true : Boolean(form.customNotes.trim());
+    case "publish":
+      return readinessScore >= (isQuickMode ? 45 : 70);
+    default:
+      return false;
+  }
+}
+
 function Section({
   title,
   description,
@@ -496,7 +533,7 @@ function Section({
   title: string;
   description?: string;
   accent?: "default" | "fuchsia" | "cyan";
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const accentClass =
     accent === "fuchsia"
@@ -586,7 +623,7 @@ function SegmentButton({
 }: {
   active: boolean;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <button
@@ -627,9 +664,7 @@ function OptionCard({
       )}
     >
       <div className="text-sm font-medium text-white">{title}</div>
-      <div className="mt-2 text-sm leading-6 text-white/60">
-        {description}
-      </div>
+      <div className="mt-2 text-sm leading-6 text-white/60">{description}</div>
     </button>
   );
 }
@@ -657,9 +692,7 @@ function VibeChip({
       )}
     >
       <div className="text-sm font-medium text-white">{label}</div>
-      <div className="mt-1 text-xs leading-5 text-white/55">
-        {description}
-      </div>
+      <div className="mt-1 text-xs leading-5 text-white/55">{description}</div>
     </button>
   );
 }
@@ -735,9 +768,7 @@ function PresetCard({
           Preset
         </div>
       </div>
-      <div className="mt-2 text-sm leading-6 text-white/60">
-        {description}
-      </div>
+      <div className="mt-2 text-sm leading-6 text-white/60">{description}</div>
       <div className="mt-4 text-xs uppercase tracking-[0.18em] text-fuchsia-200/80">
         Apply preset
       </div>
@@ -799,11 +830,7 @@ function SelectField<T extends string>({
         className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition focus:border-fuchsia-400/30 focus:bg-black/40"
       >
         {options.map((option) => (
-          <option
-            key={option.value}
-            value={option.value}
-            className="bg-[#0d1020]"
-          >
+          <option key={option.value} value={option.value} className="bg-[#0d1020]">
             {option.label}
           </option>
         ))}
@@ -857,12 +884,54 @@ function TopNavLink({
   );
 }
 
+function StepPill({
+  title,
+  active,
+  complete,
+  onClick,
+}: {
+  title: string;
+  active: boolean;
+  complete: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3 py-2 text-xs transition",
+        active
+          ? "border-fuchsia-400/35 bg-fuchsia-400/10 text-fuchsia-100"
+          : complete
+            ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
+            : "border-white/10 bg-white/5 text-white/65 hover:border-white/20 hover:bg-white/10",
+      )}
+    >
+      {title}
+    </button>
+  );
+}
+
+function DividerLabel({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-px flex-1 bg-white/10" />
+      <div className="text-[11px] uppercase tracking-[0.22em] text-white/35">
+        {label}
+      </div>
+      <div className="h-px flex-1 bg-white/10" />
+    </div>
+  );
+}
+
 export default function CreateCharacterPage() {
   const router = useRouter();
   const [form, setForm] = useState<StudioFormState>(defaultStudioForm());
   const [saving, setSaving] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
   const [dynamism, setDynamism] = useState(68);
+  const [activeStep, setActiveStep] = useState<StudioStep>("identity");
 
   const isQuickMode = form.mode === "quick";
 
@@ -916,17 +985,11 @@ export default function CreateCharacterPage() {
     [form.customNotes],
   );
   const keyMemories = useMemo(() => getStructured("Key memories"), [form.customNotes]);
-  const exampleMessage = useMemo(
-    () => getStructured("Example message"),
-    [form.customNotes],
-  );
+  const exampleMessage = useMemo(() => getStructured("Example message"), [form.customNotes]);
   const userRole = useMemo(() => getStructured("User role"), [form.customNotes]);
   const nickname = useMemo(() => getStructured("Nickname for user"), [form.customNotes]);
   const boundaries = useMemo(() => getStructured("Boundaries"), [form.customNotes]);
-  const greetingStyle = useMemo(
-    () => getStructured("Greeting style"),
-    [form.customNotes],
-  );
+  const greetingStyle = useMemo(() => getStructured("Greeting style"), [form.customNotes]);
   const chatMode = useMemo(() => getStructured("Chat mode"), [form.customNotes]);
   const avatarStyle = useMemo(() => getStructured("Avatar style"), [form.customNotes]);
   const hair = useMemo(() => getStructured("Hair"), [form.customNotes]);
@@ -935,40 +998,25 @@ export default function CreateCharacterPage() {
   const palette = useMemo(() => getStructured("Palette"), [form.customNotes]);
   const camera = useMemo(() => getStructured("Camera"), [form.customNotes]);
   const photoPack = useMemo(() => getStructured("Photo pack"), [form.customNotes]);
-  const imagePrompt = useMemo(
-    () => getStructured("Image prompt"),
-    [form.customNotes],
-  );
+  const imagePrompt = useMemo(() => getStructured("Image prompt"), [form.customNotes]);
   const relationshipStage = useMemo(
     () => getStructured("Relationship stage"),
     [form.customNotes],
   );
   const jealousy = useMemo(() => getStructured("Jealousy"), [form.customNotes]);
   const attachment = useMemo(() => getStructured("Attachment"), [form.customNotes]);
-  const protectiveness = useMemo(
-    () => getStructured("Protectiveness"),
-    [form.customNotes],
-  );
+  const protectiveness = useMemo(() => getStructured("Protectiveness"), [form.customNotes]);
   const conversationInitiative = useMemo(
     () => getStructured("Conversation initiative"),
     [form.customNotes],
   );
-  const affectionStyle = useMemo(
-    () => getStructured("Affection style"),
-    [form.customNotes],
-  );
-  const conflictStyle = useMemo(
-    () => getStructured("Conflict style"),
-    [form.customNotes],
-  );
+  const affectionStyle = useMemo(() => getStructured("Affection style"), [form.customNotes]);
+  const conflictStyle = useMemo(() => getStructured("Conflict style"), [form.customNotes]);
   const emotionalAvailability = useMemo(
     () => getStructured("Emotional availability"),
     [form.customNotes],
   );
-  const messageFormat = useMemo(
-    () => getStructured("Message format"),
-    [form.customNotes],
-  );
+  const messageFormat = useMemo(() => getStructured("Message format"), [form.customNotes]);
   const linguisticFlavor = useMemo(
     () => getStructured("Linguistic flavor"),
     [form.customNotes],
@@ -977,22 +1025,10 @@ export default function CreateCharacterPage() {
     () => getStructured("Chemistry template"),
     [form.customNotes],
   );
-  const currentEnergy = useMemo(
-    () => getStructured("Current energy"),
-    [form.customNotes],
-  );
-  const publicTagline = useMemo(
-    () => getStructured("Public tagline"),
-    [form.customNotes],
-  );
-  const publicTeaser = useMemo(
-    () => getStructured("Public teaser"),
-    [form.customNotes],
-  );
-  const publicTags = useMemo(
-    () => getStructured("Public tags"),
-    [form.customNotes],
-  );
+  const currentEnergy = useMemo(() => getStructured("Current energy"), [form.customNotes]);
+  const publicTagline = useMemo(() => getStructured("Public tagline"), [form.customNotes]);
+  const publicTeaser = useMemo(() => getStructured("Public teaser"), [form.customNotes]);
+  const publicTags = useMemo(() => getStructured("Public tags"), [form.customNotes]);
 
   const bodyNotes = useMemo(() => {
     let result = form.customNotes;
@@ -1111,7 +1147,7 @@ export default function CreateCharacterPage() {
       "Example message": next["Example message"] ?? exampleMessage,
       "User role": next["User role"] ?? userRole,
       "Nickname for user": next["Nickname for user"] ?? nickname,
-      "Boundaries": next["Boundaries"] ?? boundaries,
+      Boundaries: next["Boundaries"] ?? boundaries,
       "Greeting style": next["Greeting style"] ?? greetingStyle,
       "Chat mode": next["Chat mode"] ?? chatMode,
       "Avatar style": next["Avatar style"] ?? avatarStyle,
@@ -1289,6 +1325,44 @@ export default function CreateCharacterPage() {
     return `${name} keeps their composure perfectly intact, but the attention on ${nick} is unmistakable. “If you’re going to stay, try not to waste my patience.”`;
   }, [form.name, nickname]);
 
+  const validationIssues = useMemo(() => {
+    const issues: string[] = [];
+    if (!form.name.trim()) issues.push("Character name is missing");
+    if (!form.age.trim()) issues.push("Age is missing");
+    if (!form.region.trim()) issues.push("Region is missing");
+    if (form.coreVibes.length < 2) issues.push("Pick at least 2 core vibes");
+    if (!form.setting.trim()) issues.push("Setting is missing");
+    if (!form.relationshipToUser.trim())
+      issues.push("Relationship to user is missing");
+    if (!form.sceneGoal.trim()) issues.push("Scene goal is missing");
+    return issues;
+  }, [form]);
+
+  const allSteps: Array<{ id: StudioStep; label: string }> = [
+    { id: "identity", label: "Identity" },
+    { id: "personality", label: "Personality" },
+    { id: "scenario", label: "Scenario" },
+    { id: "advanced", label: "Advanced" },
+    { id: "visual", label: "Visual" },
+    { id: "publish", label: "Publish" },
+  ];
+
+  const visibleSteps = useMemo(() => {
+    if (isQuickMode) {
+      return allSteps.filter((step) =>
+        ["identity", "personality", "scenario", "publish"].includes(step.id),
+      );
+    }
+    return allSteps;
+  }, [isQuickMode]);
+
+  const activeStepIndex = visibleSteps.findIndex((step) => step.id === activeStep);
+  const previousStep = activeStepIndex > 0 ? visibleSteps[activeStepIndex - 1] : null;
+  const nextStep =
+    activeStepIndex >= 0 && activeStepIndex < visibleSteps.length - 1
+      ? visibleSteps[activeStepIndex + 1]
+      : null;
+
   function setField<K extends keyof StudioFormState>(
     key: K,
     value: StudioFormState[K],
@@ -1298,6 +1372,13 @@ export default function CreateCharacterPage() {
 
   function setAgeFromSlider(value: number) {
     setField("age", String(value));
+  }
+
+  function resetStudio() {
+    setForm(defaultStudioForm());
+    setBanner(null);
+    setDynamism(68);
+    setActiveStep("identity");
   }
 
   function applyQuickStartPreset(
@@ -1391,22 +1472,59 @@ export default function CreateCharacterPage() {
     }));
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function goToStep(step: StudioStep) {
+    setActiveStep(step);
+    setBanner(null);
+  }
+
+  function goNextStep() {
+    if (nextStep) {
+      setActiveStep(nextStep.id);
+      setBanner(null);
+    }
+  }
+
+  function goPreviousStep() {
+    if (previousStep) {
+      setActiveStep(previousStep.id);
+      setBanner(null);
+    }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) return;
 
     if (!form.name.trim()) {
       setBanner({ type: "error", message: "Character name is required." });
+      setActiveStep("identity");
       return;
     }
 
     if (!form.age.trim()) {
       setBanner({ type: "error", message: "Age field is required." });
+      setActiveStep("identity");
       return;
     }
 
     if (!form.region.trim()) {
       setBanner({ type: "error", message: "Region field is required." });
+      setActiveStep("identity");
+      return;
+    }
+
+    if (form.coreVibes.length < 2) {
+      setBanner({ type: "error", message: "Pick at least 2 core vibes." });
+      setActiveStep("personality");
+      return;
+    }
+
+    if (!form.setting.trim() || !form.relationshipToUser.trim() || !form.sceneGoal.trim()) {
+      setBanner({
+        type: "error",
+        message: "Setting, relationship, and scene goal are required.",
+      });
+      setActiveStep("scenario");
       return;
     }
 
@@ -1443,6 +1561,13 @@ export default function CreateCharacterPage() {
     form.visibility === "public" ? "public" : "private",
   ].filter(Boolean);
 
+  const activeStepComplete = getStepCompletion(
+    activeStep,
+    form,
+    readinessScore,
+    isQuickMode,
+  );
+
   return (
     <AuthGuard>
       <main className="min-h-screen bg-[#050816] text-white">
@@ -1463,13 +1588,12 @@ export default function CreateCharacterPage() {
               >
                 Random preset
               </button>
-
               <button
                 type="button"
-                onClick={() => router.push("/my-characters")}
+                onClick={resetStudio}
                 className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/75 transition hover:border-white/20 hover:bg-white/10"
               >
-                Dashboard
+                Reset studio
               </button>
             </div>
           </div>
@@ -1531,6 +1655,46 @@ export default function CreateCharacterPage() {
             </div>
           </div>
 
+          <div className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+            <div className="flex flex-wrap gap-2">
+              {visibleSteps.map((step) => (
+                <StepPill
+                  key={step.id}
+                  title={step.label}
+                  active={activeStep === step.id}
+                  complete={getStepCompletion(step.id, form, readinessScore, isQuickMode)}
+                  onClick={() => goToStep(step.id)}
+                />
+              ))}
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-white/60">
+                Current section: <span className="text-white/85">{activeStep}</span> •{" "}
+                {activeStepComplete ? "ready" : "still needs input"}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={goPreviousStep}
+                  disabled={!previousStep}
+                  className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={goNextStep}
+                  disabled={!nextStep}
+                  className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="mt-8 grid gap-8 lg:grid-cols-[1.08fr_0.92fr]">
             <form onSubmit={handleSubmit} className="space-y-6">
               {banner ? (
@@ -1580,570 +1744,697 @@ export default function CreateCharacterPage() {
                 <div className="flex flex-wrap gap-3">
                   <SegmentButton
                     active={form.mode === "quick"}
-                    onClick={() => setField("mode", "quick")}
+                    onClick={() => {
+                      setField("mode", "quick");
+                      if (!["identity", "personality", "scenario", "publish"].includes(activeStep)) {
+                        setActiveStep("identity");
+                      }
+                    }}
                   >
                     Quick Mode
                   </SegmentButton>
                   <SegmentButton
                     active={form.mode === "deep"}
-                    onClick={() => setField("mode", "deep")}
+                    onClick={() => {
+                      setField("mode", "deep");
+                    }}
                   >
                     Deep Studio
                   </SegmentButton>
                 </div>
               </Section>
 
-              <Section
-                title="Identity"
-                description="Core character anchors."
-                accent="cyan"
-              >
-                <div className="grid gap-4 md:grid-cols-2">
-                  <InputField
-                    label="Character name"
-                    value={form.name}
-                    onChange={(value) => setField("name", value)}
-                    placeholder="Ayla"
-                    required
-                  />
-                  <SelectField
-                    label="Gender presentation"
-                    value={form.genderPresentation}
-                    onChange={(value) => setField("genderPresentation", value)}
-                    options={GENDER_OPTIONS}
-                  />
-                </div>
-
-                <div className="mt-5 rounded-[24px] border border-white/10 bg-black/20 p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm text-white/80">Age</div>
-                      <div className="mt-1 text-xs leading-6 text-white/50">
-                        Pick an actual age between 18 and 55.
-                      </div>
-                    </div>
-                    <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-100">
-                      {ageValue} • {ageToneLabel(ageValue)}
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <input
-                      type="range"
-                      min={18}
-                      max={55}
-                      step={1}
-                      value={ageValue}
-                      onChange={(event) => setAgeFromSlider(Number(event.target.value))}
-                      className="w-full accent-cyan-400"
+              {activeStep === "identity" && (
+                <Section
+                  title="Identity"
+                  description="Core character anchors."
+                  accent="cyan"
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <InputField
+                      label="Character name"
+                      value={form.name}
+                      onChange={(value) => setField("name", value)}
+                      placeholder="Ayla"
+                      required
                     />
-                    <div className="mt-2 flex items-center justify-between text-xs text-white/35">
-                      <span>18</span>
-                      <span>25</span>
-                      <span>35</span>
-                      <span>45</span>
-                      <span>55</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5">
-                  <div className="mb-3 text-sm text-white/75">Region</div>
-                  <div className="flex flex-wrap gap-2">
-                    {REGION_OPTIONS.map((option) => (
-                      <RegionChip
-                        key={option}
-                        label={option}
-                        active={selectedRegion === option}
-                        onClick={() => handleRegionSelect(option)}
-                      />
-                    ))}
-                    <RegionChip
-                      label="Custom"
-                      active={!selectedRegion && !!customRegion}
-                      onClick={() => handleRegionSelect("")}
+                    <SelectField
+                      label="Gender presentation"
+                      value={form.genderPresentation}
+                      onChange={(value) => setField("genderPresentation", value)}
+                      options={GENDER_OPTIONS}
                     />
                   </div>
 
-                  {!selectedRegion ? (
-                    <div className="mt-4">
-                      <InputField
-                        label="Custom region"
-                        value={customRegion}
-                        onChange={handleCustomRegionChange}
-                        placeholder="Balkan / Levantine / Iberian / etc."
-                        required
-                      />
-                    </div>
-                  ) : null}
-
-                  {!isQuickMode ? (
-                    <div className="mt-4">
-                      <InputField
-                        label="Region note (optional)"
-                        value={regionNote}
-                        onChange={(value) => rebuildCustomNotes({ "Region note": value })}
-                        placeholder="coastal Brazilian, urban Turkish, old-money Roman, etc."
-                      />
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="mt-5">
-                  <div className="mb-3 text-sm text-white/75">Archetype</div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {ARCHETYPE_OPTIONS.map((option) => (
-                      <OptionCard
-                        key={option.value}
-                        active={form.archetype === option.value}
-                        title={option.label}
-                        description={option.description}
-                        onClick={() => setField("archetype", option.value)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </Section>
-
-              {isQuickMode ? (
-                <>
-                  <Section
-                    title="Hobbies and interests"
-                    description="Pick a few things that make the character feel alive."
-                  >
-                    <div className="flex flex-wrap gap-2">
-                      {INTEREST_ANCHOR_OPTIONS.map((option) => (
-                        <MiniChip
-                          key={option}
-                          label={option}
-                          active={selectedInterests.includes(option)}
-                          onClick={() => toggleInterest(option)}
-                        />
-                      ))}
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Basic personality"
-                    description="Simple controls for a fast but strong personality setup."
-                  >
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {CORE_VIBE_OPTIONS.map((option) => (
-                        <VibeChip
-                          key={option.id}
-                          active={form.coreVibes.includes(option.id)}
-                          label={option.label}
-                          description={option.description}
-                          onClick={() => toggleCoreVibe(option.id)}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="mt-5 grid gap-4 md:grid-cols-2">
-                      <SliderField
-                        label="Warmth"
-                        value={form.warmth}
-                        onChange={(value) => setField("warmth", value)}
-                      />
-                      <SliderField
-                        label="Assertiveness"
-                        value={form.assertiveness}
-                        onChange={(value) => setField("assertiveness", value)}
-                      />
-                      <SliderField
-                        label="Mystery"
-                        value={form.mystery}
-                        onChange={(value) => setField("mystery", value)}
-                      />
-                      <SliderField
-                        label="Playfulness"
-                        value={form.playfulness}
-                        onChange={(value) => setField("playfulness", value)}
-                      />
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Scenario"
-                    description="Keep it short and clear in Quick Mode."
-                    accent="fuchsia"
-                  >
-                    <div className="flex flex-wrap gap-2">
-                      {RELATIONSHIP_PRESETS.map((preset) => (
-                        <MiniChip
-                          key={preset}
-                          label={preset}
-                          active={form.relationshipToUser === preset}
-                          onClick={() => setField("relationshipToUser", preset)}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <InputField
-                        label="Setting"
-                        value={form.setting}
-                        onChange={(value) => setField("setting", value)}
-                        placeholder="late-night rooftop"
-                      />
-                      <InputField
-                        label="Relationship to user"
-                        value={form.relationshipToUser}
-                        onChange={(value) => setField("relationshipToUser", value)}
-                        placeholder="best friend with tension"
-                      />
-                      <InputField
-                        label="Scene goal"
-                        value={form.sceneGoal}
-                        onChange={(value) => setField("sceneGoal", value)}
-                        placeholder="build chemistry slowly"
-                      />
-                      <InputField
-                        label="Tone"
-                        value={form.tone}
-                        onChange={(value) => setField("tone", value)}
-                        placeholder="playful and intimate"
-                      />
-                    </div>
-                  </Section>
-                </>
-              ) : (
-                <>
-                  <Section
-                    title="Visual aura"
-                    description="Fantasy texture, vibe, and visual identity."
-                  >
-                    <div className="flex flex-wrap gap-2">
-                      {VISUAL_AURA_OPTIONS.map((option) => (
-                        <MiniChip
-                          key={option}
-                          label={option}
-                          active={visualNote === option}
-                          onClick={() =>
-                            rebuildCustomNotes({
-                              "Visual aura": visualNote === option ? "" : option,
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
-
-                    <div className="mt-4">
-                      <InputField
-                        label="Custom visual aura (optional)"
-                        value={visualNote}
-                        onChange={(value) => rebuildCustomNotes({ "Visual aura": value })}
-                        placeholder="sharp cheekbones, understated luxury, dangerous sleepy eyes, etc."
-                      />
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Relationship architecture"
-                    description="Controls the emotional baseline and how the bond behaves."
-                    accent="fuchsia"
-                  >
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <SelectField
-                        label="Relationship stage"
-                        value={
-                          (relationshipStage ||
-                            RELATIONSHIP_STAGE_OPTIONS[0]) as (typeof RELATIONSHIP_STAGE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Relationship stage": value })
-                        }
-                        options={RELATIONSHIP_STAGE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <SelectField
-                        label="Conversation initiative"
-                        value={
-                          (conversationInitiative ||
-                            INITIATIVE_OPTIONS[1]) as (typeof INITIATIVE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Conversation initiative": value })
-                        }
-                        options={INITIATIVE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <SelectField
-                        label="Affection style"
-                        value={
-                          (affectionStyle ||
-                            AFFECTION_STYLE_OPTIONS[0]) as (typeof AFFECTION_STYLE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Affection style": value })
-                        }
-                        options={AFFECTION_STYLE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <SelectField
-                        label="Conflict style"
-                        value={
-                          (conflictStyle ||
-                            CONFLICT_STYLE_OPTIONS[0]) as (typeof CONFLICT_STYLE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Conflict style": value })
-                        }
-                        options={CONFLICT_STYLE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <SelectField
-                        label="Emotional availability"
-                        value={
-                          (emotionalAvailability ||
-                            EMOTIONAL_AVAILABILITY_OPTIONS[1]) as (typeof EMOTIONAL_AVAILABILITY_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Emotional availability": value })
-                        }
-                        options={EMOTIONAL_AVAILABILITY_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <SelectField
-                        label="Chemistry template"
-                        value={
-                          (chemistryTemplate ||
-                            CHEMISTRY_TEMPLATE_OPTIONS[0]) as (typeof CHEMISTRY_TEMPLATE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Chemistry template": value })
-                        }
-                        options={CHEMISTRY_TEMPLATE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                    </div>
-
-                    <div className="mt-5 grid gap-4 md:grid-cols-3">
-                      <SliderField
-                        label="Jealousy"
-                        value={Number(jealousy || 42)}
-                        onChange={(value) =>
-                          rebuildCustomNotes({ Jealousy: String(value) })
-                        }
-                      />
-                      <SliderField
-                        label="Attachment"
-                        value={Number(attachment || 58)}
-                        onChange={(value) =>
-                          rebuildCustomNotes({ Attachment: String(value) })
-                        }
-                      />
-                      <SliderField
-                        label="Protectiveness"
-                        value={Number(protectiveness || 54)}
-                        onChange={(value) =>
-                          rebuildCustomNotes({ Protectiveness: String(value) })
-                        }
-                      />
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Interest anchors"
-                    description="Lifestyle signals that make the character feel more lived-in."
-                  >
-                    <div className="flex flex-wrap gap-2">
-                      {INTEREST_ANCHOR_OPTIONS.map((option) => (
-                        <MiniChip
-                          key={option}
-                          label={option}
-                          active={selectedInterests.includes(option)}
-                          onClick={() => toggleInterest(option)}
-                        />
-                      ))}
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Trait algorithm"
-                    description="Pick 2–4 strong vibes. The builder converts them into a deeper hidden prompt system."
-                  >
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {CORE_VIBE_OPTIONS.map((option) => (
-                        <VibeChip
-                          key={option.id}
-                          active={form.coreVibes.includes(option.id)}
-                          label={option.label}
-                          description={option.description}
-                          onClick={() => toggleCoreVibe(option.id)}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs leading-6 text-white/55">
-                      Current emotional blend: {dynamicSummary}
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Voice and behavior controls"
-                    description="These tune how the hidden engine expresses the character in chat."
-                  >
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <SelectField
-                        label="Reply length"
-                        value={form.replyLength}
-                        onChange={(value) => setField("replyLength", value)}
-                        options={REPLY_LENGTH_OPTIONS}
-                      />
-                      <SelectField
-                        label="Speech style"
-                        value={form.speechStyle}
-                        onChange={(value) => setField("speechStyle", value)}
-                        options={SPEECH_STYLE_OPTIONS}
-                      />
-                      <SelectField
-                        label="Relationship pace"
-                        value={form.relationshipPace}
-                        onChange={(value) => setField("relationshipPace", value)}
-                        options={RELATIONSHIP_PACE_OPTIONS}
-                      />
+                  <div className="mt-5 rounded-[24px] border border-white/10 bg-black/20 p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <div className="mb-2 text-sm text-white/75">Visibility</div>
-                        <div className="flex flex-wrap gap-3">
-                          <SegmentButton
-                            active={form.visibility === "private"}
-                            onClick={() => setField("visibility", "private")}
-                          >
-                            Private
-                          </SegmentButton>
-                          <SegmentButton
-                            active={form.visibility === "public"}
-                            onClick={() => setField("visibility", "public")}
-                          >
-                            Public
-                          </SegmentButton>
+                        <div className="text-sm text-white/80">Age</div>
+                        <div className="mt-1 text-xs leading-6 text-white/50">
+                          Pick an actual age between 18 and 55.
                         </div>
                       </div>
-                      <SelectField
-                        label="Message format"
-                        value={
-                          (messageFormat ||
-                            MESSAGE_FORMAT_OPTIONS[0]) as (typeof MESSAGE_FORMAT_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Message format": value })
-                        }
-                        options={MESSAGE_FORMAT_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
+                      <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-100">
+                        {ageValue} • {ageToneLabel(ageValue)}
+                      </div>
+                    </div>
+
+                    <div className="mt-4">
+                      <input
+                        type="range"
+                        min={18}
+                        max={55}
+                        step={1}
+                        value={ageValue}
+                        onChange={(event) => setAgeFromSlider(Number(event.target.value))}
+                        className="w-full accent-cyan-400"
                       />
-                      <SelectField
-                        label="Linguistic flavor"
-                        value={
-                          (linguisticFlavor ||
-                            LINGUISTIC_FLAVOR_OPTIONS[0]) as (typeof LINGUISTIC_FLAVOR_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Linguistic flavor": value })
-                        }
-                        options={LINGUISTIC_FLAVOR_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <SelectField
-                        label="Current energy"
-                        value={
-                          (currentEnergy ||
-                            CURRENT_ENERGY_OPTIONS[0]) as (typeof CURRENT_ENERGY_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Current energy": value })
-                        }
-                        options={CURRENT_ENERGY_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
+                      <div className="mt-2 flex items-center justify-between text-xs text-white/35">
+                        <span>18</span>
+                        <span>25</span>
+                        <span>35</span>
+                        <span>45</span>
+                        <span>55</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5">
+                    <div className="mb-3 text-sm text-white/75">Region</div>
+                    <div className="flex flex-wrap gap-2">
+                      {REGION_OPTIONS.map((option) => (
+                        <RegionChip
+                          key={option}
+                          label={option}
+                          active={selectedRegion === option}
+                          onClick={() => handleRegionSelect(option)}
+                        />
+                      ))}
+                      <RegionChip
+                        label="Custom"
+                        active={!selectedRegion && !!customRegion}
+                        onClick={() => handleRegionSelect("")}
                       />
                     </div>
 
-                    <div className="mt-5 grid gap-4 md:grid-cols-2">
-                      <SliderField
-                        label="Warmth"
-                        value={form.warmth}
-                        onChange={(value) => setField("warmth", value)}
-                      />
-                      <SliderField
-                        label="Assertiveness"
-                        value={form.assertiveness}
-                        onChange={(value) => setField("assertiveness", value)}
-                      />
-                      <SliderField
-                        label="Mystery"
-                        value={form.mystery}
-                        onChange={(value) => setField("mystery", value)}
-                      />
-                      <SliderField
-                        label="Playfulness"
-                        value={form.playfulness}
-                        onChange={(value) => setField("playfulness", value)}
-                      />
-                    </div>
+                    {!selectedRegion ? (
+                      <div className="mt-4">
+                        <InputField
+                          label="Custom region"
+                          value={customRegion}
+                          onChange={handleCustomRegionChange}
+                          placeholder="Balkan / Levantine / Iberian / etc."
+                          required
+                        />
+                      </div>
+                    ) : null}
 
-                    <div className="mt-5">
-                      <SliderField
-                        label="Dynamism"
-                        value={dynamism}
-                        onChange={(value) => {
-                          setDynamism(value);
-                          rebuildCustomNotes({ Dynamism: String(value) });
-                        }}
-                        min={0}
-                        max={100}
-                      />
-                    </div>
-                  </Section>
+                    {!isQuickMode ? (
+                      <div className="mt-4">
+                        <InputField
+                          label="Region note (optional)"
+                          value={regionNote}
+                          onChange={(value) => rebuildCustomNotes({ "Region note": value })}
+                          placeholder="coastal Brazilian, urban Turkish, old-money Roman, etc."
+                        />
+                      </div>
+                    ) : null}
+                  </div>
 
-                  <Section
-                    title="User persona framing"
-                    description="Who is the user in this character's emotional world?"
-                    accent="fuchsia"
-                  >
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <SelectField
-                        label="User role"
-                        value={
-                          (userRole ||
-                            USER_ROLE_OPTIONS[0]) as (typeof USER_ROLE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "User role": value })
-                        }
-                        options={USER_ROLE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <InputField
-                        label="Nickname for user (optional)"
-                        value={nickname}
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Nickname for user": value })
-                        }
-                        placeholder="love, trouble, beautiful, etc."
-                      />
+                  <div className="mt-5">
+                    <div className="mb-3 text-sm text-white/75">Archetype</div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {ARCHETYPE_OPTIONS.map((option) => (
+                        <OptionCard
+                          key={option.value}
+                          active={form.archetype === option.value}
+                          title={option.label}
+                          description={option.description}
+                          onClick={() => setField("archetype", option.value)}
+                        />
+                      ))}
                     </div>
-                  </Section>
+                  </div>
+                </Section>
+              )}
 
+              {activeStep === "personality" && (
+                <>
+                  {isQuickMode ? (
+                    <>
+                      <Section
+                        title="Hobbies and interests"
+                        description="Pick a few things that make the character feel alive."
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          {INTEREST_ANCHOR_OPTIONS.map((option) => (
+                            <MiniChip
+                              key={option}
+                              label={option}
+                              active={selectedInterests.includes(option)}
+                              onClick={() => toggleInterest(option)}
+                            />
+                          ))}
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Basic personality"
+                        description="Simple controls for a fast but strong personality setup."
+                      >
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {CORE_VIBE_OPTIONS.map((option) => (
+                            <VibeChip
+                              key={option.id}
+                              active={form.coreVibes.includes(option.id)}
+                              label={option.label}
+                              description={option.description}
+                              onClick={() => toggleCoreVibe(option.id)}
+                            />
+                          ))}
+                        </div>
+
+                        <div className="mt-5 grid gap-4 md:grid-cols-2">
+                          <SliderField
+                            label="Warmth"
+                            value={form.warmth}
+                            onChange={(value) => setField("warmth", value)}
+                          />
+                          <SliderField
+                            label="Assertiveness"
+                            value={form.assertiveness}
+                            onChange={(value) => setField("assertiveness", value)}
+                          />
+                          <SliderField
+                            label="Mystery"
+                            value={form.mystery}
+                            onChange={(value) => setField("mystery", value)}
+                          />
+                          <SliderField
+                            label="Playfulness"
+                            value={form.playfulness}
+                            onChange={(value) => setField("playfulness", value)}
+                          />
+                        </div>
+                      </Section>
+                    </>
+                  ) : (
+                    <>
+                      <Section
+                        title="Visual aura"
+                        description="Fantasy texture, vibe, and visual identity."
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          {VISUAL_AURA_OPTIONS.map((option) => (
+                            <MiniChip
+                              key={option}
+                              label={option}
+                              active={visualNote === option}
+                              onClick={() =>
+                                rebuildCustomNotes({
+                                  "Visual aura": visualNote === option ? "" : option,
+                                })
+                              }
+                            />
+                          ))}
+                        </div>
+
+                        <div className="mt-4">
+                          <InputField
+                            label="Custom visual aura (optional)"
+                            value={visualNote}
+                            onChange={(value) => rebuildCustomNotes({ "Visual aura": value })}
+                            placeholder="sharp cheekbones, understated luxury, dangerous sleepy eyes, etc."
+                          />
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Interest anchors"
+                        description="Lifestyle signals that make the character feel more lived-in."
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          {INTEREST_ANCHOR_OPTIONS.map((option) => (
+                            <MiniChip
+                              key={option}
+                              label={option}
+                              active={selectedInterests.includes(option)}
+                              onClick={() => toggleInterest(option)}
+                            />
+                          ))}
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Trait algorithm"
+                        description="Pick 2–4 strong vibes. The builder converts them into a deeper hidden prompt system."
+                      >
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {CORE_VIBE_OPTIONS.map((option) => (
+                            <VibeChip
+                              key={option.id}
+                              active={form.coreVibes.includes(option.id)}
+                              label={option.label}
+                              description={option.description}
+                              onClick={() => toggleCoreVibe(option.id)}
+                            />
+                          ))}
+                        </div>
+
+                        <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs leading-6 text-white/55">
+                          Current emotional blend: {dynamicSummary}
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Voice and behavior controls"
+                        description="These tune how the hidden engine expresses the character in chat."
+                      >
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <SelectField
+                            label="Reply length"
+                            value={form.replyLength}
+                            onChange={(value) => setField("replyLength", value)}
+                            options={REPLY_LENGTH_OPTIONS}
+                          />
+                          <SelectField
+                            label="Speech style"
+                            value={form.speechStyle}
+                            onChange={(value) => setField("speechStyle", value)}
+                            options={SPEECH_STYLE_OPTIONS}
+                          />
+                          <SelectField
+                            label="Relationship pace"
+                            value={form.relationshipPace}
+                            onChange={(value) => setField("relationshipPace", value)}
+                            options={RELATIONSHIP_PACE_OPTIONS}
+                          />
+                          <SelectField
+                            label="Message format"
+                            value={
+                              (messageFormat ||
+                                MESSAGE_FORMAT_OPTIONS[0]) as (typeof MESSAGE_FORMAT_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Message format": value })
+                            }
+                            options={MESSAGE_FORMAT_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <SelectField
+                            label="Linguistic flavor"
+                            value={
+                              (linguisticFlavor ||
+                                LINGUISTIC_FLAVOR_OPTIONS[0]) as (typeof LINGUISTIC_FLAVOR_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Linguistic flavor": value })
+                            }
+                            options={LINGUISTIC_FLAVOR_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <SelectField
+                            label="Current energy"
+                            value={
+                              (currentEnergy ||
+                                CURRENT_ENERGY_OPTIONS[0]) as (typeof CURRENT_ENERGY_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Current energy": value })
+                            }
+                            options={CURRENT_ENERGY_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                        </div>
+
+                        <div className="mt-5 grid gap-4 md:grid-cols-2">
+                          <SliderField
+                            label="Warmth"
+                            value={form.warmth}
+                            onChange={(value) => setField("warmth", value)}
+                          />
+                          <SliderField
+                            label="Assertiveness"
+                            value={form.assertiveness}
+                            onChange={(value) => setField("assertiveness", value)}
+                          />
+                          <SliderField
+                            label="Mystery"
+                            value={form.mystery}
+                            onChange={(value) => setField("mystery", value)}
+                          />
+                          <SliderField
+                            label="Playfulness"
+                            value={form.playfulness}
+                            onChange={(value) => setField("playfulness", value)}
+                          />
+                        </div>
+
+                        <div className="mt-5">
+                          <SliderField
+                            label="Dynamism"
+                            value={dynamism}
+                            onChange={(value) => {
+                              setDynamism(value);
+                              rebuildCustomNotes({ Dynamism: String(value) });
+                            }}
+                            min={0}
+                            max={100}
+                          />
+                        </div>
+                      </Section>
+                    </>
+                  )}
+                </>
+              )}
+
+              {activeStep === "scenario" && (
+                <>
+                  {isQuickMode ? (
+                    <Section
+                      title="Scenario"
+                      description="Keep it short and clear in Quick Mode."
+                      accent="fuchsia"
+                    >
+                      <div className="flex flex-wrap gap-2">
+                        {RELATIONSHIP_PRESETS.map((preset) => (
+                          <MiniChip
+                            key={preset}
+                            label={preset}
+                            active={form.relationshipToUser === preset}
+                            onClick={() => setField("relationshipToUser", preset)}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        <InputField
+                          label="Setting"
+                          value={form.setting}
+                          onChange={(value) => setField("setting", value)}
+                          placeholder="late-night rooftop"
+                        />
+                        <InputField
+                          label="Relationship to user"
+                          value={form.relationshipToUser}
+                          onChange={(value) => setField("relationshipToUser", value)}
+                          placeholder="best friend with tension"
+                        />
+                        <InputField
+                          label="Scene goal"
+                          value={form.sceneGoal}
+                          onChange={(value) => setField("sceneGoal", value)}
+                          placeholder="build chemistry slowly"
+                        />
+                        <InputField
+                          label="Tone"
+                          value={form.tone}
+                          onChange={(value) => setField("tone", value)}
+                          placeholder="playful and intimate"
+                        />
+                      </div>
+                    </Section>
+                  ) : (
+                    <>
+                      <Section
+                        title="Relationship architecture"
+                        description="Controls the emotional baseline and how the bond behaves."
+                        accent="fuchsia"
+                      >
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <SelectField
+                            label="Relationship stage"
+                            value={
+                              (relationshipStage ||
+                                RELATIONSHIP_STAGE_OPTIONS[0]) as (typeof RELATIONSHIP_STAGE_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Relationship stage": value })
+                            }
+                            options={RELATIONSHIP_STAGE_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <SelectField
+                            label="Conversation initiative"
+                            value={
+                              (conversationInitiative ||
+                                INITIATIVE_OPTIONS[1]) as (typeof INITIATIVE_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Conversation initiative": value })
+                            }
+                            options={INITIATIVE_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <SelectField
+                            label="Affection style"
+                            value={
+                              (affectionStyle ||
+                                AFFECTION_STYLE_OPTIONS[0]) as (typeof AFFECTION_STYLE_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Affection style": value })
+                            }
+                            options={AFFECTION_STYLE_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <SelectField
+                            label="Conflict style"
+                            value={
+                              (conflictStyle ||
+                                CONFLICT_STYLE_OPTIONS[0]) as (typeof CONFLICT_STYLE_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Conflict style": value })
+                            }
+                            options={CONFLICT_STYLE_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <SelectField
+                            label="Emotional availability"
+                            value={
+                              (emotionalAvailability ||
+                                EMOTIONAL_AVAILABILITY_OPTIONS[1]) as (typeof EMOTIONAL_AVAILABILITY_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Emotional availability": value })
+                            }
+                            options={EMOTIONAL_AVAILABILITY_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <SelectField
+                            label="Chemistry template"
+                            value={
+                              (chemistryTemplate ||
+                                CHEMISTRY_TEMPLATE_OPTIONS[0]) as (typeof CHEMISTRY_TEMPLATE_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Chemistry template": value })
+                            }
+                            options={CHEMISTRY_TEMPLATE_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                        </div>
+
+                        <div className="mt-5 grid gap-4 md:grid-cols-3">
+                          <SliderField
+                            label="Jealousy"
+                            value={Number(jealousy || 42)}
+                            onChange={(value) =>
+                              rebuildCustomNotes({ Jealousy: String(value) })
+                            }
+                          />
+                          <SliderField
+                            label="Attachment"
+                            value={Number(attachment || 58)}
+                            onChange={(value) =>
+                              rebuildCustomNotes({ Attachment: String(value) })
+                            }
+                          />
+                          <SliderField
+                            label="Protectiveness"
+                            value={Number(protectiveness || 54)}
+                            onChange={(value) =>
+                              rebuildCustomNotes({ Protectiveness: String(value) })
+                            }
+                          />
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="User persona framing"
+                        description="Who is the user in this character's emotional world?"
+                        accent="fuchsia"
+                      >
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <SelectField
+                            label="User role"
+                            value={
+                              (userRole ||
+                                USER_ROLE_OPTIONS[0]) as (typeof USER_ROLE_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "User role": value })
+                            }
+                            options={USER_ROLE_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <InputField
+                            label="Nickname for user (optional)"
+                            value={nickname}
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Nickname for user": value })
+                            }
+                            placeholder="love, trouble, beautiful, etc."
+                          />
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Greeting and mode"
+                        description="First impression and interaction frame."
+                        accent="cyan"
+                      >
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <SelectField
+                            label="Greeting style"
+                            value={
+                              (greetingStyle ||
+                                GREETING_STYLE_OPTIONS[0]) as (typeof GREETING_STYLE_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Greeting style": value })
+                            }
+                            options={GREETING_STYLE_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                          <SelectField
+                            label="Chat mode / flair"
+                            value={
+                              (chatMode ||
+                                CHAT_MODE_OPTIONS[0]) as (typeof CHAT_MODE_OPTIONS)[number]
+                            }
+                            onChange={(value) =>
+                              rebuildCustomNotes({ "Chat mode": value })
+                            }
+                            options={CHAT_MODE_OPTIONS.map((v) => ({
+                              value: v,
+                              label: v,
+                            }))}
+                          />
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Relationship setup"
+                        description="Fast ways to define the user-character dynamic."
+                        accent="fuchsia"
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          {RELATIONSHIP_PRESETS.map((preset) => (
+                            <MiniChip
+                              key={preset}
+                              label={preset}
+                              active={form.relationshipToUser === preset}
+                              onClick={() => setField("relationshipToUser", preset)}
+                            />
+                          ))}
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Scene accelerators"
+                        description="One-click scene foundations for stronger context."
+                      >
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {SCENE_PRESETS.map((preset) => (
+                            <button
+                              key={preset.title}
+                              type="button"
+                              onClick={() => applyScenePreset(preset)}
+                              className="rounded-[24px] border border-white/10 bg-black/25 p-4 text-left transition hover:border-cyan-400/25 hover:bg-black/35"
+                            >
+                              <div className="text-sm font-medium text-white">
+                                {preset.title}
+                              </div>
+                              <div className="mt-2 text-xs leading-6 text-white/55">
+                                {preset.setting}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Roleplay scenario"
+                        description="These become part of the saved character."
+                      >
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <InputField
+                            label="Setting"
+                            value={form.setting}
+                            onChange={(value) => setField("setting", value)}
+                            placeholder="late-night hospital shift"
+                          />
+                          <InputField
+                            label="Relationship to user"
+                            value={form.relationshipToUser}
+                            onChange={(value) => setField("relationshipToUser", value)}
+                            placeholder="emotionally guarded co-worker"
+                          />
+                          <InputField
+                            label="Scene goal"
+                            value={form.sceneGoal}
+                            onChange={(value) => setField("sceneGoal", value)}
+                            placeholder="build tension slowly without breaking composure"
+                          />
+                          <InputField
+                            label="Tone"
+                            value={form.tone}
+                            onChange={(value) => setField("tone", value)}
+                            placeholder="restrained, intimate, low-key"
+                          />
+                        </div>
+
+                        <div className="mt-4">
+                          <TextAreaField
+                            label="Opening state"
+                            value={form.openingState}
+                            onChange={(value) => setField("openingState", value)}
+                            placeholder="tired after a brutal shift, but unusually honest tonight"
+                            rows={4}
+                          />
+                        </div>
+                      </Section>
+                    </>
+                  )}
+                </>
+              )}
+
+              {!isQuickMode && activeStep === "advanced" && (
+                <>
                   <Section
                     title="Response control"
                     description="Directive, example style, and stable behavior shaping."
@@ -2179,43 +2470,6 @@ export default function CreateCharacterPage() {
                   </Section>
 
                   <Section
-                    title="Greeting and mode"
-                    description="First impression and interaction frame."
-                    accent="cyan"
-                  >
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <SelectField
-                        label="Greeting style"
-                        value={
-                          (greetingStyle ||
-                            GREETING_STYLE_OPTIONS[0]) as (typeof GREETING_STYLE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Greeting style": value })
-                        }
-                        options={GREETING_STYLE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <SelectField
-                        label="Chat mode / flair"
-                        value={
-                          (chatMode ||
-                            CHAT_MODE_OPTIONS[0]) as (typeof CHAT_MODE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Chat mode": value })
-                        }
-                        options={CHAT_MODE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                    </div>
-                  </Section>
-
-                  <Section
                     title="Boundaries and forbidden behaviors"
                     description="Guardrails so the character stays tasteful and coherent."
                   >
@@ -2228,210 +2482,6 @@ export default function CreateCharacterPage() {
                           onClick={() => toggleBoundary(option)}
                         />
                       ))}
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Visual lab prep"
-                    description="Prepares the character for future portraits, cards, and media generation."
-                    accent="cyan"
-                  >
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <SelectField
-                        label="Avatar style"
-                        value={
-                          (avatarStyle ||
-                            AVATAR_STYLE_OPTIONS[0]) as (typeof AVATAR_STYLE_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Avatar style": value })
-                        }
-                        options={AVATAR_STYLE_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                      <SelectField
-                        label="Hair"
-                        value={(hair || HAIR_OPTIONS[0]) as (typeof HAIR_OPTIONS)[number]}
-                        onChange={(value) => rebuildCustomNotes({ Hair: value })}
-                        options={HAIR_OPTIONS.map((v) => ({ value: v, label: v }))}
-                      />
-                      <SelectField
-                        label="Eyes"
-                        value={(eyes || EYE_OPTIONS[0]) as (typeof EYE_OPTIONS)[number]}
-                        onChange={(value) => rebuildCustomNotes({ Eyes: value })}
-                        options={EYE_OPTIONS.map((v) => ({ value: v, label: v }))}
-                      />
-                      <SelectField
-                        label="Outfit"
-                        value={
-                          (outfit ||
-                            OUTFIT_OPTIONS[0]) as (typeof OUTFIT_OPTIONS)[number]
-                        }
-                        onChange={(value) => rebuildCustomNotes({ Outfit: value })}
-                        options={OUTFIT_OPTIONS.map((v) => ({ value: v, label: v }))}
-                      />
-                      <SelectField
-                        label="Palette"
-                        value={
-                          (palette ||
-                            PALETTE_OPTIONS[0]) as (typeof PALETTE_OPTIONS)[number]
-                        }
-                        onChange={(value) => rebuildCustomNotes({ Palette: value })}
-                        options={PALETTE_OPTIONS.map((v) => ({ value: v, label: v }))}
-                      />
-                      <SelectField
-                        label="Camera framing"
-                        value={
-                          (camera ||
-                            CAMERA_OPTIONS[0]) as (typeof CAMERA_OPTIONS)[number]
-                        }
-                        onChange={(value) => rebuildCustomNotes({ Camera: value })}
-                        options={CAMERA_OPTIONS.map((v) => ({ value: v, label: v }))}
-                      />
-                      <SelectField
-                        label="Photo pack style"
-                        value={
-                          (photoPack ||
-                            PHOTO_PACK_OPTIONS[0]) as (typeof PHOTO_PACK_OPTIONS)[number]
-                        }
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Photo pack": value })
-                        }
-                        options={PHOTO_PACK_OPTIONS.map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                    </div>
-
-                    <div className="mt-4">
-                      <TextAreaField
-                        label="Image prompt prep"
-                        value={imagePrompt}
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Image prompt": value })
-                        }
-                        placeholder="cinematic luxury portrait, warm skin glow, rich contrast, subtle eye contact, premium fashion editorial lighting..."
-                        rows={4}
-                      />
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Public card setup"
-                    description="Controls how the character feels on public showcase pages."
-                    accent="fuchsia"
-                  >
-                    <div className="grid gap-4">
-                      <InputField
-                        label="Public tagline"
-                        value={publicTagline}
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Public tagline": value })
-                        }
-                        placeholder="Elegant, emotionally unreadable, impossible to forget."
-                      />
-                      <TextAreaField
-                        label="Public teaser"
-                        value={publicTeaser}
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Public teaser": value })
-                        }
-                        placeholder="A luxurious slow-burn character with controlled warmth, dangerous softness, and selective honesty."
-                        rows={3}
-                      />
-                      <InputField
-                        label="Public tags"
-                        value={publicTags}
-                        onChange={(value) =>
-                          rebuildCustomNotes({ "Public tags": value })
-                        }
-                        placeholder="slow burn, elegant, dangerous, luxury"
-                      />
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Relationship setup"
-                    description="Fast ways to define the user-character dynamic."
-                    accent="fuchsia"
-                  >
-                    <div className="flex flex-wrap gap-2">
-                      {RELATIONSHIP_PRESETS.map((preset) => (
-                        <MiniChip
-                          key={preset}
-                          label={preset}
-                          active={form.relationshipToUser === preset}
-                          onClick={() => setField("relationshipToUser", preset)}
-                        />
-                      ))}
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Scene accelerators"
-                    description="One-click scene foundations for stronger context."
-                  >
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {SCENE_PRESETS.map((preset) => (
-                        <button
-                          key={preset.title}
-                          type="button"
-                          onClick={() => applyScenePreset(preset)}
-                          className="rounded-[24px] border border-white/10 bg-black/25 p-4 text-left transition hover:border-cyan-400/25 hover:bg-black/35"
-                        >
-                          <div className="text-sm font-medium text-white">
-                            {preset.title}
-                          </div>
-                          <div className="mt-2 text-xs leading-6 text-white/55">
-                            {preset.setting}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Roleplay scenario"
-                    description="These become part of the saved character."
-                  >
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <InputField
-                        label="Setting"
-                        value={form.setting}
-                        onChange={(value) => setField("setting", value)}
-                        placeholder="late-night hospital shift"
-                      />
-                      <InputField
-                        label="Relationship to user"
-                        value={form.relationshipToUser}
-                        onChange={(value) => setField("relationshipToUser", value)}
-                        placeholder="emotionally guarded co-worker"
-                      />
-                      <InputField
-                        label="Scene goal"
-                        value={form.sceneGoal}
-                        onChange={(value) => setField("sceneGoal", value)}
-                        placeholder="build tension slowly without breaking composure"
-                      />
-                      <InputField
-                        label="Tone"
-                        value={form.tone}
-                        onChange={(value) => setField("tone", value)}
-                        placeholder="restrained, intimate, low-key"
-                      />
-                    </div>
-
-                    <div className="mt-4">
-                      <TextAreaField
-                        label="Opening state"
-                        value={form.openingState}
-                        onChange={(value) => setField("openingState", value)}
-                        placeholder="tired after a brutal shift, but unusually honest tonight"
-                        rows={4}
-                      />
                     </div>
                   </Section>
 
@@ -2456,6 +2506,161 @@ export default function CreateCharacterPage() {
                     </div>
                   </Section>
                 </>
+              )}
+
+              {!isQuickMode && activeStep === "visual" && (
+                <Section
+                  title="Visual lab prep"
+                  description="Prepares the character for future portraits, cards, and media generation."
+                  accent="cyan"
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <SelectField
+                      label="Avatar style"
+                      value={
+                        (avatarStyle ||
+                          AVATAR_STYLE_OPTIONS[0]) as (typeof AVATAR_STYLE_OPTIONS)[number]
+                      }
+                      onChange={(value) =>
+                        rebuildCustomNotes({ "Avatar style": value })
+                      }
+                      options={AVATAR_STYLE_OPTIONS.map((v) => ({
+                        value: v,
+                        label: v,
+                      }))}
+                    />
+                    <SelectField
+                      label="Hair"
+                      value={(hair || HAIR_OPTIONS[0]) as (typeof HAIR_OPTIONS)[number]}
+                      onChange={(value) => rebuildCustomNotes({ Hair: value })}
+                      options={HAIR_OPTIONS.map((v) => ({ value: v, label: v }))}
+                    />
+                    <SelectField
+                      label="Eyes"
+                      value={(eyes || EYE_OPTIONS[0]) as (typeof EYE_OPTIONS)[number]}
+                      onChange={(value) => rebuildCustomNotes({ Eyes: value })}
+                      options={EYE_OPTIONS.map((v) => ({ value: v, label: v }))}
+                    />
+                    <SelectField
+                      label="Outfit"
+                      value={
+                        (outfit || OUTFIT_OPTIONS[0]) as (typeof OUTFIT_OPTIONS)[number]
+                      }
+                      onChange={(value) => rebuildCustomNotes({ Outfit: value })}
+                      options={OUTFIT_OPTIONS.map((v) => ({ value: v, label: v }))}
+                    />
+                    <SelectField
+                      label="Palette"
+                      value={
+                        (palette || PALETTE_OPTIONS[0]) as (typeof PALETTE_OPTIONS)[number]
+                      }
+                      onChange={(value) => rebuildCustomNotes({ Palette: value })}
+                      options={PALETTE_OPTIONS.map((v) => ({ value: v, label: v }))}
+                    />
+                    <SelectField
+                      label="Camera framing"
+                      value={
+                        (camera || CAMERA_OPTIONS[0]) as (typeof CAMERA_OPTIONS)[number]
+                      }
+                      onChange={(value) => rebuildCustomNotes({ Camera: value })}
+                      options={CAMERA_OPTIONS.map((v) => ({ value: v, label: v }))}
+                    />
+                    <SelectField
+                      label="Photo pack style"
+                      value={
+                        (photoPack ||
+                          PHOTO_PACK_OPTIONS[0]) as (typeof PHOTO_PACK_OPTIONS)[number]
+                      }
+                      onChange={(value) =>
+                        rebuildCustomNotes({ "Photo pack": value })
+                      }
+                      options={PHOTO_PACK_OPTIONS.map((v) => ({
+                        value: v,
+                        label: v,
+                      }))}
+                    />
+                  </div>
+
+                  <div className="mt-4">
+                    <TextAreaField
+                      label="Image prompt prep"
+                      value={imagePrompt}
+                      onChange={(value) =>
+                        rebuildCustomNotes({ "Image prompt": value })
+                      }
+                      placeholder="cinematic luxury portrait, warm skin glow, rich contrast, subtle eye contact, premium fashion editorial lighting..."
+                      rows={4}
+                    />
+                  </div>
+                </Section>
+              )}
+
+              {activeStep === "publish" && (
+                <Section
+                  title="Publish setup"
+                  description="Decide how this character should live inside your system."
+                  accent="fuchsia"
+                >
+                  <div className="grid gap-5">
+                    <div>
+                      <div className="mb-2 text-sm text-white/75">Visibility</div>
+                      <div className="flex flex-wrap gap-3">
+                        <SegmentButton
+                          active={form.visibility === "private"}
+                          onClick={() => setField("visibility", "private")}
+                        >
+                          Private
+                        </SegmentButton>
+                        <SegmentButton
+                          active={form.visibility === "public"}
+                          onClick={() => setField("visibility", "public")}
+                        >
+                          Public
+                        </SegmentButton>
+                      </div>
+                      <p className="mt-3 text-sm leading-6 text-white/55">
+                        Private characters stay in your vault only. Public characters
+                        keep the same internal structure but can be shared on a public page.
+                      </p>
+                    </div>
+
+                    {!isQuickMode ? (
+                      <div className="grid gap-4">
+                        <InputField
+                          label="Public tagline"
+                          value={publicTagline}
+                          onChange={(value) =>
+                            rebuildCustomNotes({ "Public tagline": value })
+                          }
+                          placeholder="Elegant, emotionally unreadable, impossible to forget."
+                        />
+                        <TextAreaField
+                          label="Public teaser"
+                          value={publicTeaser}
+                          onChange={(value) =>
+                            rebuildCustomNotes({ "Public teaser": value })
+                          }
+                          placeholder="A luxurious slow-burn character with controlled warmth, dangerous softness, and selective honesty."
+                          rows={3}
+                        />
+                        <InputField
+                          label="Public tags"
+                          value={publicTags}
+                          onChange={(value) =>
+                            rebuildCustomNotes({ "Public tags": value })
+                          }
+                          placeholder="slow burn, elegant, dangerous, luxury"
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm leading-7 text-white/60">
+                        Quick Mode keeps publish settings minimal on purpose.
+                        You still keep full payload compatibility, public/private control,
+                        and can deepen the character later without rebuilding it.
+                      </div>
+                    )}
+                  </div>
+                </Section>
               )}
 
               <div className="flex flex-wrap items-center gap-3">
@@ -2540,15 +2745,13 @@ export default function CreateCharacterPage() {
 
                   {!isQuickMode ? (
                     <>
+                      <DividerLabel label="Visual concept" />
                       <div className="mt-4 rounded-[24px] border border-white/10 bg-gradient-to-br from-fuchsia-400/10 via-white/[0.02] to-cyan-400/10 p-4">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                          Portrait concept
-                        </div>
-                        <div className="mt-4 grid grid-cols-[100px_1fr] gap-4">
+                        <div className="mt-4 grid grid-cols-[110px_1fr] gap-4">
                           <div className="relative overflow-hidden rounded-[22px] border border-white/10 bg-gradient-to-br from-fuchsia-500/25 via-slate-800 to-cyan-500/25">
                             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.2),transparent_35%),radial-gradient(circle_at_bottom,rgba(255,255,255,0.08),transparent_30%)]" />
                             <div className="absolute left-1/2 top-5 h-16 w-16 -translate-x-1/2 rounded-full border border-white/15 bg-white/10" />
-                            <div className="absolute bottom-4 left-1/2 h-20 w-24 -translate-x-1/2 rounded-[20px] border border-white/10 bg-white/5" />
+                            <div className="absolute bottom-4 left-1/2 h-24 w-24 -translate-x-1/2 rounded-[20px] border border-white/10 bg-white/5" />
                           </div>
 
                           <div className="space-y-2">
@@ -2585,68 +2788,74 @@ export default function CreateCharacterPage() {
                   ) : null}
 
                   {memoryAnchorPreview.length > 0 ? (
-                    <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                    <>
+                      <DividerLabel label="Memory anchors" />
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {memoryAnchorPreview.map((item) => (
+                            <span
+                              key={item}
+                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75"
+                            >
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+
+                  <DividerLabel label="First reply variants" />
+                  <div className="mt-4 space-y-4">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                        Memory anchor preview
+                        Softer
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {memoryAnchorPreview.map((item) => (
-                          <span
-                            key={item}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75"
-                          >
-                            {item}
-                          </span>
-                        ))}
-                      </div>
+                      <p className="mt-2 text-sm leading-7 text-white/75">{firstReplySoft}</p>
                     </div>
-                  ) : null}
-
-                  {!isQuickMode ? (
-                    <div className="mt-4 space-y-4">
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                          First message variants
-                        </div>
-                        <div className="mt-3 space-y-3 text-sm leading-7 text-white/75">
-                          <p><span className="text-white/50">Softer:</span> {firstReplySoft}</p>
-                          <p><span className="text-white/50">Flirtier:</span> {firstReplyFlirty}</p>
-                          <p><span className="text-white/50">Colder:</span> {firstReplyCold}</p>
-                        </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                        Flirtier
                       </div>
+                      <p className="mt-2 text-sm leading-7 text-white/75">{firstReplyFlirty}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                        Colder
+                      </div>
+                      <p className="mt-2 text-sm leading-7 text-white/75">{firstReplyCold}</p>
+                    </div>
+                  </div>
 
-                      {(publicTagline || publicTeaser || publicTags) ? (
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                            Public card preview
+                  {!isQuickMode && (publicTagline || publicTeaser || publicTags) ? (
+                    <>
+                      <DividerLabel label="Public showcase" />
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        {publicTagline ? (
+                          <div className="text-base font-medium text-white">{publicTagline}</div>
+                        ) : null}
+                        {publicTeaser ? (
+                          <p className="mt-2 text-sm leading-7 text-white/70">
+                            {publicTeaser}
+                          </p>
+                        ) : null}
+                        {publicTags ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {parseCsv(publicTags).map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
+                              >
+                                {tag}
+                              </span>
+                            ))}
                           </div>
-                          {publicTagline ? (
-                            <div className="mt-3 text-base font-medium text-white">
-                              {publicTagline}
-                            </div>
-                          ) : null}
-                          {publicTeaser ? (
-                            <p className="mt-2 text-sm leading-7 text-white/70">
-                              {publicTeaser}
-                            </p>
-                          ) : null}
-                          {publicTags ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {parseCsv(publicTags).map((tag) => (
-                                <span
-                                  key={tag}
-                                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
+                        ) : null}
+                      </div>
+                    </>
                   ) : null}
 
+                  <DividerLabel label="Draft output" />
                   <div className="mt-5 space-y-4 text-sm text-white/75">
                     <div>
                       <div className="mb-1 text-xs uppercase tracking-[0.18em] text-white/40">
@@ -2673,6 +2882,28 @@ export default function CreateCharacterPage() {
               </Section>
 
               <Section
+                title="Quality checks"
+                description="These are the remaining things that affect output strength."
+              >
+                {validationIssues.length === 0 ? (
+                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+                    Everything important is in place.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {validationIssues.map((issue) => (
+                      <div
+                        key={issue}
+                        className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/72"
+                      >
+                        {issue}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+
+              <Section
                 title="What this final version includes"
                 description={
                   isQuickMode
@@ -2688,6 +2919,7 @@ export default function CreateCharacterPage() {
                     <li>• Hobbies / interests</li>
                     <li>• Basic traits</li>
                     <li>• Short scenario</li>
+                    <li>• Publish visibility</li>
                   </ul>
                 ) : (
                   <ul className="space-y-3 text-sm text-white/68">

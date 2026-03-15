@@ -5,8 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Flame, Search, Sparkles, Star } from "lucide-react";
 
 import { characters } from "@/lib/characters";
-import { listPublicCustomCharacters, type PublicCustomCharacter } from "@/lib/public-characters";
-import { getPublicShareHref } from "@/lib/custom-character-studio";
+import {
+  getPublicCharacterDetailHref,
+  getPublicShareIdFromPayload,
+  listPublicCustomCharacters,
+  type PublicCustomCharacter,
+} from "@/lib/public-characters";
 
 type CharacterLike = {
   slug?: string;
@@ -16,7 +20,9 @@ type CharacterLike = {
   description?: string;
   greeting?: string;
   category?: string;
-  tags?: Array<string | { name?: string; label?: string; value?: string; category?: string }>;
+  tags?: Array<
+    string | { name?: string; label?: string; value?: string; category?: string }
+  >;
 };
 
 type FilterKey = "all" | "romance" | "dark" | "soft" | "elite" | "fantasy";
@@ -117,6 +123,7 @@ function matchesFilter(character: DiscoverCharacter, filter: FilterKey): boolean
       "girlfriend",
       "boyfriend",
       "slow burn",
+      "slowburn",
     ],
     dark: [
       "dark",
@@ -127,10 +134,39 @@ function matchesFilter(character: DiscoverCharacter, filter: FilterKey): boolean
       "possessive",
       "dominant",
       "villain",
+      "obsession",
     ],
-    soft: ["soft", "warm", "comfort", "kind", "gentle", "caring", "sweet"],
-    elite: ["elite", "luxury", "wealth", "billionaire", "ceo", "royal", "high status"],
-    fantasy: ["fantasy", "myth", "dragon", "kingdom", "supernatural", "immortal", "vampire"],
+    soft: [
+      "soft",
+      "warm",
+      "comfort",
+      "kind",
+      "gentle",
+      "caring",
+      "sweet",
+      "nurturing",
+    ],
+    elite: [
+      "elite",
+      "luxury",
+      "wealth",
+      "billionaire",
+      "ceo",
+      "royal",
+      "high status",
+      "old-money",
+      "elegant",
+    ],
+    fantasy: [
+      "fantasy",
+      "myth",
+      "dragon",
+      "kingdom",
+      "supernatural",
+      "immortal",
+      "vampire",
+      "magic",
+    ],
   };
 
   return terms[filter].some((term) => haystack.includes(term));
@@ -142,44 +178,59 @@ function buildStatText(total: number, shown: number): string {
   return `${shown} of ${total} characters shown`;
 }
 
-function mapBuiltInCharacters(source: CharacterLike[]): DiscoverCharacter[] {
-  return source.map((character, index) => ({
-    id: `built-in-${index}-${normalizeText(character.slug) || normalizeText(character.name)}`,
-    slug: normalizeText(character.slug),
-    name: getCharacterName(character),
-    headline: getCharacterHeadline(character),
-    description: getCharacterDescription(character),
-    category: normalizeText(character.category) || "Built-in",
-    tags: getTagLabels(character),
-    href: normalizeText(character.slug) ? `/characters/${normalizeText(character.slug)}` : "/characters",
-    source: "built-in",
-  }));
+function mapBuiltInCharacters(input: CharacterLike[]): DiscoverCharacter[] {
+  return input.map((character, index) => {
+    const slug = normalizeText(character.slug);
+
+    return {
+      id: `built-in-${slug || index}`,
+      slug,
+      name: getCharacterName(character),
+      headline: getCharacterHeadline(character),
+      description: getCharacterDescription(character),
+      category: normalizeText(character.category) || "Built-in",
+      tags: getTagLabels(character),
+      href: slug ? `/characters/${slug}` : "/characters",
+      source: "built-in",
+    };
+  });
 }
 
-function mapPublicCustomCharacters(source: PublicCustomCharacter[]): DiscoverCharacter[] {
-  return source.flatMap((character) => {
-    const href = getPublicShareHref(character.payload);
-    if (!href) return [];
+function mapPublicCustomCharacters(input: PublicCustomCharacter[]): DiscoverCharacter[] {
+  return input
+    .map((character) => {
+      const shareId = getPublicShareIdFromPayload(character.payload);
+      if (!shareId) return null;
 
-    return [
-      {
-        id: character.id,
+      const scenarioTags = [
+        character.scenario?.tone,
+        character.scenario?.setting,
+        character.scenario?.relationshipToUser,
+      ].filter((item): item is string => Boolean(item && item.trim()));
+
+      return {
+        id: `public-custom-${character.id}`,
         slug: character.slug,
-        name: character.name,
-        headline: normalizeText(character.headline) || normalizeText(character.description),
+        name: character.name || "Untitled character",
+        headline:
+          character.headline ||
+          character.description ||
+          "A public custom Lovora character ready to explore.",
         description:
-          normalizeText(character.description) ||
-          normalizeText(character.preview_message) ||
-          "Public custom character",
-        category: character.archetype || "Public custom",
-        tags: Array.isArray(character.tags) ? character.tags.slice(0, 4) : [],
-        href,
+          character.description ||
+          character.greeting ||
+          "Shared publicly from the custom character studio.",
+        category: character.archetype || "Custom",
+        tags: Array.from(
+          new Set([...(character.tags ?? []), ...scenarioTags]),
+        ).slice(0, 4),
+        href: getPublicCharacterDetailHref(shareId),
         source: "public-custom" as const,
         createdAt: character.created_at,
         updatedAt: character.updated_at,
-      },
-    ];
-  });
+      };
+    })
+    .filter((item): item is DiscoverCharacter => item !== null);
 }
 
 export default function CharactersPage() {
@@ -193,7 +244,9 @@ export default function CharactersPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadPublic() {
+    async function loadPublicCharacters() {
+      setLoadingPublic(true);
+
       try {
         const data = await listPublicCustomCharacters();
         if (!cancelled) {
@@ -210,17 +263,18 @@ export default function CharactersPage() {
       }
     }
 
-    loadPublic();
+    loadPublicCharacters();
 
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const source = useMemo<DiscoverCharacter[]>(() => {
-    const builtIn = mapBuiltInCharacters(builtInSource);
-    const publicCustom = mapPublicCustomCharacters(publicCharacters);
-    return [...publicCustom, ...builtIn];
+  const source = useMemo(() => {
+    const builtIns = mapBuiltInCharacters(builtInSource);
+    const publicCustoms = mapPublicCustomCharacters(publicCharacters);
+
+    return [...publicCustoms, ...builtIns];
   }, [builtInSource, publicCharacters]);
 
   const filtered = useMemo(() => {
@@ -230,6 +284,7 @@ export default function CharactersPage() {
       const inFilter = matchesFilter(character, activeFilter);
       if (!inFilter) return false;
       if (!normalizedQuery) return true;
+
       return getFilterSignals(character).includes(normalizedQuery);
     });
   }, [activeFilter, query, source]);
@@ -264,14 +319,12 @@ export default function CharactersPage() {
                 <div className="mt-2 text-2xl font-semibold">{source.length}</div>
               </div>
               <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
-                <div className="text-sm text-white/55">Public custom</div>
-                <div className="mt-2 text-2xl font-semibold">
-                  {loadingPublic ? "..." : publicCharacters.length}
-                </div>
+                <div className="text-sm text-white/55">Public customs</div>
+                <div className="mt-2 text-2xl font-semibold">{publicCharacters.length}</div>
               </div>
               <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur col-span-2 sm:col-span-1">
                 <div className="text-sm text-white/55">Fast path</div>
-                <div className="mt-2 text-2xl font-semibold">Create + chat</div>
+                <div className="mt-2 text-2xl font-semibold">Discover + duplicate</div>
               </div>
             </div>
           </div>
@@ -295,8 +348,9 @@ export default function CharactersPage() {
                 {buildStatText(source.length, filtered.length)}
               </div>
               <div className="mt-2 text-sm leading-6 text-white/55">
-                Built-in characters stay available. Public custom characters appear here only
-                when their owner publishes them.
+                {loadingPublic
+                  ? "Loading public custom characters..."
+                  : "Built-in and public custom characters are shown together here."}
               </div>
             </div>
           </div>
@@ -336,7 +390,9 @@ export default function CharactersPage() {
             </div>
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">Featured picks</h2>
-              <p className="text-sm text-white/55">Built-in and public custom characters together.</p>
+              <p className="text-sm text-white/55">
+                A tighter first row for the strongest first impression.
+              </p>
             </div>
           </div>
 
@@ -350,13 +406,27 @@ export default function CharactersPage() {
                   <div>
                     <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs text-white/70">
                       <Star className="h-3.5 w-3.5" />
-                      {character.source === "public-custom" ? "Public custom" : "Featured"}
+                      Featured
                     </div>
-                    <h3 className="mt-4 text-2xl font-semibold tracking-tight">{character.name}</h3>
+                    <h3 className="mt-4 text-2xl font-semibold tracking-tight">
+                      {character.name}
+                    </h3>
                     <p className="mt-2 text-sm text-white/62">{character.headline}</p>
                   </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/58">
-                    {character.category || "Lovora"}
+
+                  <div className="flex flex-col gap-2">
+                    <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/58">
+                      {character.category}
+                    </div>
+                    <div
+                      className={`rounded-2xl border px-3 py-2 text-[10px] uppercase tracking-[0.18em] ${
+                        character.source === "public-custom"
+                          ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100"
+                          : "border-white/10 bg-white/5 text-white/55"
+                      }`}
+                    >
+                      {character.source === "public-custom" ? "Public custom" : "Built-in"}
+                    </div>
                   </div>
                 </div>
 
@@ -389,6 +459,7 @@ export default function CharactersPage() {
                     Open character
                     <ArrowRight className="h-4 w-4" />
                   </Link>
+
                   <Link
                     href="/create-character"
                     className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
@@ -407,9 +478,10 @@ export default function CharactersPage() {
           <div>
             <h2 className="text-2xl font-semibold tracking-tight">Browse all characters</h2>
             <p className="mt-2 text-sm text-white/55">
-              Public custom characters appear here only when published.
+              Built-in and public custom characters, all in one place.
             </p>
           </div>
+
           <Link
             href="/create-character"
             className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
@@ -421,9 +493,12 @@ export default function CharactersPage() {
 
         {filtered.length === 0 ? (
           <div className="rounded-[32px] border border-dashed border-white/12 bg-white/[0.03] px-6 py-16 text-center">
-            <h3 className="text-2xl font-semibold tracking-tight">No characters match this search yet.</h3>
+            <h3 className="text-2xl font-semibold tracking-tight">
+              No characters match this search yet.
+            </h3>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-white/58">
-              Try a broader mood, remove a search term, or create a custom character that fits exactly what you want.
+              Try a broader mood, remove a search term, or create a custom character
+              that fits exactly what you want.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <button
@@ -456,8 +531,20 @@ export default function CharactersPage() {
                     <h3 className="text-xl font-semibold tracking-tight">{character.name}</h3>
                     <p className="mt-2 text-sm text-white/60">{character.headline}</p>
                   </div>
-                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-white/48">
-                    {character.source === "public-custom" ? "Public custom" : "Built-in"}
+
+                  <div className="flex flex-col gap-2">
+                    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-white/48">
+                      {character.category}
+                    </div>
+                    <div
+                      className={`rounded-xl border px-3 py-2 text-[10px] uppercase tracking-[0.18em] ${
+                        character.source === "public-custom"
+                          ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100"
+                          : "border-white/10 bg-white/5 text-white/55"
+                      }`}
+                    >
+                      {character.source === "public-custom" ? "Public custom" : "Built-in"}
+                    </div>
                   </div>
                 </div>
 
@@ -484,8 +571,11 @@ export default function CharactersPage() {
 
                 <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
                   <span className="text-sm text-white/45">
-                    {character.source === "public-custom" ? "Public community character" : "Built-in Lovora character"}
+                    {character.source === "public-custom"
+                      ? "Open public detail page"
+                      : "Open details to start chatting"}
                   </span>
+
                   <Link
                     href={character.href}
                     className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"

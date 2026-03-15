@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import { buildMemoryPromptBlock } from "@/lib/conversation-memory";
+import {
+  getConversationMemoryState,
+  insertCustomConversationMessage,
+  listCustomConversationMessages,
+  toCustomMemoryMessages,
+  upsertConversationMemoryState,
+} from "@/lib/chat-conversations";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL_NAME = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
@@ -320,195 +328,6 @@ function getRecentMessages(messages: MessageInput[], count: number) {
   return messages.slice(Math.max(0, messages.length - count));
 }
 
-function extractPreferenceLines(userMessages: MessageInput[]): string[] {
-  const patterns = [
-    /\bI like\b/i,
-    /\bI love\b/i,
-    /\bI hate\b/i,
-    /\bI don't like\b/i,
-    /\bI want\b/i,
-    /\bI need\b/i,
-    /\bI prefer\b/i,
-    /\bmy favorite\b/i,
-    /\bI'm\b/i,
-    /\bI am\b/i,
-    /\bmy\b/i,
-  ];
-
-  const lines = userMessages
-    .map((msg) => clean(msg.content))
-    .filter((text) => patterns.some((pattern) => pattern.test(text)))
-    .map((text) => truncate(text, 120));
-
-  return Array.from(new Set(lines)).slice(-6);
-}
-
-function extractTopicKeywords(userMessages: MessageInput[]): string[] {
-  const stopWords = new Set([
-    "the",
-    "and",
-    "for",
-    "with",
-    "that",
-    "this",
-    "from",
-    "your",
-    "have",
-    "just",
-    "like",
-    "want",
-    "need",
-    "been",
-    "into",
-    "about",
-    "there",
-    "what",
-    "when",
-    "where",
-    "would",
-    "could",
-    "should",
-    "really",
-    "maybe",
-    "because",
-    "after",
-    "before",
-    "while",
-    "then",
-    "them",
-    "they",
-    "their",
-    "my",
-    "you",
-    "me",
-    "our",
-    "are",
-    "was",
-    "were",
-    "too",
-    "can",
-    "but",
-    "not",
-    "yes",
-    "all",
-  ]);
-
-  const counts = new Map<string, number>();
-
-  for (const msg of userMessages) {
-    const words = msg.content
-      .toLocaleLowerCase("en")
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .map((word) => word.trim())
-      .filter((word) => word.length >= 4 && !stopWords.has(word));
-
-    for (const word of words) {
-      counts.set(word, (counts.get(word) ?? 0) + 1);
-    }
-  }
-
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([word]) => word);
-}
-
-function detectRelationshipStage(messages: MessageInput[]): string {
-  const combined = messages.map((m) => m.content.toLocaleLowerCase("en")).join("\n");
-
-  const intimateHits = [
-    "kiss",
-    "miss you",
-    "need you",
-    "love you",
-    "hold you",
-    "close to you",
-    "want you",
-    "mine",
-    "obsessed",
-    "stay with me",
-  ].filter((token) => combined.includes(token)).length;
-
-  const vulnerableHits = [
-    "i'm scared",
-    "i feel",
-    "i'm tired",
-    "i'm hurt",
-    "be honest",
-    "trust you",
-    "confused",
-    "lonely",
-  ].filter((token) => combined.includes(token)).length;
-
-  const teasingHits = [
-    "tease",
-    "brat",
-    "trouble",
-    "behave",
-    "smirk",
-    "cute",
-    "flirt",
-    "jealous",
-  ].filter((token) => combined.includes(token)).length;
-
-  if (intimateHits >= 3) return "deeply attached and emotionally charged";
-  if (intimateHits >= 1 && vulnerableHits >= 1)
-    return "emotionally open with rising intimacy";
-  if (teasingHits >= 2) return "playful tension with clear chemistry";
-  if (vulnerableHits >= 2) return "emotionally softening and increasingly trusting";
-  if (messages.length >= 8) return "comfortable and familiar";
-  if (messages.length >= 3) return "curious and warming up";
-  return "new or lightly established";
-}
-
-function detectConversationMode(messages: MessageInput[]): string {
-  const recent = getRecentMessages(messages, 8)
-    .map((m) => m.content.toLocaleLowerCase("en"))
-    .join("\n");
-
-  const playful = ["haha", "cute", "tease", "smirk", "trouble", "brat"].some((x) =>
-    recent.includes(x),
-  );
-  const vulnerable = ["i feel", "i'm tired", "i'm scared", "honest", "trust"].some((x) =>
-    recent.includes(x),
-  );
-  const intense = ["need you", "want you", "mine", "don't leave", "stay"].some((x) =>
-    recent.includes(x),
-  );
-  const conflict = ["angry", "mad", "upset", "annoyed", "hurt"].some((x) =>
-    recent.includes(x),
-  );
-
-  if (conflict) return "conflict or emotional friction";
-  if (intense) return "high emotional intensity";
-  if (vulnerable) return "vulnerable and emotionally open";
-  if (playful) return "playful and chemistry-driven";
-  return "steady in-character interaction";
-}
-
-function buildSceneContinuity(messages: MessageInput[]): string[] {
-  const recent = getRecentMessages(messages, 6);
-
-  return recent.map((msg, index) => {
-    const prefix = msg.role === "user" ? "User" : "Character";
-    return `${index + 1}. ${prefix}: ${truncate(msg.content, 120)}`;
-  });
-}
-
-function buildConversationMemory(messages: MessageInput[]) {
-  const recent = getRecentMessages(messages, 30);
-  const userMessages = recent.filter((msg) => msg.role === "user");
-
-  return {
-    relationshipStage: detectRelationshipStage(recent),
-    activeMode: detectConversationMode(recent),
-    preferenceLines: extractPreferenceLines(userMessages),
-    topicKeywords: extractTopicKeywords(userMessages),
-    sceneContinuity: buildSceneContinuity(recent),
-  };
-}
-
 function buildFallbackSystemPrompt(character: CharacterInput): string {
   const identity = getIdentityData(character.payload);
   const studio = getStudioData(character.payload);
@@ -527,9 +346,7 @@ function buildFallbackSystemPrompt(character: CharacterInput): string {
     character.archetype ? `Archetype: ${character.archetype}` : "",
     identity.age ? `Age: ${identity.age}` : "",
     identity.region ? `Region: ${identity.region}` : "",
-    identity.genderPresentation
-      ? `Presentation: ${identity.genderPresentation}`
-      : "",
+    identity.genderPresentation ? `Presentation: ${identity.genderPresentation}` : "",
     character.headline ? `Headline: ${character.headline}` : "",
     character.description ? `Description: ${character.description}` : "",
     character.backstory ? `Backstory: ${character.backstory}` : "",
@@ -540,11 +357,7 @@ function buildFallbackSystemPrompt(character: CharacterInput): string {
     "Do not sound clinical, therapist-like, robotic, or generic.",
     ...(studio.coreVibes.length > 0 ? [`Core vibes: ${studio.coreVibes.join(", ")}`] : []),
     ...(character.traitBadges && character.traitBadges.length > 0
-      ? [
-          `Trait badges: ${character.traitBadges
-            .map((item) => item.label)
-            .join(", ")}`,
-        ]
+      ? [`Trait badges: ${character.traitBadges.map((item) => item.label).join(", ")}`]
       : []),
     ...(character.tags && character.tags.length > 0
       ? [`Tags: ${character.tags.join(", ")}`]
@@ -558,13 +371,9 @@ function buildFallbackSystemPrompt(character: CharacterInput): string {
     character.scenario?.relationshipToUser
       ? `Relationship to user: ${character.scenario.relationshipToUser}`
       : "",
-    character.scenario?.sceneGoal
-      ? `Scene goal: ${character.scenario.sceneGoal}`
-      : "",
+    character.scenario?.sceneGoal ? `Scene goal: ${character.scenario.sceneGoal}` : "",
     character.scenario?.tone ? `Tone: ${character.scenario.tone}` : "",
-    character.scenario?.openingState
-      ? `Opening state: ${character.scenario.openingState}`
-      : "",
+    character.scenario?.openingState ? `Opening state: ${character.scenario.openingState}` : "",
     "",
     "MEMORY SEEDS",
     ...(memorySeed.identity.length > 0
@@ -588,11 +397,14 @@ function buildFallbackSystemPrompt(character: CharacterInput): string {
   return lines.join("\n");
 }
 
-function buildSystemPrompt(character: CharacterInput, messages: MessageInput[]): string {
+function buildSystemPrompt(
+  character: CharacterInput,
+  messages: MessageInput[],
+  memoryBlock?: string,
+): string {
   const identity = getIdentityData(character.payload);
   const studio = getStudioData(character.payload);
   const memorySeed = getMemorySeed(character.payload);
-  const conversationMemory = buildConversationMemory(messages);
   const speechDNA = buildSpeechDNA(character.payload);
   const enginePrompt = clean(character.engine?.systemPrompt);
 
@@ -610,9 +422,7 @@ function buildSystemPrompt(character: CharacterInput, messages: MessageInput[]):
     identity.archetype ? `Archetype key: ${identity.archetype}` : "",
     identity.age ? `Age profile: ${identity.age}` : "",
     identity.region ? `Region / aesthetic influence: ${identity.region}` : "",
-    identity.genderPresentation
-      ? `Gender presentation: ${identity.genderPresentation}`
-      : "",
+    identity.genderPresentation ? `Gender presentation: ${identity.genderPresentation}` : "",
     character.headline ? `Headline: ${character.headline}` : "",
     character.description ? `Description: ${character.description}` : "",
     character.backstory ? `Backstory: ${character.backstory}` : "",
@@ -623,11 +433,7 @@ function buildSystemPrompt(character: CharacterInput, messages: MessageInput[]):
     "Do not overperform romance; let chemistry feel earned, textured, and responsive.",
     ...(studio.coreVibes.length > 0 ? [`Core vibe blend: ${studio.coreVibes.join(", ")}`] : []),
     ...(character.traitBadges && character.traitBadges.length > 0
-      ? [
-          `Trait badge blend: ${character.traitBadges
-            .map((item) => item.label)
-            .join(", ")}`,
-        ]
+      ? [`Trait badge blend: ${character.traitBadges.map((item) => item.label).join(", ")}`]
       : []),
     ...(character.tags && character.tags.length > 0
       ? [`Tag influence: ${character.tags.join(", ")}`]
@@ -641,27 +447,14 @@ function buildSystemPrompt(character: CharacterInput, messages: MessageInput[]):
     character.scenario?.relationshipToUser
       ? `Relationship to user: ${character.scenario.relationshipToUser}`
       : "",
-    character.scenario?.sceneGoal
-      ? `Scene objective: ${character.scenario.sceneGoal}`
-      : "",
+    character.scenario?.sceneGoal ? `Scene objective: ${character.scenario.sceneGoal}` : "",
     character.scenario?.tone ? `Scene tone: ${character.scenario.tone}` : "",
     character.scenario?.openingState
       ? `Starting emotional state: ${character.scenario.openingState}`
       : "",
     "",
-    "RELATIONSHIP + MEMORY STATE",
-    `Current relationship stage: ${conversationMemory.relationshipStage}`,
-    `Current conversation mode: ${conversationMemory.activeMode}`,
-    ...(conversationMemory.preferenceLines.length > 0
-      ? [
-          `Remembered user disclosures / preferences: ${conversationMemory.preferenceLines.join(
-            " | ",
-          )}`,
-        ]
-      : []),
-    ...(conversationMemory.topicKeywords.length > 0
-      ? [`Recurring conversation topics: ${conversationMemory.topicKeywords.join(", ")}`]
-      : []),
+    ...(memoryBlock ? [memoryBlock, ""] : []),
+    "MEMORY SEEDS",
     ...(memorySeed.identity.length > 0
       ? [`Identity memory seed: ${memorySeed.identity.join(" | ")}`]
       : []),
@@ -673,7 +466,10 @@ function buildSystemPrompt(character: CharacterInput, messages: MessageInput[]):
       : []),
     "",
     "RECENT SCENE CONTINUITY",
-    ...conversationMemory.sceneContinuity,
+    ...getRecentMessages(messages, 6).map((msg, index) => {
+      const prefix = msg.role === "user" ? "User" : "Character";
+      return `${index + 1}. ${prefix}: ${truncate(msg.content, 120)}`;
+    }),
     "",
     "RESPONSE DISCIPLINE",
     "Prioritize character consistency over generic helpfulness.",
@@ -712,6 +508,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const character = normalizeCharacter(body?.character);
     const messages = normalizeMessages(body?.messages);
+    const accessToken =
+      typeof body?.accessToken === "string" ? clean(body.accessToken) : "";
+    const conversationId =
+      typeof body?.conversationId === "string" ? clean(body.conversationId) : "";
 
     if (!character) {
       return NextResponse.json(
@@ -735,8 +535,32 @@ export async function POST(request: Request) {
       );
     }
 
-    const systemPrompt = buildSystemPrompt(character, messages);
-    const recentMessages = getRecentMessages(messages, 24);
+    let promptMessages = messages;
+    let memoryBlock = "";
+
+    if (accessToken && conversationId) {
+      try {
+        const storedMemory = await getConversationMemoryState(accessToken, conversationId);
+        if (storedMemory) {
+          memoryBlock = buildMemoryPromptBlock(storedMemory);
+        }
+
+        const dbMessages = await listCustomConversationMessages(accessToken, conversationId);
+        const normalizedDbMessages = dbMessages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        }));
+
+        if (normalizedDbMessages.length > 0) {
+          promptMessages = normalizedDbMessages;
+        }
+      } catch (error) {
+        console.error("Custom memory bootstrap failed:", error);
+      }
+    }
+
+    const systemPrompt = buildSystemPrompt(character, promptMessages, memoryBlock);
+    const recentMessages = getRecentMessages(promptMessages, 24);
 
     const completionResponse = await fetch(OPENROUTER_URL, {
       method: "POST",
@@ -785,7 +609,36 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ reply });
+    if (accessToken && conversationId) {
+      try {
+        await insertCustomConversationMessage(
+          accessToken,
+          conversationId,
+          "assistant",
+          reply,
+        );
+
+        const updatedMessages = await listCustomConversationMessages(
+          accessToken,
+          conversationId,
+        );
+
+        await upsertConversationMemoryState({
+          accessToken,
+          conversationId,
+          conversationType: "custom",
+          messages: toCustomMemoryMessages(updatedMessages),
+        });
+      } catch (error) {
+        console.error("Custom memory persistence failed:", error);
+      }
+    }
+
+    return NextResponse.json({
+      reply,
+      conversationId: conversationId || null,
+      memoryActive: Boolean(accessToken && conversationId),
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unexpected server error.";

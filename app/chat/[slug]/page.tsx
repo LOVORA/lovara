@@ -1,18 +1,17 @@
 import { notFound } from "next/navigation";
-import Navbar from "../../../components/landing/navbar";
-import ChatWindow from "../../../components/chat/chat-window";
-import AuthGuard from "../../../components/auth/auth-guard";
-import { getCharacterBySlug } from "../../../lib/characters";
+import Navbar from "@/components/landing/navbar";
+import ChatWindow from "@/components/chat/chat-window";
+import AuthGuard from "@/components/auth/auth-guard";
+import { getCharacterBySlug } from "@/lib/characters";
 
 type ChatPageProps = {
-  params: Promise<{
+  params: {
     slug: string;
-  }>;
+  };
 };
 
 export default async function ChatPage({ params }: ChatPageProps) {
-  const { slug } = await params;
-  const character = getCharacterBySlug(slug);
+  const character = getCharacterBySlug(params.slug);
 
   if (!character) {
     notFound();
