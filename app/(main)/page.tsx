@@ -1,5 +1,25 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CheckCircle2,
+  ChevronRight,
+  Sparkles,
+  Wand2,
+  Library,
+  MessageCircle,
+  X,
+  BarChart3,
+  Globe2,
+  Heart,
+  Clock3,
+} from "lucide-react";
 import AuthStatus from "@/components/auth/auth-status";
+
+const ONBOARDING_STORAGE_KEY = "lovora.home.onboarding.dismissed";
+const FAVORITES_STORAGE_KEY = "lovora.favorite.characters";
+const RECENT_STORAGE_KEY = "lovora.recent.characters";
 
 const featuredCharacters = [
   {
@@ -71,6 +91,243 @@ const featureColumns = [
   },
 ];
 
+const onboardingSteps = [
+  {
+    id: "create",
+    title: "Create your first character",
+    description: "Open the studio and choose a template or build from scratch.",
+    href: "/create-character",
+    cta: "Open studio",
+    icon: Wand2,
+  },
+  {
+    id: "library",
+    title: "Save it to your library",
+    description: "Your private vault keeps characters ready for reuse and edits.",
+    href: "/my-characters",
+    cta: "Open library",
+    icon: Library,
+  },
+  {
+    id: "chat",
+    title: "Start a private chat",
+    description: "Move into an immersive roleplay flow with stronger continuity.",
+    href: "/characters",
+    cta: "Explore characters",
+    icon: MessageCircle,
+  },
+] as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function safeReadStringArray(key: string): string[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
+function OnboardingCard() {
+  const [dismissed, setDismissed] = useState(true);
+
+  useEffect(() => {
+    try {
+      const stored =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem(ONBOARDING_STORAGE_KEY)
+          : null;
+      setDismissed(stored === "true");
+    } catch {
+      setDismissed(false);
+    }
+  }, []);
+
+  function handleDismiss() {
+    setDismissed(true);
+    try {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
+    } catch {
+      // ignore storage failures
+    }
+  }
+
+  if (dismissed) return null;
+
+  return (
+    <section className="mx-auto mb-8 max-w-7xl px-4 pt-4 md:px-6">
+      <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(135deg,rgba(236,72,153,0.10),rgba(255,255,255,0.05),rgba(59,130,246,0.08))] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(236,72,153,0.14),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.10),transparent_24%)]" />
+
+        <div className="relative">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-2xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-pink-300/20 bg-pink-400/10 px-3 py-1 text-xs uppercase tracking-[0.22em] text-pink-100/85">
+                <Sparkles className="h-3.5 w-3.5" />
+                Getting started
+              </div>
+
+              <h2 className="mt-4 text-2xl font-semibold tracking-tight text-white md:text-3xl">
+                New here? Start with these 3 steps.
+              </h2>
+
+              <p className="mt-3 max-w-xl text-sm leading-7 text-white/62">
+                Lovora works best as a loop: create a character, save it into your
+                library, then continue the relationship in private chat.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70 transition hover:border-white/20 hover:bg-white/10"
+            >
+              <X className="h-4 w-4" />
+              Dismiss
+            </button>
+          </div>
+
+          <div className="mt-6 grid gap-4 lg:grid-cols-3">
+            {onboardingSteps.map((step, index) => {
+              const Icon = step.icon;
+
+              return (
+                <div
+                  key={step.id}
+                  className="rounded-[26px] border border-white/10 bg-black/20 p-5"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white">
+                      <Icon className="h-5 w-5" />
+                    </div>
+
+                    <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/45">
+                      0{index + 1}
+                    </div>
+                  </div>
+
+                  <h3 className="mt-4 text-lg font-semibold text-white">
+                    {step.title}
+                  </h3>
+
+                  <p className="mt-2 text-sm leading-7 text-white/60">
+                    {step.description}
+                  </p>
+
+                  <Link
+                    href={step.href}
+                    className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/82 transition hover:border-white/20 hover:bg-white/10"
+                  >
+                    {step.cta}
+                    <ChevronRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-100">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Premium onboarding flow active
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProductStats() {
+  const [favoriteCount, setFavoriteCount] = useState(0);
+  const [recentCount, setRecentCount] = useState(0);
+
+  useEffect(() => {
+    setFavoriteCount(safeReadStringArray(FAVORITES_STORAGE_KEY).length);
+    setRecentCount(safeReadStringArray(RECENT_STORAGE_KEY).length);
+  }, []);
+
+  const stats = useMemo(
+    () => [
+      {
+        label: "Built-in preview",
+        value: "3",
+        helper: "Landing page featured characters",
+        icon: Sparkles,
+      },
+      {
+        label: "Favorites saved",
+        value: String(favoriteCount),
+        helper: "Stored in your browser vault",
+        icon: Heart,
+      },
+      {
+        label: "Recently viewed",
+        value: String(recentCount),
+        helper: "Characters you explored lately",
+        icon: Clock3,
+      },
+      {
+        label: "Core product loop",
+        value: "Create → Save → Chat",
+        helper: "Premium character workflow",
+        icon: BarChart3,
+      },
+    ],
+    [favoriteCount, recentCount],
+  );
+
+  return (
+    <section className="mx-auto mt-6 max-w-7xl px-4 md:px-6">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {stats.map((stat) => {
+          const Icon = stat.icon;
+
+          return (
+            <div
+              key={stat.label}
+              className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white/80">
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div className="text-sm text-white/50">{stat.label}</div>
+              </div>
+
+              <div className="mt-4 text-2xl font-semibold text-white">{stat.value}</div>
+              <p className="mt-2 text-sm leading-7 text-white/58">{stat.helper}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100">
+          <Globe2 className="mr-1 inline h-3.5 w-3.5" />
+          Public discovery enabled
+        </span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/72">
+          Character studio live
+        </span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/72">
+          Saved library active
+        </span>
+      </div>
+    </section>
+  );
+}
+
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-[#06070b] text-white">
@@ -125,6 +382,8 @@ export default function HomePage() {
             </div>
           </div>
         </header>
+
+        <OnboardingCard />
 
         <section className="relative z-10 mx-auto grid max-w-7xl gap-10 px-4 pb-20 pt-8 md:px-6 md:pb-28 md:pt-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
           <div>
@@ -253,6 +512,8 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        <ProductStats />
       </div>
 
       <section id="characters" className="mx-auto max-w-7xl px-4 py-18 md:px-6 md:py-24">

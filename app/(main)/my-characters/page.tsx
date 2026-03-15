@@ -4,8 +4,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import {
+  Copy,
+  Edit3,
+  PlusSquare,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
+
+import {
+  createMyCustomCharacter,
   deleteMyCustomCharacter,
   listMyCustomCharacters,
+  type CharacterDraftInput,
   type DbCustomCharacter,
 } from "@/lib/account";
 import type { Json } from "@/types/supabase";
@@ -53,12 +63,23 @@ type CustomMessageLookupRow = {
   conversation_id: string;
 };
 
+type EditDraftState = {
+  id: string;
+  name: string;
+  headline: string;
+  description: string;
+  greeting: string;
+  backstory: string;
+  tags: string;
+};
+
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
 function formatRelativeDate(value?: string): string {
   if (!value) return "Recently updated";
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Recently updated";
 
@@ -132,6 +153,18 @@ function matchesSearch(character: DbCustomCharacter, query: string) {
   return fields.includes(q);
 }
 
+function toTagString(tags?: string[] | null) {
+  return Array.isArray(tags) ? tags.join(", ") : "";
+}
+
+function toTagArray(tags: string) {
+  return tags
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 function StatCard({
   label,
   value,
@@ -142,13 +175,9 @@ function StatCard({
   helper: string;
 }) {
   return (
-    <div className="rounded-[30px] border border-white/10 bg-white/[0.03] p-5 shadow-[0_10px_50px_rgba(0,0,0,0.16)]">
-      <div className="text-[11px] uppercase tracking-[0.22em] text-white/35">
-        {label}
-      </div>
-      <div className="mt-3 text-3xl font-semibold tracking-tight text-white">
-        {value}
-      </div>
+    <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5">
+      <div className="text-sm text-white/50">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-white">{value}</div>
       <div className="mt-2 text-sm leading-6 text-white/55">{helper}</div>
     </div>
   );
@@ -164,16 +193,12 @@ function StatusPill({
   return (
     <span
       className={cn(
-        "rounded-full border px-3 py-1 text-[11px] font-medium tracking-[0.14em] uppercase",
-        tone === "neutral" && "border-white/10 bg-white/5 text-white/68",
-        tone === "success" &&
-          "border-emerald-400/20 bg-emerald-400/10 text-emerald-100",
-        tone === "warm" &&
-          "border-amber-400/20 bg-amber-400/10 text-amber-100",
-        tone === "cyan" &&
-          "border-cyan-400/20 bg-cyan-400/10 text-cyan-100",
-        tone === "danger" &&
-          "border-rose-400/20 bg-rose-400/10 text-rose-100",
+        "inline-flex rounded-full border px-3 py-1 text-xs",
+        tone === "success" && "border-emerald-400/20 bg-emerald-400/10 text-emerald-100",
+        tone === "warm" && "border-amber-400/20 bg-amber-400/10 text-amber-100",
+        tone === "cyan" && "border-cyan-400/20 bg-cyan-400/10 text-cyan-100",
+        tone === "danger" && "border-rose-400/20 bg-rose-400/10 text-rose-100",
+        tone === "neutral" && "border-white/10 bg-white/5 text-white/70",
       )}
     >
       {label}
@@ -183,36 +208,12 @@ function StatusPill({
 
 function LoadingSkeleton() {
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
       {Array.from({ length: 4 }).map((_, index) => (
         <div
           key={index}
-          className="rounded-[30px] border border-white/10 bg-white/[0.03] p-6"
-        >
-          <div className="animate-pulse">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <div className="h-6 w-24 rounded-full bg-white/10" />
-                <div className="mt-4 h-8 w-48 rounded-xl bg-white/10" />
-                <div className="mt-3 h-4 w-full rounded bg-white/10" />
-                <div className="mt-2 h-4 w-4/5 rounded bg-white/10" />
-              </div>
-              <div className="h-4 w-24 rounded bg-white/10" />
-            </div>
-
-            <div className="mt-5 h-24 rounded-2xl bg-white/10" />
-            <div className="mt-4 flex gap-2">
-              <div className="h-7 w-20 rounded-full bg-white/10" />
-              <div className="h-7 w-20 rounded-full bg-white/10" />
-              <div className="h-7 w-20 rounded-full bg-white/10" />
-            </div>
-            <div className="mt-6 flex gap-3">
-              <div className="h-10 w-24 rounded-full bg-white/10" />
-              <div className="h-10 w-28 rounded-full bg-white/10" />
-              <div className="h-10 w-24 rounded-full bg-white/10" />
-            </div>
-          </div>
-        </div>
+          className="h-[320px] animate-pulse rounded-[30px] border border-white/10 bg-white/[0.04]"
+        />
       ))}
     </div>
   );
@@ -220,27 +221,25 @@ function LoadingSkeleton() {
 
 function EmptyVaultState() {
   return (
-    <div className="rounded-[34px] border border-dashed border-white/15 bg-white/[0.03] p-8 text-center">
-      <div className="text-xs uppercase tracking-[0.22em] text-fuchsia-200/80">
-        Studio Ready
-      </div>
-      <h2 className="mt-4 text-2xl font-semibold text-white">
+    <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-8 text-center md:p-12">
+      <StatusPill label="Studio Ready" tone="cyan" />
+      <h2 className="mt-5 text-3xl font-semibold tracking-tight text-white">
         Your character vault is empty.
       </h2>
-      <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-white/60">
-        Create your first character, save it to your account, and come back here
-        to manage visibility, public sharing, and chat continuity.
+      <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-white/62">
+        Create your first character, save it to your account, and come back here to manage
+        visibility, public sharing, duplication, editing, and chat continuity.
       </p>
-      <div className="mt-6 flex flex-wrap justify-center gap-3">
+      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
         <Link
           href="/create-character"
-          className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black"
+          className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:bg-white/90"
         >
           Create first character
         </Link>
         <Link
           href="/characters"
-          className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/80"
+          className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
         >
           Explore public characters
         </Link>
@@ -251,17 +250,14 @@ function EmptyVaultState() {
 
 function EmptyResultsState({ query }: { query: string }) {
   return (
-    <div className="rounded-[34px] border border-dashed border-white/15 bg-white/[0.03] p-8 text-center">
-      <div className="text-xs uppercase tracking-[0.22em] text-cyan-200/80">
-        No Results
-      </div>
-      <h2 className="mt-4 text-2xl font-semibold text-white">
+    <div className="rounded-[32px] border border-dashed border-white/12 bg-white/[0.03] p-8 text-center md:p-12">
+      <StatusPill label="No Results" tone="neutral" />
+      <h2 className="mt-5 text-3xl font-semibold tracking-tight text-white">
         Nothing matched your filters.
       </h2>
-      <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-white/60">
-        No saved characters matched{" "}
-        <span className="text-white/85">“{query || "your current filters"}”</span>.
-        Try another name, tag, or visibility filter.
+      <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-white/62">
+        No saved characters matched “{query || "your current filters"}”. Try another name,
+        tag, or visibility filter.
       </p>
     </div>
   );
@@ -278,7 +274,10 @@ export default function MyCharactersPage() {
   const [banner, setBanner] = useState<BannerState>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [editing, setEditing] = useState<EditDraftState | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   async function loadMemoryState(charactersList: DbCustomCharacter[]) {
     try {
@@ -299,8 +298,7 @@ export default function MyCharactersPage() {
         .eq("user_id", user.id)
         .in("custom_character_id", characterIds);
 
-      const conversations =
-        (conversationsRaw as CustomConversationLookupRow[] | null) ?? [];
+      const conversations = (conversationsRaw as CustomConversationLookupRow[] | null) ?? [];
 
       if (conversationsError) {
         setMemoryMap({});
@@ -320,8 +318,7 @@ export default function MyCharactersPage() {
         .eq("user_id", user.id)
         .in("conversation_id", conversationIds);
 
-      const memoryRows =
-        (memoryRowsRaw as ConversationMemoryLookupRow[] | null) ?? [];
+      const memoryRows = (memoryRowsRaw as ConversationMemoryLookupRow[] | null) ?? [];
 
       const { data: messageRowsRaw } = await supabase
         .from("custom_messages")
@@ -329,8 +326,7 @@ export default function MyCharactersPage() {
         .eq("user_id", user.id)
         .in("conversation_id", conversationIds);
 
-      const messageRows =
-        (messageRowsRaw as CustomMessageLookupRow[] | null) ?? [];
+      const messageRows = (messageRowsRaw as CustomMessageLookupRow[] | null) ?? [];
 
       const memoryByConversation = new Map<
         string,
@@ -338,9 +334,7 @@ export default function MyCharactersPage() {
       >();
 
       for (const row of memoryRows) {
-        const count =
-          typeof row.message_count === "number" ? row.message_count : 0;
-
+        const count = typeof row.message_count === "number" ? row.message_count : 0;
         memoryByConversation.set(row.conversation_id, {
           messageCount: count,
           hasMemory: count > 1,
@@ -416,9 +410,7 @@ export default function MyCharactersPage() {
   }, []);
 
   async function handleDelete(character: DbCustomCharacter) {
-    const confirmed = window.confirm(
-      `Delete "${character.name}" from this account?`,
-    );
+    const confirmed = window.confirm(`Delete "${character.name}" from this account?`);
     if (!confirmed) return;
 
     setDeletingId(character.id);
@@ -426,17 +418,26 @@ export default function MyCharactersPage() {
 
     try {
       await deleteMyCustomCharacter(character.id);
+
       setCharacters((current) => current.filter((item) => item.id !== character.id));
       setMemoryMap((current) => {
         const next = { ...current };
         delete next[character.id];
         return next;
       });
-      setBanner({ type: "success", message: `"${character.name}" was deleted.` });
+
+      setBanner({
+        type: "success",
+        message: `"${character.name}" was deleted.`,
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not delete character.";
-      setBanner({ type: "error", message });
+
+      setBanner({
+        type: "error",
+        message,
+      });
     } finally {
       setDeletingId(null);
     }
@@ -444,7 +445,6 @@ export default function MyCharactersPage() {
 
   async function handleVisibilityToggle(character: DbCustomCharacter) {
     const currentPayload = safePayload(character);
-
     const nextVisibility =
       getVisibilityFromPayload(currentPayload) === "public" ? "private" : "public";
 
@@ -452,8 +452,7 @@ export default function MyCharactersPage() {
       ...currentPayload,
       visibility: nextVisibility,
       publicShareId:
-        typeof currentPayload.publicShareId === "string" &&
-        currentPayload.publicShareId.trim()
+        typeof currentPayload.publicShareId === "string" && currentPayload.publicShareId.trim()
           ? currentPayload.publicShareId
           : `share_${character.id.replace(/-/g, "").slice(0, 18)}`,
     } as Json;
@@ -472,6 +471,7 @@ export default function MyCharactersPage() {
       }
 
       await loadCharacters({ silent: true });
+
       setBanner({
         type: "success",
         message:
@@ -482,7 +482,11 @@ export default function MyCharactersPage() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not update visibility.";
-      setBanner({ type: "error", message });
+
+      setBanner({
+        type: "error",
+        message,
+      });
     } finally {
       setPublishingId(null);
     }
@@ -514,6 +518,123 @@ export default function MyCharactersPage() {
     }
   }
 
+  function openEdit(character: DbCustomCharacter) {
+    setEditing({
+      id: character.id,
+      name: character.name || "",
+      headline: character.headline || "",
+      description: character.description || "",
+      greeting: character.greeting || "",
+      backstory: character.backstory || "",
+      tags: toTagString(character.tags),
+    });
+    setBanner(null);
+  }
+
+  async function handleSaveEdit() {
+    if (!editing || savingEdit) return;
+
+    if (!editing.name.trim()) {
+      setBanner({
+        type: "error",
+        message: "Character name cannot be empty.",
+      });
+      return;
+    }
+
+    setSavingEdit(true);
+    setBanner(null);
+
+    try {
+      const { error } = await supabase
+        .from("custom_characters")
+        .update({
+          name: editing.name.trim(),
+          headline: editing.headline.trim(),
+          description: editing.description.trim(),
+          greeting: editing.greeting.trim(),
+          backstory: editing.backstory.trim(),
+          tags: toTagArray(editing.tags),
+        })
+        .eq("id", editing.id);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      setEditing(null);
+      await loadCharacters({ silent: true });
+
+      setBanner({
+        type: "success",
+        message: "Character updated successfully.",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not save character changes.";
+
+      setBanner({
+        type: "error",
+        message,
+      });
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleDuplicate(character: DbCustomCharacter) {
+    if (duplicatingId) return;
+
+    setDuplicatingId(character.id);
+    setBanner(null);
+
+    try {
+      const payload = safePayload(character);
+      const nextPayload: Record<string, unknown> = {
+        ...payload,
+        visibility: "private",
+      };
+
+      delete nextPayload.publicShareId;
+
+      const input: CharacterDraftInput = {
+        name: `${character.name} Copy`,
+        archetype: character.archetype || "custom",
+        headline: character.headline || "",
+        description: character.description || "",
+        greeting: character.greeting || "",
+        previewMessage: character.preview_message || character.greeting || "",
+        backstory: character.backstory || "",
+        tags: character.tags ?? [],
+        traitBadges: [],
+        scenario: character.scenario ?? {},
+        payload: nextPayload,
+      };
+
+      const created = await createMyCustomCharacter(input);
+
+      await loadCharacters({ silent: true });
+
+      setBanner({
+        type: "success",
+        message: `"${created.name}" was duplicated into your library as a private character.`,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not duplicate character.";
+
+      setBanner({
+        type: "error",
+        message:
+          message === "AUTH_REQUIRED"
+            ? "You need to log in before duplicating a character."
+            : message,
+      });
+    } finally {
+      setDuplicatingId(null);
+    }
+  }
+
   const stats = useMemo(() => {
     const total = characters.length;
     const publicCount = characters.filter(
@@ -537,7 +658,6 @@ export default function MyCharactersPage() {
   const filteredCharacters = useMemo(() => {
     return characters.filter((character) => {
       const visibility = getVisibilityFromPayload(safePayload(character));
-
       const visibilityMatch =
         visibilityFilter === "all" ? true : visibility === visibilityFilter;
 
@@ -568,69 +688,44 @@ export default function MyCharactersPage() {
     <AuthGuard>
       <main className="min-h-screen bg-[#050816] text-white">
         <div className="mx-auto max-w-7xl px-6 py-10">
-          <section className="relative overflow-hidden rounded-[38px] border border-white/10 bg-gradient-to-br from-fuchsia-500/10 via-white/[0.04] to-cyan-400/10 p-8 shadow-[0_30px_120px_rgba(0,0,0,0.22)]">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(217,70,239,0.16),transparent_26%),radial-gradient(circle_at_bottom_left,rgba(34,211,238,0.12),transparent_24%)]" />
-            <div className="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-              <div>
-                <div className="text-xs uppercase tracking-[0.24em] text-fuchsia-200/80">
-                  My Characters
-                </div>
-                <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white md:text-4xl">
-                  Your private character vault
-                </h1>
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-white/60">
-                  These characters are tied to your account. Manage visibility,
-                  public sharing, and chat continuity from one clean dashboard.
-                </p>
+          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <div className="text-sm uppercase tracking-[0.22em] text-white/40">
+                My Characters
               </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => loadCharacters({ silent: true })}
-                  disabled={refreshing || loading}
-                  className="rounded-full border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {refreshing ? "Refreshing..." : "Refresh"}
-                </button>
-
-                <Link
-                  href="/create-character"
-                  className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
-                >
-                  Create character
-                </Link>
-              </div>
+              <h1 className="mt-2 text-4xl font-semibold tracking-tight text-white md:text-5xl">
+                Your private character vault
+              </h1>
+              <p className="mt-4 max-w-3xl text-sm leading-7 text-white/62 md:text-base">
+                These characters are tied to your account. Manage visibility, public sharing,
+                duplication, editing, and chat continuity from one clean dashboard.
+              </p>
             </div>
-          </section>
 
-          <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <StatCard
-              label="Total"
-              value={String(stats.total)}
-              helper="All characters tied to this account."
-            />
-            <StatCard
-              label="Public"
-              value={String(stats.publicCount)}
-              helper="Characters visible on discover."
-            />
-            <StatCard
-              label="Private"
-              value={String(stats.privateCount)}
-              helper="Visible only inside your account."
-            />
-            <StatCard
-              label="Active this week"
-              value={String(stats.activeThisWeek)}
-              helper="Updated in the last 7 days."
-            />
-          </section>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => loadCharacters({ silent: true })}
+                disabled={refreshing || loading}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+                {refreshing ? "Refreshing..." : "Refresh"}
+              </button>
+
+              <Link
+                href="/create-character"
+                className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+              >
+                Create character
+              </Link>
+            </div>
+          </div>
 
           {banner ? (
             <div
               className={cn(
-                "mt-6 rounded-2xl border px-4 py-3 text-sm",
+                "mb-6 rounded-2xl border px-4 py-3 text-sm",
                 banner.type === "success"
                   ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
                   : "border-rose-400/20 bg-rose-400/10 text-rose-100",
@@ -640,8 +735,31 @@ export default function MyCharactersPage() {
             </div>
           ) : null}
 
-          <section className="mt-6 rounded-[30px] border border-white/10 bg-white/[0.03] p-5 shadow-[0_10px_50px_rgba(0,0,0,0.16)]">
-            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.55fr_0.55fr]">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              label="Total characters"
+              value={String(stats.total)}
+              helper="Everything saved to your account."
+            />
+            <StatCard
+              label="Public"
+              value={String(stats.publicCount)}
+              helper="Visible through a public share page."
+            />
+            <StatCard
+              label="Private"
+              value={String(stats.privateCount)}
+              helper="Only visible inside your account."
+            />
+            <StatCard
+              label="Active this week"
+              value={String(stats.activeThisWeek)}
+              helper="Recently updated or refined characters."
+            />
+          </div>
+
+          <div className="mt-6 rounded-[30px] border border-white/10 bg-white/[0.04] p-5">
+            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.4fr_0.4fr]">
               <label className="block">
                 <div className="mb-2 text-sm text-white/70">Search</div>
                 <input
@@ -680,7 +798,7 @@ export default function MyCharactersPage() {
                 </select>
               </label>
             </div>
-          </section>
+          </div>
 
           <div className="mt-8">
             {loading ? (
@@ -690,7 +808,7 @@ export default function MyCharactersPage() {
             ) : sortedCharacters.length === 0 ? (
               <EmptyResultsState query={searchQuery} />
             ) : (
-              <div className="grid gap-5 lg:grid-cols-2">
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
                 {sortedCharacters.map((character) => {
                   const payload = safePayload(character);
                   const visibility = getVisibilityFromPayload(payload);
@@ -701,50 +819,44 @@ export default function MyCharactersPage() {
                   return (
                     <article
                       key={character.id}
-                      className="group rounded-[32px] border border-white/10 bg-gradient-to-br from-white/[0.05] to-white/[0.02] p-6 shadow-[0_18px_80px_rgba(0,0,0,0.18)] transition hover:border-white/15 hover:from-white/[0.06] hover:to-white/[0.03]"
+                      className="flex h-full flex-col rounded-[30px] border border-white/10 bg-white/[0.04] p-6 transition hover:border-white/18 hover:bg-white/[0.06]"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap gap-2">
-                            <StatusPill label={character.archetype || "custom"} />
-                            <StatusPill
-                              label={visibility === "public" ? "Public" : "Private"}
-                              tone={visibility === "public" ? "success" : "neutral"}
-                            />
-                            {!memoryState?.hasConversation ? (
-                              <StatusPill label="No active chat" tone="neutral" />
-                            ) : memoryState.isFresh ? (
-                              <StatusPill label="Fresh chat" tone="warm" />
-                            ) : memoryState.hasMemory ? (
-                              <StatusPill label="Memory active" tone="cyan" />
-                            ) : (
-                              <StatusPill label="Active chat" tone="success" />
-                            )}
-                          </div>
-
-                          <h2 className="mt-4 text-2xl font-semibold tracking-tight text-white">
-                            {character.name}
-                          </h2>
-
-                          <p className="mt-2 max-w-2xl text-sm leading-6 text-white/60">
-                            {truncate(
-                              character.headline || character.description || "",
-                              130,
-                            )}
-                          </p>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex flex-wrap gap-2">
+                          <StatusPill
+                            label={visibility === "public" ? "Public" : "Private"}
+                            tone={visibility === "public" ? "cyan" : "neutral"}
+                          />
+                          {!memoryState?.hasConversation ? (
+                            <StatusPill label="No chat yet" tone="neutral" />
+                          ) : memoryState.isFresh ? (
+                            <StatusPill label="Fresh chat" tone="warm" />
+                          ) : memoryState.hasMemory ? (
+                            <StatusPill label="Memory active" tone="success" />
+                          ) : (
+                            <StatusPill label="Conversation active" tone="warm" />
+                          )}
                         </div>
 
-                        <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-white/45">
+                        <div className="text-xs text-white/45">
                           {formatRelativeDate(character.updated_at)}
                         </div>
                       </div>
 
+                      <h2 className="mt-5 text-2xl font-semibold tracking-tight text-white">
+                        {character.name}
+                      </h2>
+
+                      <p className="mt-3 text-sm leading-7 text-white/62">
+                        {truncate(character.headline || character.description || "", 130)}
+                      </p>
+
                       {identity.length > 0 ? (
-                        <div className="mt-5 flex flex-wrap gap-2">
+                        <div className="mt-4 flex flex-wrap gap-2">
                           {identity.map((item) => (
                             <span
                               key={item}
-                              className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100"
+                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
                             >
                               {item}
                             </span>
@@ -752,58 +864,75 @@ export default function MyCharactersPage() {
                         </div>
                       ) : null}
 
-                      <div className="mt-5 grid gap-3 md:grid-cols-2">
-                        <div className="rounded-[24px] border border-white/10 bg-black/25 p-4">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-white/38">
-                            Scenario
-                          </div>
-                          <p className="mt-2 text-sm leading-6 text-white/70">
-                            {getScenarioSummary(character)}
-                          </p>
+                      <div className="mt-5 rounded-[24px] border border-white/10 bg-black/20 p-4">
+                        <div className="text-xs uppercase tracking-[0.18em] text-white/40">
+                          Scenario
                         </div>
+                        <div className="mt-2 text-sm leading-7 text-white/74">
+                          {getScenarioSummary(character)}
+                        </div>
+                      </div>
 
-                        <div className="rounded-[24px] border border-white/10 bg-black/25 p-4">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-white/38">
-                            Chat status
-                          </div>
-                          <p className="mt-2 text-sm leading-6 text-white/70">
-                            {!memoryState?.hasConversation
-                              ? "No conversation started yet."
-                              : memoryState.isFresh
-                                ? "Conversation exists and is still fresh."
-                                : memoryState.hasMemory
-                                  ? `Memory is active across ${
-                                      memoryState.messageCount ?? 0
-                                    } messages.`
-                                  : "Conversation is active."}
-                          </p>
+                      <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4">
+                        <div className="text-xs uppercase tracking-[0.18em] text-white/40">
+                          Chat status
+                        </div>
+                        <div className="mt-2 text-sm leading-7 text-white/74">
+                          {!memoryState?.hasConversation
+                            ? "No conversation started yet."
+                            : memoryState.isFresh
+                              ? "Conversation exists and is still fresh."
+                              : memoryState.hasMemory
+                                ? `Memory is active across ${memoryState.messageCount ?? 0} messages.`
+                                : "Conversation is active."}
                         </div>
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-2">
                         {(character.tags ?? []).slice(0, 6).map((tag) => (
                           <span
-                            key={tag}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75"
+                            key={`${character.id}-${tag}`}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
                           >
                             {tag}
                           </span>
                         ))}
                         {(!character.tags || character.tags.length === 0) && (
-                          <span className="text-xs text-white/35">
+                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
                             No tags added
                           </span>
                         )}
                       </div>
 
-                      <div className="mt-6 flex flex-wrap gap-3">
+                      <div className="mt-6 flex flex-wrap gap-2">
                         <Link
                           href={`/chat/custom/${character.slug}`}
-                          className="rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:opacity-90"
+                          className="rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-white/90"
                         >
                           {memoryState?.hasConversation ? "Open chat" : "Start chat"}
                         </Link>
 
+                        <button
+                          type="button"
+                          onClick={() => openEdit(character)}
+                          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDuplicate(character)}
+                          disabled={duplicatingId === character.id}
+                          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          <PlusSquare className="h-4 w-4" />
+                          {duplicatingId === character.id ? "Duplicating..." : "Duplicate"}
+                        </button>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => handleVisibilityToggle(character)}
@@ -822,8 +951,9 @@ export default function MyCharactersPage() {
                             <button
                               type="button"
                               onClick={() => handleCopyShareLink(character)}
-                              className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
+                              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
                             >
+                              <Copy className="h-4 w-4" />
                               Copy public link
                             </button>
 
@@ -840,8 +970,9 @@ export default function MyCharactersPage() {
                           type="button"
                           onClick={() => handleDelete(character)}
                           disabled={deletingId === character.id}
-                          className="rounded-full border border-rose-400/20 bg-rose-400/10 px-4 py-2.5 text-sm text-rose-100 transition hover:border-rose-400/30 hover:bg-rose-400/15 disabled:cursor-not-allowed disabled:opacity-70"
+                          className="inline-flex items-center gap-2 rounded-full border border-rose-400/20 bg-rose-400/10 px-4 py-2.5 text-sm text-rose-100 transition hover:border-rose-400/30 hover:bg-rose-400/15 disabled:cursor-not-allowed disabled:opacity-70"
                         >
+                          <Trash2 className="h-4 w-4" />
                           {deletingId === character.id ? "Deleting..." : "Delete"}
                         </button>
                       </div>
@@ -852,6 +983,136 @@ export default function MyCharactersPage() {
             )}
           </div>
         </div>
+
+        {editing ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm">
+            <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[32px] border border-white/10 bg-[#0a1020] p-6 md:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-sm uppercase tracking-[0.2em] text-white/40">
+                    Edit character
+                  </div>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                    Update saved character
+                  </h2>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setEditing(null)}
+                  className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 transition hover:border-white/20 hover:bg-white/10"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <div className="mb-2 text-sm text-white/75">Name</div>
+                  <input
+                    value={editing.name}
+                    onChange={(event) =>
+                      setEditing((current) =>
+                        current ? { ...current, name: event.target.value } : current,
+                      )
+                    }
+                    className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-2 text-sm text-white/75">Headline</div>
+                  <input
+                    value={editing.headline}
+                    onChange={(event) =>
+                      setEditing((current) =>
+                        current ? { ...current, headline: event.target.value } : current,
+                      )
+                    }
+                    className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-4">
+                <label className="block">
+                  <div className="mb-2 text-sm text-white/75">Description</div>
+                  <textarea
+                    rows={4}
+                    value={editing.description}
+                    onChange={(event) =>
+                      setEditing((current) =>
+                        current ? { ...current, description: event.target.value } : current,
+                      )
+                    }
+                    className="min-h-[120px] w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-2 text-sm text-white/75">Greeting</div>
+                  <textarea
+                    rows={3}
+                    value={editing.greeting}
+                    onChange={(event) =>
+                      setEditing((current) =>
+                        current ? { ...current, greeting: event.target.value } : current,
+                      )
+                    }
+                    className="min-h-[100px] w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-2 text-sm text-white/75">Backstory</div>
+                  <textarea
+                    rows={4}
+                    value={editing.backstory}
+                    onChange={(event) =>
+                      setEditing((current) =>
+                        current ? { ...current, backstory: event.target.value } : current,
+                      )
+                    }
+                    className="min-h-[120px] w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-2 text-sm text-white/75">Tags</div>
+                  <input
+                    value={editing.tags}
+                    onChange={(event) =>
+                      setEditing((current) =>
+                        current ? { ...current, tags: event.target.value } : current,
+                      )
+                    }
+                    placeholder="slow burn, elegant, dark, witty"
+                    className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={savingEdit}
+                  className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {savingEdit ? "Saving..." : "Save changes"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEditing(null)}
+                  className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </main>
     </AuthGuard>
   );

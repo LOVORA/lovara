@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Flame, Search, Sparkles, Star } from "lucide-react";
+import {
+  ArrowRight,
+  BadgeCheck,
+  Clock3,
+  Flame,
+  Heart,
+  Search,
+  Sparkles,
+  Star,
+  TrendingUp,
+} from "lucide-react";
 
 import { characters } from "@/lib/characters";
 import {
@@ -24,7 +34,14 @@ type CharacterLike = {
   >;
 };
 
-type FilterKey = "all" | "romance" | "dark" | "soft" | "elite" | "fantasy";
+type FilterKey =
+  | "all"
+  | "favorites"
+  | "romance"
+  | "dark"
+  | "soft"
+  | "elite"
+  | "fantasy";
 
 type DiscoverCharacter = {
   id: string;
@@ -40,8 +57,12 @@ type DiscoverCharacter = {
   updatedAt?: string;
 };
 
+const FAVORITES_STORAGE_KEY = "lovora.favorite.characters";
+const RECENT_STORAGE_KEY = "lovora.recent.characters";
+
 const FILTERS: Array<{ key: FilterKey; label: string; helper: string }> = [
   { key: "all", label: "All characters", helper: "Browse the full Lovora collection" },
+  { key: "favorites", label: "Favorites", helper: "Only the characters you saved" },
   { key: "romance", label: "Romance", helper: "Chemistry, tension, intimacy" },
   { key: "dark", label: "Dark", helper: "Danger, obsession, control" },
   { key: "soft", label: "Soft", helper: "Warmth, care, comfort" },
@@ -109,11 +130,11 @@ function getFilterSignals(character: DiscoverCharacter): string {
 }
 
 function matchesFilter(character: DiscoverCharacter, filter: FilterKey): boolean {
-  if (filter === "all") return true;
+  if (filter === "all" || filter === "favorites") return true;
 
   const haystack = getFilterSignals(character);
 
-  const terms: Record<Exclude<FilterKey, "all">, string[]> = {
+  const terms: Record<Exclude<FilterKey, "all" | "favorites">, string[]> = {
     romance: [
       "romance",
       "romantic",
@@ -194,6 +215,112 @@ function mapPublicCustomCharacters(source: PublicCustomCharacter[]): DiscoverCha
   });
 }
 
+function getFavoriteKey(character: DiscoverCharacter): string {
+  return `${character.source}:${character.slug || character.id}`;
+}
+
+function getRecentKey(character: DiscoverCharacter): string {
+  return `${character.source}:${character.slug || character.id}`;
+}
+
+function safeReadStringArray(key: string): string[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
+function saveStringArray(key: string, value: string[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore storage write issues
+  }
+}
+
+function isNewCharacter(character: DiscoverCharacter): boolean {
+  const rawDate = character.updatedAt || character.createdAt;
+  if (!rawDate) return false;
+
+  const date = new Date(rawDate);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const diff = Date.now() - date.getTime();
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+
+  return diff <= sevenDays;
+}
+
+function getQualityBadges(
+  character: DiscoverCharacter,
+  options: { isFavorite: boolean; isRecent: boolean; favoriteCount: number },
+): Array<{ label: string; icon: "favorite" | "new" | "community" | "built-in" | "popular" | "recent" }> {
+  const badges: Array<{
+    label: string;
+    icon: "favorite" | "new" | "community" | "built-in" | "popular" | "recent";
+  }> = [];
+
+  if (options.isFavorite) {
+    badges.push({ label: "Favorite", icon: "favorite" });
+  }
+
+  if (options.isRecent) {
+    badges.push({ label: "Recent", icon: "recent" });
+  }
+
+  if (isNewCharacter(character)) {
+    badges.push({ label: "New", icon: "new" });
+  }
+
+  if (character.source === "public-custom") {
+    badges.push({ label: "Community", icon: "community" });
+  } else {
+    badges.push({ label: "Built-in", icon: "built-in" });
+  }
+
+  const signals = getFilterSignals(character);
+  const strongVibe =
+    signals.includes("romance") ||
+    signals.includes("dark") ||
+    signals.includes("fantasy") ||
+    signals.includes("billionaire") ||
+    signals.includes("mafia");
+
+  if (strongVibe) {
+    badges.push({ label: "Popular vibe", icon: "popular" });
+  }
+
+  return badges.slice(0, 3);
+}
+
+function renderBadgeIcon(icon: "favorite" | "new" | "community" | "built-in" | "popular" | "recent") {
+  switch (icon) {
+    case "favorite":
+      return <Heart className="h-3.5 w-3.5 fill-white text-white" />;
+    case "new":
+      return <Sparkles className="h-3.5 w-3.5" />;
+    case "community":
+      return <BadgeCheck className="h-3.5 w-3.5" />;
+    case "built-in":
+      return <Star className="h-3.5 w-3.5" />;
+    case "popular":
+      return <TrendingUp className="h-3.5 w-3.5" />;
+    case "recent":
+      return <Clock3 className="h-3.5 w-3.5" />;
+  }
+}
+
 export default function CharactersPage() {
   const builtInSource = useMemo(() => (characters as CharacterLike[]) ?? [], []);
 
@@ -201,6 +328,8 @@ export default function CharactersPage() {
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const [publicCharacters, setPublicCharacters] = useState<PublicCustomCharacter[]>([]);
   const [loadingPublic, setLoadingPublic] = useState(true);
+  const [favoriteKeys, setFavoriteKeys] = useState<string[]>([]);
+  const [recentKeys, setRecentKeys] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -230,6 +359,19 @@ export default function CharactersPage() {
     };
   }, []);
 
+  useEffect(() => {
+    setFavoriteKeys(safeReadStringArray(FAVORITES_STORAGE_KEY));
+    setRecentKeys(safeReadStringArray(RECENT_STORAGE_KEY));
+  }, []);
+
+  useEffect(() => {
+    saveStringArray(FAVORITES_STORAGE_KEY, favoriteKeys);
+  }, [favoriteKeys]);
+
+  useEffect(() => {
+    saveStringArray(RECENT_STORAGE_KEY, recentKeys);
+  }, [recentKeys]);
+
   const source = useMemo<DiscoverCharacter[]>(() => {
     const builtInCharacters = mapBuiltInCharacters(builtInSource);
     const publicCustomCharacters = mapPublicCustomCharacters(publicCharacters);
@@ -237,10 +379,28 @@ export default function CharactersPage() {
     return [...publicCustomCharacters, ...builtInCharacters];
   }, [builtInSource, publicCharacters]);
 
+  const favoriteCharacters = useMemo(() => {
+    const favoriteSet = new Set(favoriteKeys);
+    return source.filter((character) => favoriteSet.has(getFavoriteKey(character)));
+  }, [favoriteKeys, source]);
+
+  const recentCharacters = useMemo(() => {
+    const sourceMap = new Map(source.map((character) => [getRecentKey(character), character]));
+    return recentKeys
+      .map((key) => sourceMap.get(key))
+      .filter((character): character is DiscoverCharacter => Boolean(character))
+      .slice(0, 6);
+  }, [recentKeys, source]);
+
   const filtered = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
+    const favoriteSet = new Set(favoriteKeys);
 
     return source.filter((character) => {
+      const isFavorite = favoriteSet.has(getFavoriteKey(character));
+
+      if (activeFilter === "favorites" && !isFavorite) return false;
+
       const inFilter = matchesFilter(character, activeFilter);
       if (!inFilter) return false;
 
@@ -248,10 +408,39 @@ export default function CharactersPage() {
 
       return getFilterSignals(character).includes(normalizedQuery);
     });
-  }, [activeFilter, query, source]);
+  }, [activeFilter, favoriteKeys, query, source]);
 
   const featured = filtered.slice(0, 3);
   const gridCharacters = filtered.slice(3);
+
+  function toggleFavorite(character: DiscoverCharacter) {
+    const key = getFavoriteKey(character);
+
+    setFavoriteKeys((current) => {
+      if (current.includes(key)) {
+        return current.filter((item) => item !== key);
+      }
+
+      return [key, ...current];
+    });
+  }
+
+  function isFavorited(character: DiscoverCharacter) {
+    return favoriteKeys.includes(getFavoriteKey(character));
+  }
+
+  function isRecent(character: DiscoverCharacter) {
+    return recentKeys.includes(getRecentKey(character));
+  }
+
+  function registerRecent(character: DiscoverCharacter) {
+    const key = getRecentKey(character);
+
+    setRecentKeys((current) => {
+      const next = [key, ...current.filter((item) => item !== key)];
+      return next.slice(0, 12);
+    });
+  }
 
   return (
     <main className="min-h-screen bg-neutral-950 text-white">
@@ -271,12 +460,13 @@ export default function CharactersPage() {
 
                 <p className="max-w-2xl text-base leading-7 text-white/68 md:text-lg">
                   Explore Lovora’s built-in cast and public custom characters through mood,
-                  chemistry, power, softness, and fantasy.
+                  chemistry, power, softness, fantasy, favorites, recent browsing, and stronger
+                  quality signals.
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:min-w-[420px]">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:min-w-[520px]">
               <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
                 <div className="text-sm text-white/55">Library</div>
                 <div className="mt-2 text-2xl font-semibold">{source.length}</div>
@@ -289,9 +479,14 @@ export default function CharactersPage() {
                 </div>
               </div>
 
-              <div className="col-span-2 rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur sm:col-span-1">
-                <div className="text-sm text-white/55">Fast path</div>
-                <div className="mt-2 text-2xl font-semibold">Create + chat</div>
+              <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
+                <div className="text-sm text-white/55">Favorites</div>
+                <div className="mt-2 text-2xl font-semibold">{favoriteCharacters.length}</div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
+                <div className="text-sm text-white/55">Recent</div>
+                <div className="mt-2 text-2xl font-semibold">{recentCharacters.length}</div>
               </div>
             </div>
           </div>
@@ -349,6 +544,218 @@ export default function CharactersPage() {
         </div>
       </section>
 
+      {recentCharacters.length > 0 ? (
+        <section className="mx-auto max-w-7xl px-6 pb-8 md:px-8 lg:px-10">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="rounded-full border border-white/10 bg-white/6 p-2">
+              <Clock3 className="h-4 w-4 text-white" />
+            </div>
+
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight">Recent characters</h2>
+              <p className="text-sm text-white/55">
+                Fast return path to the characters you viewed most recently.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {recentCharacters.slice(0, 3).map((character) => {
+              const favorited = isFavorited(character);
+              const badges = getQualityBadges(character, {
+                isFavorite: favorited,
+                isRecent: true,
+                favoriteCount: favoriteCharacters.length,
+              });
+
+              return (
+                <article
+                  key={`recent-${character.id}`}
+                  className="flex h-full flex-col rounded-[28px] border border-white/10 bg-white/[0.04] p-5 transition hover:border-white/18 hover:bg-white/[0.06]"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/60">
+                        Recent
+                      </div>
+                      <h3 className="mt-3 text-xl font-semibold tracking-tight">{character.name}</h3>
+                      <p className="mt-2 text-sm text-white/60">{character.headline}</p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleFavorite(character)}
+                      aria-label={favorited ? "Remove favorite" : "Add favorite"}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
+                    >
+                      <Heart
+                        className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {badges.map((badge) => (
+                      <span
+                        key={`${character.id}-${badge.label}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
+                      >
+                        {renderBadgeIcon(badge.icon)}
+                        {badge.label}
+                      </span>
+                    ))}
+                  </div>
+
+                  <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
+                    {character.description}
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {character.tags.length > 0 ? (
+                      character.tags.map((tag) => (
+                        <span
+                          key={`${character.id}-${tag}`}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
+                        Recently viewed
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
+                    <span className="text-sm text-white/45">
+                      {character.source === "public-custom"
+                        ? "Public community character"
+                        : "Built-in Lovora character"}
+                    </span>
+
+                    <Link
+                      href={character.href}
+                      onClick={() => registerRecent(character)}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+                    >
+                      View
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {favoriteCharacters.length > 0 && activeFilter !== "favorites" ? (
+        <section className="mx-auto max-w-7xl px-6 pb-8 md:px-8 lg:px-10">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="rounded-full border border-white/10 bg-white/6 p-2">
+              <Heart className="h-4 w-4 fill-white text-white" />
+            </div>
+
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight">Your favorites</h2>
+              <p className="text-sm text-white/55">
+                Quick access to the characters you want to come back to.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {favoriteCharacters.slice(0, 3).map((character) => {
+              const favorited = isFavorited(character);
+              const badges = getQualityBadges(character, {
+                isFavorite: favorited,
+                isRecent: isRecent(character),
+                favoriteCount: favoriteCharacters.length,
+              });
+
+              return (
+                <article
+                  key={`favorite-${character.id}`}
+                  className="flex h-full flex-col rounded-[28px] border border-white/10 bg-white/[0.04] p-5 transition hover:border-white/18 hover:bg-white/[0.06]"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/60">
+                        Favorite
+                      </div>
+                      <h3 className="mt-3 text-xl font-semibold tracking-tight">{character.name}</h3>
+                      <p className="mt-2 text-sm text-white/60">{character.headline}</p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleFavorite(character)}
+                      aria-label={favorited ? "Remove favorite" : "Add favorite"}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
+                    >
+                      <Heart
+                        className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {badges.map((badge) => (
+                      <span
+                        key={`${character.id}-${badge.label}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
+                      >
+                        {renderBadgeIcon(badge.icon)}
+                        {badge.label}
+                      </span>
+                    ))}
+                  </div>
+
+                  <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
+                    {character.description}
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {character.tags.length > 0 ? (
+                      character.tags.map((tag) => (
+                        <span
+                          key={`${character.id}-${tag}`}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
+                        Saved favorite
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
+                    <span className="text-sm text-white/45">
+                      {character.source === "public-custom"
+                        ? "Public community character"
+                        : "Built-in Lovora character"}
+                    </span>
+
+                    <Link
+                      href={character.href}
+                      onClick={() => registerRecent(character)}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+                    >
+                      View
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
       {featured.length > 0 ? (
         <section className="mx-auto max-w-7xl px-6 pb-8 md:px-8 lg:px-10">
           <div className="mb-5 flex items-center gap-3">
@@ -365,69 +772,104 @@ export default function CharactersPage() {
           </div>
 
           <div className="grid gap-5 lg:grid-cols-3">
-            {featured.map((character) => (
-              <article
-                key={character.id}
-                className="group rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-6 transition hover:border-white/16 hover:bg-[linear-gradient(180deg,rgba(255,255,255,0.12),rgba(255,255,255,0.04))]"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs text-white/70">
-                      <Star className="h-3.5 w-3.5" />
-                      {character.source === "public-custom" ? "Public custom" : "Featured"}
+            {featured.map((character) => {
+              const favorited = isFavorited(character);
+              const badges = getQualityBadges(character, {
+                isFavorite: favorited,
+                isRecent: isRecent(character),
+                favoriteCount: favoriteCharacters.length,
+              });
+
+              return (
+                <article
+                  key={character.id}
+                  className="group rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-6 transition hover:border-white/16 hover:bg-[linear-gradient(180deg,rgba(255,255,255,0.12),rgba(255,255,255,0.04))]"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs text-white/70">
+                        <Star className="h-3.5 w-3.5" />
+                        {character.source === "public-custom" ? "Public custom" : "Featured"}
+                      </div>
+
+                      <h3 className="mt-4 text-2xl font-semibold tracking-tight">
+                        {character.name}
+                      </h3>
+
+                      <p className="mt-2 text-sm text-white/62">{character.headline}</p>
                     </div>
 
-                    <h3 className="mt-4 text-2xl font-semibold tracking-tight">
-                      {character.name}
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/58">
+                        {character.category || "Lovora"}
+                      </div>
 
-                    <p className="mt-2 text-sm text-white/62">{character.headline}</p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/58">
-                    {character.category || "Lovora"}
-                  </div>
-                </div>
-
-                <p className="mt-5 line-clamp-4 text-sm leading-7 text-white/68">
-                  {character.description}
-                </p>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {character.tags.length > 0 ? (
-                    character.tags.map((tag) => (
-                      <span
-                        key={`${character.id}-${tag}`}
-                        className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/70"
+                      <button
+                        type="button"
+                        onClick={() => toggleFavorite(character)}
+                        aria-label={favorited ? "Remove favorite" : "Add favorite"}
+                        className="rounded-2xl border border-white/10 bg-white/6 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
                       >
-                        {tag}
+                        <Heart
+                          className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {badges.map((badge) => (
+                      <span
+                        key={`${character.id}-${badge.label}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
+                      >
+                        {renderBadgeIcon(badge.icon)}
+                        {badge.label}
                       </span>
-                    ))
-                  ) : (
-                    <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/55">
-                      Premium roleplay
-                    </span>
-                  )}
-                </div>
+                    ))}
+                  </div>
 
-                <div className="mt-6 flex items-center gap-3">
-                  <Link
-                    href={character.href}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-                  >
-                    Open character
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
+                  <p className="mt-5 line-clamp-4 text-sm leading-7 text-white/68">
+                    {character.description}
+                  </p>
 
-                  <Link
-                    href="/create-character"
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
-                  >
-                    Create your own
-                  </Link>
-                </div>
-              </article>
-            ))}
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {character.tags.length > 0 ? (
+                      character.tags.map((tag) => (
+                        <span
+                          key={`${character.id}-${tag}`}
+                          className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/70"
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/55">
+                        Premium roleplay
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-6 flex items-center gap-3">
+                    <Link
+                      href={character.href}
+                      onClick={() => registerRecent(character)}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+                    >
+                      Open character
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+
+                    <Link
+                      href="/create-character"
+                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/78 transition hover:border-white/18 hover:bg-white/8"
+                    >
+                      Create your own
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
       ) : null}
@@ -483,60 +925,95 @@ export default function CharactersPage() {
           </div>
         ) : (
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {gridCharacters.map((character) => (
-              <article
-                key={character.id}
-                className="flex h-full flex-col rounded-[28px] border border-white/10 bg-white/[0.04] p-5 transition hover:border-white/18 hover:bg-white/[0.06]"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-semibold tracking-tight">{character.name}</h3>
-                    <p className="mt-2 text-sm text-white/60">{character.headline}</p>
-                  </div>
+            {gridCharacters.map((character) => {
+              const favorited = isFavorited(character);
+              const badges = getQualityBadges(character, {
+                isFavorite: favorited,
+                isRecent: isRecent(character),
+                favoriteCount: favoriteCharacters.length,
+              });
 
-                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-white/48">
-                    {character.source === "public-custom" ? "Public custom" : "Built-in"}
-                  </div>
-                </div>
+              return (
+                <article
+                  key={character.id}
+                  className="flex h-full flex-col rounded-[28px] border border-white/10 bg-white/[0.04] p-5 transition hover:border-white/18 hover:bg-white/[0.06]"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-xl font-semibold tracking-tight">{character.name}</h3>
+                      <p className="mt-2 text-sm text-white/60">{character.headline}</p>
+                    </div>
 
-                <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
-                  {character.description}
-                </p>
+                    <div className="flex items-center gap-2">
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-white/48">
+                        {character.source === "public-custom" ? "Public custom" : "Built-in"}
+                      </div>
 
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {character.tags.length > 0 ? (
-                    character.tags.map((tag) => (
-                      <span
-                        key={`${character.id}-${tag}`}
-                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                      <button
+                        type="button"
+                        onClick={() => toggleFavorite(character)}
+                        aria-label={favorited ? "Remove favorite" : "Add favorite"}
+                        className="rounded-2xl border border-white/10 bg-white/5 p-3 text-white/75 transition hover:border-white/18 hover:bg-white/8"
                       >
-                        {tag}
+                        <Heart
+                          className={`h-4 w-4 ${favorited ? "fill-white text-white" : "text-white/70"}`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {badges.map((badge) => (
+                      <span
+                        key={`${character.id}-${badge.label}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] text-white/72"
+                      >
+                        {renderBadgeIcon(badge.icon)}
+                        {badge.label}
                       </span>
-                    ))
-                  ) : (
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
-                      Distinct tone
+                    ))}
+                  </div>
+
+                  <p className="mt-4 flex-1 text-sm leading-7 text-white/66">
+                    {character.description}
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {character.tags.length > 0 ? (
+                      character.tags.map((tag) => (
+                        <span
+                          key={`${character.id}-${tag}`}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/68"
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/52">
+                        Distinct tone
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
+                    <span className="text-sm text-white/45">
+                      {character.source === "public-custom"
+                        ? "Public community character"
+                        : "Built-in Lovora character"}
                     </span>
-                  )}
-                </div>
 
-                <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/8 pt-5">
-                  <span className="text-sm text-white/45">
-                    {character.source === "public-custom"
-                      ? "Public community character"
-                      : "Built-in Lovora character"}
-                  </span>
-
-                  <Link
-                    href={character.href}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-                  >
-                    View
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </div>
-              </article>
-            ))}
+                    <Link
+                      href={character.href}
+                      onClick={() => registerRecent(character)}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
+                    >
+                      View
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

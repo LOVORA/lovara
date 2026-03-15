@@ -1,12 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useMemo,
-  useState,
-  type ReactNode,
-  type FormEvent,
-} from "react";
+import { useMemo, useState, type ReactNode, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
@@ -42,6 +37,45 @@ type StudioStep =
   | "advanced"
   | "visual"
   | "publish";
+
+type TemplateMode = "quick" | "deep";
+
+type CharacterTemplate = {
+  id: string;
+  title: string;
+  badge: string;
+  description: string;
+  mode: TemplateMode;
+  values: {
+    region: string;
+    age: number;
+    archetype: StudioFormState["archetype"];
+    coreVibes: CoreVibeId[];
+    warmth: number;
+    assertiveness: number;
+    mystery: number;
+    playfulness: number;
+    speechStyle: StudioFormState["speechStyle"];
+    replyLength: StudioFormState["replyLength"];
+    relationshipPace: StudioFormState["relationshipPace"];
+    tone: string;
+    setting: string;
+    relationshipToUser: string;
+    sceneGoal: string;
+    visualAura?: string;
+    interests?: string[];
+    avatarStyle?: string;
+    hair?: string;
+    eyes?: string;
+    outfit?: string;
+    palette?: string;
+    camera?: string;
+    photoPack?: string;
+    publicTagline?: string;
+    publicTeaser?: string;
+    publicTags?: string[];
+  };
+};
 
 const REGION_OPTIONS = [
   "Latin",
@@ -312,24 +346,26 @@ const SCENE_PRESETS = [
   },
 ] as const;
 
-const QUICK_START_PRESETS = [
+const CHARACTER_TEMPLATES: CharacterTemplate[] = [
   {
-    id: "soft-latin",
+    id: "soft-latin-muse",
     title: "Soft Latin Muse",
+    badge: "Premium slow-burn",
     description:
       "Warm, teasing, emotionally magnetic, premium slow-burn energy.",
+    mode: "quick",
     values: {
       region: "Latin",
       age: 24,
-      archetype: "elegant-muse" as StudioFormState["archetype"],
-      coreVibes: ["soft", "teasing", "intense"] as CoreVibeId[],
+      archetype: "elegant-muse",
+      coreVibes: ["soft", "teasing", "intense"],
       warmth: 68,
       assertiveness: 56,
       mystery: 58,
       playfulness: 62,
-      speechStyle: "soft" as StudioFormState["speechStyle"],
-      replyLength: "balanced" as StudioFormState["replyLength"],
-      relationshipPace: "slow-burn" as StudioFormState["relationshipPace"],
+      speechStyle: "soft",
+      replyLength: "balanced",
+      relationshipPace: "slow-burn",
       tone: "warm, sensual, emotionally aware",
       setting: "upscale lounge after midnight",
       relationshipToUser:
@@ -345,25 +381,31 @@ const QUICK_START_PRESETS = [
       palette: "wine red / black",
       camera: "close-up portrait",
       photoPack: "luxury portraits",
+      publicTagline: "Warmth, luxury, and dangerous intimacy in one character.",
+      publicTeaser:
+        "A polished romantic character with softness, tension, and upscale emotional pull.",
+      publicTags: ["slow burn", "luxury", "romantic", "teasing"],
     },
   },
   {
     id: "witty-bestfriend",
     title: "Witty Best-Friend",
+    badge: "Fast chemistry",
     description:
       "Fast chemistry, banter-heavy, cozy but flirt-forward and addictive.",
+    mode: "quick",
     values: {
       region: "Mediterranean",
       age: 22,
-      archetype: "best-friend-lover" as StudioFormState["archetype"],
-      coreVibes: ["witty", "teasing", "soft"] as CoreVibeId[],
+      archetype: "best-friend-lover",
+      coreVibes: ["witty", "teasing", "soft"],
       warmth: 72,
       assertiveness: 46,
       mystery: 30,
       playfulness: 84,
-      speechStyle: "witty" as StudioFormState["speechStyle"],
-      replyLength: "balanced" as StudioFormState["replyLength"],
-      relationshipPace: "balanced" as StudioFormState["relationshipPace"],
+      speechStyle: "witty",
+      replyLength: "balanced",
+      relationshipPace: "balanced",
       tone: "quick, playful, naturally intimate",
       setting: "late-night walk after a chaotic day",
       relationshipToUser: "best friend with unresolved tension",
@@ -377,25 +419,31 @@ const QUICK_START_PRESETS = [
       palette: "white / beige",
       camera: "soft candid angle",
       photoPack: "daily lifestyle set",
+      publicTagline: "Banter, comfort, and chemistry that feels instant.",
+      publicTeaser:
+        "A playful best-friend energy template built for teasing, comfort, and emotional closeness.",
+      publicTags: ["banter", "best friend", "soft", "playful"],
     },
   },
   {
     id: "cold-luxury",
     title: "Cold Luxury",
+    badge: "High-status tension",
     description:
       "Controlled, hard-to-read, premium elegance with slow-burn dominance.",
+    mode: "deep",
     values: {
       region: "Nordic",
       age: 29,
-      archetype: "ice-queen" as StudioFormState["archetype"],
-      coreVibes: ["mysterious", "dominant", "slowburn"] as CoreVibeId[],
+      archetype: "ice-queen",
+      coreVibes: ["mysterious", "dominant", "slowburn"],
       warmth: 36,
       assertiveness: 76,
       mystery: 86,
       playfulness: 28,
-      speechStyle: "poetic" as StudioFormState["speechStyle"],
-      replyLength: "detailed" as StudioFormState["replyLength"],
-      relationshipPace: "slow-burn" as StudioFormState["relationshipPace"],
+      speechStyle: "poetic",
+      replyLength: "detailed",
+      relationshipPace: "slow-burn",
       tone: "controlled, elegant, restrained",
       setting: "private suite overlooking a city skyline",
       relationshipToUser: "someone she tests before she trusts",
@@ -409,9 +457,127 @@ const QUICK_START_PRESETS = [
       palette: "cream / gold",
       camera: "editorial front-facing shot",
       photoPack: "night-out set",
+      publicTagline: "Elegant, unreadable, and impossible to forget.",
+      publicTeaser:
+        "Luxury-coded emotional tension with cold restraint, selective warmth, and slow-burn dominance.",
+      publicTags: ["luxury", "cold", "slow burn", "elite"],
     },
   },
-] as const;
+  {
+    id: "dangerous-obsession",
+    title: "Dangerous Obsession",
+    badge: "Dark fantasy",
+    description:
+      "Possessive tension, magnetic danger, and obsession-driven chemistry.",
+    mode: "deep",
+    values: {
+      region: "Middle Eastern",
+      age: 28,
+      archetype: "ice-queen",
+      coreVibes: ["intense", "dominant", "mysterious"],
+      warmth: 34,
+      assertiveness: 82,
+      mystery: 78,
+      playfulness: 24,
+      speechStyle: "poetic",
+      replyLength: "balanced",
+      relationshipPace: "slow-burn",
+      tone: "dangerous, intimate, quietly possessive",
+      setting: "private car ride through the city at night",
+      relationshipToUser: "someone they protect too intensely",
+      sceneGoal: "build dark attachment without losing elegance",
+      visualAura: "dangerous charm",
+      interests: ["boxing", "late-night drives", "poetry"],
+      avatarStyle: "dark moody",
+      hair: "black silky hair",
+      eyes: "dark eyes",
+      outfit: "street-luxury fit",
+      palette: "black / silver",
+      camera: "over-the-shoulder glance",
+      photoPack: "night-out set",
+      publicTagline: "Obsessive protection with premium dark chemistry.",
+      publicTeaser:
+        "A dark, possessive, emotionally intense character with controlled danger and private loyalty.",
+      publicTags: ["dark", "obsession", "protective", "dangerous"],
+    },
+  },
+  {
+    id: "soft-comfort",
+    title: "Soft Comfort",
+    badge: "Companion energy",
+    description:
+      "Gentle reassurance, emotional safety, and warm relationship depth.",
+    mode: "quick",
+    values: {
+      region: "Global",
+      age: 25,
+      archetype: "elegant-muse",
+      coreVibes: ["soft", "teasing", "intense"],
+      warmth: 84,
+      assertiveness: 38,
+      mystery: 24,
+      playfulness: 50,
+      speechStyle: "soft",
+      replyLength: "balanced",
+      relationshipPace: "balanced",
+      tone: "safe, kind, emotionally available",
+      setting: "quiet apartment during a rainy evening",
+      relationshipToUser: "someone they care for deeply and calmly",
+      sceneGoal: "create comfort and trust quickly",
+      visualAura: "soft natural beauty",
+      interests: ["books", "coffee rituals", "cooking"],
+      avatarStyle: "romantic glow",
+      hair: "auburn romantic hair",
+      eyes: "soft brown eyes",
+      outfit: "soft knitwear intimacy",
+      palette: "rose / ivory",
+      camera: "soft candid angle",
+      photoPack: "soft home set",
+      publicTagline: "A gentle emotional presence built for comfort and trust.",
+      publicTeaser:
+        "Warm, loyal, and emotionally steady companion energy for softer chats and slower closeness.",
+      publicTags: ["comfort", "soft", "gentle", "companion"],
+    },
+  },
+  {
+    id: "elite-rival",
+    title: "Elite Rival",
+    badge: "Sharp tension",
+    description:
+      "Competitive attraction, high-status rivalry, and sharp emotional control.",
+    mode: "deep",
+    values: {
+      region: "Slavic",
+      age: 31,
+      archetype: "best-friend-lover",
+      coreVibes: ["witty", "dominant", "slowburn"],
+      warmth: 42,
+      assertiveness: 80,
+      mystery: 62,
+      playfulness: 54,
+      speechStyle: "witty",
+      replyLength: "balanced",
+      relationshipPace: "slow-burn",
+      tone: "sharp, elegant, competitive",
+      setting: "exclusive event where both of you are pretending not to care",
+      relationshipToUser: "rival they watch too closely",
+      sceneGoal: "turn rivalry into addictive attraction",
+      visualAura: "high-fashion edge",
+      interests: ["fashion", "travel", "art museums"],
+      avatarStyle: "editorial fashion",
+      hair: "short sharp cut",
+      eyes: "green eyes",
+      outfit: "tailored office look",
+      palette: "navy / gold",
+      camera: "waist-up portrait",
+      photoPack: "luxury portraits",
+      publicTagline: "Luxury rivalry with controlled flirtation and elite tension.",
+      publicTeaser:
+        "A polished rival template designed for status games, chemistry, and restrained attraction.",
+      publicTags: ["rival", "elite", "luxury", "sharp"],
+    },
+  },
+];
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -749,28 +915,37 @@ function RegionChip({
 
 function PresetCard({
   title,
+  badge,
   description,
+  active,
   onClick,
 }: {
   title: string;
+  badge: string;
   description: string;
+  active: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group rounded-[26px] border border-white/10 bg-gradient-to-br from-white/[0.05] to-white/[0.02] p-4 text-left transition hover:border-fuchsia-400/25 hover:from-fuchsia-400/10 hover:to-cyan-400/10"
+      className={cn(
+        "group rounded-[26px] border p-4 text-left transition",
+        active
+          ? "border-fuchsia-400/35 bg-gradient-to-br from-fuchsia-400/12 to-cyan-400/12 shadow-[0_0_0_1px_rgba(217,70,239,0.12)]"
+          : "border-white/10 bg-gradient-to-br from-white/[0.05] to-white/[0.02] hover:border-fuchsia-400/25 hover:from-fuchsia-400/10 hover:to-cyan-400/10",
+      )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="text-sm font-medium text-white">{title}</div>
         <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/45 transition group-hover:text-fuchsia-100">
-          Preset
+          {badge}
         </div>
       </div>
       <div className="mt-2 text-sm leading-6 text-white/60">{description}</div>
       <div className="mt-4 text-xs uppercase tracking-[0.18em] text-fuchsia-200/80">
-        Apply preset
+        {active ? "Applied" : "Apply template"}
       </div>
     </button>
   );
@@ -932,6 +1107,7 @@ export default function CreateCharacterPage() {
   const [banner, setBanner] = useState<BannerState>(null);
   const [dynamism, setDynamism] = useState(68);
   const [activeStep, setActiveStep] = useState<StudioStep>("identity");
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
   const isQuickMode = form.mode === "quick";
 
@@ -1379,47 +1555,55 @@ export default function CreateCharacterPage() {
     setBanner(null);
     setDynamism(68);
     setActiveStep("identity");
+    setSelectedTemplateId("");
   }
 
-  function applyQuickStartPreset(
-    preset: (typeof QUICK_START_PRESETS)[number],
-  ) {
+  function applyCharacterTemplate(template: CharacterTemplate) {
+    setSelectedTemplateId(template.id);
     setForm((current) => ({
       ...current,
-      region: preset.values.region,
-      age: String(preset.values.age),
-      archetype: preset.values.archetype,
-      coreVibes: [...preset.values.coreVibes],
-      warmth: preset.values.warmth,
-      assertiveness: preset.values.assertiveness,
-      mystery: preset.values.mystery,
-      playfulness: preset.values.playfulness,
-      speechStyle: preset.values.speechStyle,
-      replyLength: preset.values.replyLength,
-      relationshipPace: preset.values.relationshipPace,
-      tone: preset.values.tone,
-      setting: preset.values.setting,
-      relationshipToUser: preset.values.relationshipToUser,
-      sceneGoal: preset.values.sceneGoal,
+      mode: template.mode,
+      region: template.values.region,
+      age: String(template.values.age),
+      archetype: template.values.archetype,
+      coreVibes: [...template.values.coreVibes],
+      warmth: template.values.warmth,
+      assertiveness: template.values.assertiveness,
+      mystery: template.values.mystery,
+      playfulness: template.values.playfulness,
+      speechStyle: template.values.speechStyle,
+      replyLength: template.values.replyLength,
+      relationshipPace: template.values.relationshipPace,
+      tone: template.values.tone,
+      setting: template.values.setting,
+      relationshipToUser: template.values.relationshipToUser,
+      sceneGoal: template.values.sceneGoal,
     }));
 
+    if (template.mode === "quick") {
+      setActiveStep("identity");
+    }
+
     rebuildCustomNotes({
-      "Visual aura": preset.values.visualAura,
-      "Interest anchors": preset.values.interests.join(", "),
-      "Avatar style": preset.values.avatarStyle,
-      Hair: preset.values.hair,
-      Eyes: preset.values.eyes,
-      Outfit: preset.values.outfit,
-      Palette: preset.values.palette,
-      Camera: preset.values.camera,
-      "Photo pack": preset.values.photoPack,
+      "Visual aura": template.values.visualAura || "",
+      "Interest anchors": (template.values.interests || []).join(", "),
+      "Avatar style": template.values.avatarStyle || "",
+      Hair: template.values.hair || "",
+      Eyes: template.values.eyes || "",
+      Outfit: template.values.outfit || "",
+      Palette: template.values.palette || "",
+      Camera: template.values.camera || "",
+      "Photo pack": template.values.photoPack || "",
+      "Public tagline": template.values.publicTagline || "",
+      "Public teaser": template.values.publicTeaser || "",
+      "Public tags": (template.values.publicTags || []).join(", "),
     });
   }
 
-  function applyRandomPreset() {
+  function applyRandomTemplate() {
     const random =
-      QUICK_START_PRESETS[Math.floor(Math.random() * QUICK_START_PRESETS.length)];
-    applyQuickStartPreset(random);
+      CHARACTER_TEMPLATES[Math.floor(Math.random() * CHARACTER_TEMPLATES.length)];
+    applyCharacterTemplate(random);
   }
 
   function handleRegionSelect(region: string) {
@@ -1583,10 +1767,10 @@ export default function CreateCharacterPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={applyRandomPreset}
+                onClick={applyRandomTemplate}
                 className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/75 transition hover:border-white/20 hover:bg-white/10"
               >
-                Random preset
+                Surprise me
               </button>
               <button
                 type="button"
@@ -1711,27 +1895,32 @@ export default function CreateCharacterPage() {
               ) : null}
 
               <Section
-                title="Quick start presets"
-                description="Start from a polished emotional template, then refine manually."
+                title="Template library"
+                description="Start from a polished, working template and then customize it."
                 accent="fuchsia"
               >
-                <div className="mb-4 flex flex-wrap gap-3">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm text-white/60">
+                    Templates apply safely on top of the current builder system.
+                  </div>
                   <button
                     type="button"
-                    onClick={applyRandomPreset}
+                    onClick={applyRandomTemplate}
                     className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
                   >
-                    Random premium preset
+                    Apply random template
                   </button>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-3">
-                  {QUICK_START_PRESETS.map((preset) => (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {CHARACTER_TEMPLATES.map((template) => (
                     <PresetCard
-                      key={preset.id}
-                      title={preset.title}
-                      description={preset.description}
-                      onClick={() => applyQuickStartPreset(preset)}
+                      key={template.id}
+                      title={template.title}
+                      badge={template.badge}
+                      description={template.description}
+                      active={selectedTemplateId === template.id}
+                      onClick={() => applyCharacterTemplate(template)}
                     />
                   ))}
                 </div>
@@ -2703,6 +2892,13 @@ export default function CreateCharacterPage() {
                   </h3>
 
                   <p className="mt-2 text-sm text-white/65">{draft.headline}</p>
+
+                  {selectedTemplateId ? (
+                    <div className="mt-3 inline-flex rounded-full border border-fuchsia-400/20 bg-fuchsia-400/10 px-3 py-1 text-xs text-fuchsia-100">
+                      Template applied:{" "}
+                      {CHARACTER_TEMPLATES.find((item) => item.id === selectedTemplateId)?.title}
+                    </div>
+                  ) : null}
 
                   <div className="mt-4 flex flex-wrap gap-2">
                     {identitySummary.map((item) => (

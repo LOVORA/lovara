@@ -14,6 +14,9 @@ import {
   HeartHandshake,
   ScrollText,
   Tags,
+  Star,
+  Copy,
+  CheckCircle2,
 } from "lucide-react";
 import {
   createMyCustomCharacter,
@@ -64,6 +67,11 @@ function getScenarioSummary(
   ].filter(Boolean);
 
   return parts.length > 0 ? parts.join(" • ") : "Open-ended roleplay dynamic";
+}
+
+function truncate(value: string, max: number) {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trim()}…`;
 }
 
 function DetailCard({
@@ -141,6 +149,24 @@ function PreviewBubble({
   );
 }
 
+function HeroStat({
+  label,
+  value,
+  helper,
+}: {
+  label: string;
+  value: string;
+  helper: string;
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4">
+      <div className="text-sm text-white/45">{label}</div>
+      <div className="mt-2 text-lg font-semibold text-white">{value}</div>
+      <div className="mt-2 text-sm leading-6 text-white/55">{helper}</div>
+    </div>
+  );
+}
+
 export default function PublicSharePage() {
   const params = useParams<{ shareId?: string | string[] }>();
   const router = useRouter();
@@ -158,6 +184,7 @@ export default function PublicSharePage() {
   const [isOwner, setIsOwner] = useState(false);
   const [importing, setImporting] = useState(false);
   const [checkingOwner, setCheckingOwner] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -282,6 +309,26 @@ export default function PublicSharePage() {
     }
   }
 
+  async function handleCopyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setBanner({
+        type: "success",
+        message: "Public link copied.",
+      });
+
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 1800);
+    } catch {
+      setBanner({
+        type: "error",
+        message: "Could not copy the public link.",
+      });
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-[#050816] px-6 py-10 text-white">
@@ -315,6 +362,11 @@ export default function PublicSharePage() {
 
   const visibility = getVisibilityFromPayload(safePayload(character));
   const scenarioSummary = getScenarioSummary(character.scenario);
+  const tagList = character.tags ?? [];
+  const greetingPreview =
+    character.greeting || character.preview_message || "No greeting added.";
+  const shortDescription =
+    character.headline || truncate(character.description || "", 180);
 
   return (
     <main className="min-h-screen bg-[#050816] text-white">
@@ -336,7 +388,7 @@ export default function PublicSharePage() {
               </h1>
 
               <p className="mt-4 max-w-3xl text-base leading-8 text-white/68">
-                {character.headline || character.description}
+                {shortDescription}
               </p>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -356,21 +408,17 @@ export default function PublicSharePage() {
                   ))}
                 </div>
               ) : null}
-            </div>
 
-            <div className="rounded-[30px] border border-white/10 bg-black/25 p-5 backdrop-blur-sm">
-              <div className="text-xs uppercase tracking-[0.2em] text-white/45">
-                What you can do here
-              </div>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
+                >
+                  {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  {copied ? "Copied" : "Copy link"}
+                </button>
 
-              <div className="mt-4 grid gap-3 text-sm text-white/72">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  Browse the full public profile, preview the roleplay tone, and decide whether
-                  this character belongs in your own vault.
-                </div>
-              </div>
-
-              <div className="mt-5 flex flex-wrap gap-3">
                 <Link
                   href="/characters"
                   className="rounded-full border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
@@ -388,9 +436,10 @@ export default function PublicSharePage() {
                     </Link>
                     <Link
                       href={`/chat/custom/${character.slug}`}
-                      className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black"
+                      className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-medium text-black"
                     >
                       Open private chat
+                      <ArrowRight className="h-4 w-4" />
                     </Link>
                   </>
                 ) : (
@@ -398,11 +447,40 @@ export default function PublicSharePage() {
                     type="button"
                     onClick={handleImport}
                     disabled={importing || checkingOwner}
-                    className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-70"
+                    className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-70"
                   >
+                    <UserPlus className="h-4 w-4" />
                     {importing ? "Adding..." : "Add to my characters"}
                   </button>
                 )}
+              </div>
+            </div>
+
+            <div className="rounded-[30px] border border-white/10 bg-black/25 p-5 backdrop-blur-sm">
+              <div className="text-xs uppercase tracking-[0.2em] text-white/45">
+                Why this page matters
+              </div>
+
+              <div className="mt-4 grid gap-3">
+                <HeroStat
+                  label="Profile"
+                  value="Public showcase"
+                  helper="A polished share page for discovery, trust, and imports."
+                />
+                <HeroStat
+                  label="Workflow"
+                  value={isOwner ? "Owner access active" : "Import-ready"}
+                  helper={
+                    isOwner
+                      ? "You can keep using your private copy while this page stays public."
+                      : "Save this character into your vault and continue privately."
+                  }
+                />
+                <HeroStat
+                  label="Scenario"
+                  value={character.scenario?.setting || "Open setting"}
+                  helper="The roleplay setup stays visible before import."
+                />
               </div>
             </div>
           </div>
@@ -432,7 +510,7 @@ export default function PublicSharePage() {
             <DetailCard icon={<MessageCircle className="h-4 w-4" />} label="Greeting Preview">
               <PreviewBubble
                 title="First impression"
-                content={character.greeting || "No greeting added."}
+                content={greetingPreview}
                 tone="dark"
               />
             </DetailCard>
@@ -476,8 +554,8 @@ export default function PublicSharePage() {
 
             <DetailCard icon={<Tags className="h-4 w-4" />} label="Tags">
               <div className="flex flex-wrap gap-2">
-                {(character.tags ?? []).length > 0 ? (
-                  character.tags.map((tag) => (
+                {tagList.length > 0 ? (
+                  tagList.map((tag) => (
                     <span
                       key={tag}
                       className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/75"
@@ -522,6 +600,17 @@ export default function PublicSharePage() {
                     {isOwner
                       ? "You own this character. Keep using your private chat flow while this public page stays visible for discovery."
                       : "Add this character to your account to create a private copy and start chatting with it from your own vault."}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-white">
+                    <Star className="h-4 w-4 text-amber-300" />
+                    Why import it
+                  </div>
+                  <p className="mt-2 text-sm leading-7 text-white/68">
+                    Importing creates your own private version, so you can refine tone, keep it in
+                    your library, and continue the character inside your personal workflow.
                   </p>
                 </div>
 
