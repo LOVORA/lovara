@@ -36,7 +36,7 @@ export default async function MyCharactersPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect("/sign-in?next=/my-characters");
   }
 
   const { data, error } = await supabase
@@ -90,9 +90,7 @@ export default async function MyCharactersPage() {
               Your saved characters
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-white/60 md:text-base">
-              Private and public characters you created appear here. Builder-v2
-              cards automatically show richer teaser and visual summary data when
-              available.
+              Private and public characters you created appear here.
             </p>
           </div>
 
@@ -115,7 +113,7 @@ export default async function MyCharactersPage() {
         <CharacterListGrid
           items={items}
           emptyTitle="No characters yet"
-          emptyDescription="You have not created any custom characters yet. Start with a quick template or build a deep studio character."
+          emptyDescription="You have not created any custom characters yet."
           ctaLabel="Open Chat"
         />
       </div>

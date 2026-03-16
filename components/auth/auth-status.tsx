@@ -2,40 +2,69 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { User } from "@supabase/supabase-js";
-import { clearLegacyLovoraLocalData, supabase } from "@/lib/supabase";
+
+type AuthUser = {
+  id: string;
+  email?: string;
+} | null;
+
+type MeResponse = {
+  ok: boolean;
+  user: AuthUser;
+};
+
+function clearLegacyLovoraLocalData() {
+  if (typeof window === "undefined") return;
+
+  const keys = [
+    "lovora.favorite.characters",
+    "lovora.recent.characters",
+    "lovora.home.onboarding.dismissed",
+  ];
+
+  for (const key of keys) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {}
+  }
+}
 
 export default function AuthStatus() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser>(null);
   const [loading, setLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
+    let active = true;
 
-    async function bootstrap() {
-      const {
-        data: { user: currentUser },
-      } = await supabase.auth.getUser();
+    async function loadUser() {
+      try {
+        const response = await fetch("/api/auth/me", {
+          method: "GET",
+          cache: "no-store",
+        });
 
-      if (!mounted) return;
+        const payload = (await response.json().catch(() => null)) as
+          | MeResponse
+          | null;
 
-      setUser(currentUser ?? null);
-      setLoading(false);
+        if (!active) return;
+
+        setUser(payload?.user ?? null);
+      } catch {
+        if (!active) return;
+        setUser(null);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
     }
 
-    bootstrap();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    loadUser();
 
     return () => {
-      mounted = false;
-      subscription.unsubscribe();
+      active = false;
     };
   }, []);
 
@@ -45,7 +74,10 @@ export default function AuthStatus() {
     setIsLoggingOut(true);
 
     try {
-      await supabase.auth.signOut();
+      await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+
       clearLegacyLovoraLocalData();
       window.location.href = "/";
     } finally {
@@ -86,7 +118,7 @@ export default function AuthStatus() {
         href="/my-profile"
         className="max-w-[220px] truncate rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10"
       >
-        {user.email}
+        {user.email || "My profile"}
       </Link>
 
       <button

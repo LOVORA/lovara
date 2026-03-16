@@ -1,20 +1,55 @@
-import { NextResponse } from "next/server";
-import { SESSION_COOKIE } from "@/lib/auth-store";
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
 export const runtime = "nodejs";
 
-export async function POST() {
-  const response = NextResponse.json({ ok: true });
+type PendingCookie = {
+  name: string;
+  value: string;
+  options: CookieOptions;
+};
 
-  response.cookies.set({
-    name: SESSION_COOKIE,
-    value: "",
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 0,
-  });
+export async function POST(request: NextRequest) {
+  try {
+    const pendingCookies: PendingCookie[] = [];
 
-  return response;
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value;
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            pendingCookies.push({ name, value, options });
+          },
+          remove(name: string, options: CookieOptions) {
+            pendingCookies.push({ name, value: "", options });
+          },
+        },
+      },
+    );
+
+    await supabase.auth.signOut();
+
+    const response = NextResponse.json({ ok: true });
+
+    for (const cookie of pendingCookies) {
+      response.cookies.set({
+        name: cookie.name,
+        value: cookie.value,
+        ...cookie.options,
+      });
+    }
+
+    return response;
+  } catch (error) {
+    console.error("LOGOUT_ROUTE_ERROR", error);
+
+    return NextResponse.json(
+      { ok: false, error: "Failed to sign out." },
+      { status: 500 },
+    );
+  }
 }

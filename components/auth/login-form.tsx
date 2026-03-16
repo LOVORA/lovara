@@ -1,17 +1,24 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
 
 type BannerState =
   | { type: "error"; message: string }
   | { type: "success"; message: string }
   | null;
 
+type LoginResponse = {
+  ok: boolean;
+  error?: string;
+  user?: {
+    id: string;
+    email?: string;
+  };
+};
+
 export default function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
@@ -37,15 +44,25 @@ export default function LoginForm() {
         return;
       }
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password,
+        }),
       });
 
-      if (error) {
+      const payload = (await response.json().catch(() => null)) as
+        | LoginResponse
+        | null;
+
+      if (!response.ok || !payload?.ok) {
         setBanner({
           type: "error",
-          message: error.message || "Invalid email or password.",
+          message: payload?.error || "Invalid email or password.",
         });
         return;
       }
@@ -60,7 +77,6 @@ export default function LoginForm() {
         searchParams.get("redirectTo") ||
         "/my-characters";
 
-      router.refresh();
       window.location.href = next;
     } catch (error) {
       setBanner({
