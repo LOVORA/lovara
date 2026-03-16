@@ -36,7 +36,7 @@ export default async function MyCharactersPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/sign-in?next=/my-characters");
+    redirect("/login?next=/my-characters");
   }
 
   const { data, error } = await supabase
