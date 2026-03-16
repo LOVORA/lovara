@@ -1,118 +1,130 @@
 "use client";
 
-import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ensureProfile } from "@/lib/account";
-import { supabase, sanitizeNextPath } from "@/lib/supabase";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+
+type BannerState =
+  | { type: "error"; message: string }
+  | { type: "success"; message: string }
+  | null;
 
 export default function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const nextPath = useMemo(() => {
-    return sanitizeNextPath(searchParams.get("next"));
-  }, [searchParams]);
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [banner, setBanner] = useState<BannerState>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (loading) return;
+    if (submitting) return;
 
-    setLoading(true);
-    setError(null);
+    setSubmitting(true);
+    setBanner(null);
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
 
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      if (!normalizedEmail || !password) {
+        setBanner({
+          type: "error",
+          message: "Email and password are required.",
+        });
+        return;
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password,
       });
 
-      if (signInError || !data.user) {
-        throw new Error(signInError?.message || "Login failed.");
+      if (error) {
+        setBanner({
+          type: "error",
+          message: error.message || "Invalid email or password.",
+        });
+        return;
       }
 
-      await ensureProfile(data.user);
+      setBanner({
+        type: "success",
+        message: "Login successful. Redirecting...",
+      });
 
-      router.replace(nextPath);
+      const next =
+        searchParams.get("next") ||
+        searchParams.get("redirectTo") ||
+        "/my-characters";
+
       router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not sign in.");
+      window.location.href = next;
+    } catch (error) {
+      setBanner({
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Failed to sign in.",
+      });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
   return (
-    <div className="space-y-6">
-      <form
-        onSubmit={handleSubmit}
-        className="space-y-5 rounded-[28px] border border-white/10 bg-white/[0.04] p-6 backdrop-blur"
-      >
-        <div className="space-y-2">
-          <label htmlFor="email" className="block text-sm font-medium text-white/90">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none transition focus:border-white/30"
-            placeholder="you@example.com"
-            required
-            disabled={loading}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label htmlFor="password" className="block text-sm font-medium text-white/90">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none transition focus:border-white/30"
-            placeholder="••••••••"
-            required
-            disabled={loading}
-          />
-        </div>
-
-        {error ? (
-          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {error}
-          </div>
-        ) : null}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="h-12 w-full rounded-2xl bg-white px-4 font-semibold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+    <form onSubmit={handleSubmit} className="space-y-5">
+      {banner ? (
+        <div
+          className={
+            banner.type === "success"
+              ? "rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100"
+              : "rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100"
+          }
         >
-          {loading ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
+          {banner.message}
+        </div>
+      ) : null}
+
+      <label className="block">
+        <div className="mb-2 text-sm text-white/75">Email</div>
+        <input
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="you@example.com"
+          className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-pink-400/30 focus:bg-black/40"
+        />
+      </label>
+
+      <label className="block">
+        <div className="mb-2 text-sm text-white/75">Password</div>
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder="Enter your password"
+          className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-pink-400/30 focus:bg-black/40"
+        />
+      </label>
+
+      <button
+        type="submit"
+        disabled={submitting}
+        className="w-full rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
+      >
+        {submitting ? "Signing in..." : "Sign in"}
+      </button>
 
       <div className="text-center text-sm text-white/55">
         Don&apos;t have an account?{" "}
-        <Link
-          href={`/sign-up?next=${encodeURIComponent(nextPath)}`}
-          className="font-medium text-white underline underline-offset-4"
-        >
+        <Link href="/sign-up" className="text-white underline underline-offset-4">
           Create one
         </Link>
       </div>
-    </div>
+    </form>
   );
 }

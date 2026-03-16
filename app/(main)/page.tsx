@@ -118,10 +118,6 @@ const onboardingSteps = [
   },
 ] as const;
 
-function cn(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(" ");
-}
-
 function safeReadStringArray(key: string): string[] {
   if (typeof window === "undefined") return [];
 
@@ -139,14 +135,14 @@ function safeReadStringArray(key: string): string[] {
 }
 
 function OnboardingCard() {
-  const [dismissed, setDismissed] = useState(true);
+  const [mounted, setMounted] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
+
     try {
-      const stored =
-        typeof window !== "undefined"
-          ? window.localStorage.getItem(ONBOARDING_STORAGE_KEY)
-          : null;
+      const stored = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
       setDismissed(stored === "true");
     } catch {
       setDismissed(false);
@@ -160,6 +156,18 @@ function OnboardingCard() {
     } catch {
       // ignore storage failures
     }
+  }
+
+  if (!mounted) {
+    return (
+      <section className="mx-auto mb-8 max-w-7xl px-4 pt-4 md:px-6">
+        <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(135deg,rgba(236,72,153,0.10),rgba(255,255,255,0.05),rgba(59,130,246,0.08))] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur">
+          <div className="relative">
+            <div className="h-[260px] rounded-[24px] bg-white/[0.04]" />
+          </div>
+        </div>
+      </section>
+    );
   }
 
   if (dismissed) return null;
@@ -249,10 +257,12 @@ function OnboardingCard() {
 }
 
 function ProductStats() {
+  const [mounted, setMounted] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [recentCount, setRecentCount] = useState(0);
 
   useEffect(() => {
+    setMounted(true);
     setFavoriteCount(safeReadStringArray(FAVORITES_STORAGE_KEY).length);
     setRecentCount(safeReadStringArray(RECENT_STORAGE_KEY).length);
   }, []);
@@ -267,13 +277,13 @@ function ProductStats() {
       },
       {
         label: "Favorites saved",
-        value: String(favoriteCount),
+        value: mounted ? String(favoriteCount) : "0",
         helper: "Stored in your browser vault",
         icon: Heart,
       },
       {
         label: "Recently viewed",
-        value: String(recentCount),
+        value: mounted ? String(recentCount) : "0",
         helper: "Characters you explored lately",
         icon: Clock3,
       },
@@ -284,7 +294,7 @@ function ProductStats() {
         icon: BarChart3,
       },
     ],
-    [favoriteCount, recentCount],
+    [favoriteCount, recentCount, mounted],
   );
 
   return (

@@ -64,6 +64,34 @@ type CharacterImageJobRecord = {
   updated_at: string;
 };
 
+type QueryResult<T> = Promise<{ data: T; error: { message: string } | null }>;
+
+type UpdateBuilder = {
+  eq(column: string, value: string): QueryResult<unknown>;
+};
+
+type UpdateCapableTable = {
+  update(values: Record<string, unknown>): UpdateBuilder;
+};
+
+type InsertSelectionBuilder<T> = {
+  select(columns: string): {
+    single(): QueryResult<T>;
+  };
+};
+
+type InsertCapableTable<T> = {
+  insert(values: Record<string, unknown>): InsertSelectionBuilder<T>;
+};
+
+function asUpdateCapableTable(tableName: string): UpdateCapableTable {
+  return supabase.from(tableName) as unknown as UpdateCapableTable;
+}
+
+function asInsertCapableTable<T>(tableName: string): InsertCapableTable<T> {
+  return supabase.from(tableName) as unknown as InsertCapableTable<T>;
+}
+
 function getStorageBucket() {
   return CHARACTER_IMAGES_BUCKET;
 }
@@ -121,7 +149,7 @@ async function getCurrentUserOrThrow() {
 }
 
 async function clearPrimaryImageForCharacter(characterId: string) {
-  const table = supabase.from("character_images") as any;
+  const table = asUpdateCapableTable("character_images");
 
   const { error } = await table
     .update({ is_primary: false })
@@ -133,7 +161,7 @@ async function clearPrimaryImageForCharacter(characterId: string) {
 }
 
 async function setCharacterAvatarReference(characterId: string, imageId: string) {
-  const table = supabase.from("custom_characters") as any;
+  const table = asUpdateCapableTable("custom_characters");
 
   const { error } = await table
     .update({
@@ -179,7 +207,7 @@ export async function createCharacterImageJob(
     updated_at: now,
   };
 
-  const table = supabase.from("character_image_jobs") as any;
+  const table = asInsertCapableTable<CharacterImageJobRecord>("character_image_jobs");
 
   const { data, error } = await table.insert(row).select("*").single();
 
@@ -193,7 +221,7 @@ export async function createCharacterImageJob(
 export async function markCharacterImageJobCompleted(
   input: MarkCharacterImageJobCompletedInput,
 ) {
-  const table = supabase.from("character_image_jobs") as any;
+  const table = asUpdateCapableTable("character_image_jobs");
 
   const { error } = await table
     .update({
@@ -273,7 +301,7 @@ export async function uploadGeneratedCharacterImage(
     updated_at: now,
   };
 
-  const table = supabase.from("character_images") as any;
+  const table = asInsertCapableTable<Record<string, unknown>>("character_images");
 
   const { data, error } = await table.insert(imageRow).select("*").single();
 

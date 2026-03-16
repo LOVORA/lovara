@@ -38,6 +38,10 @@ import {
   type CoreVibeId,
   type StudioFormState,
 } from "@/lib/custom-character-studio";
+import {
+  buildLegacyAvatarPromptInputCompat,
+  buildLegacyBuilderV2Summary,
+} from "@/lib/create-character/builder-v2-compat";
 
 const AuthGuard = dynamic(() => import("@/components/auth/auth-guard"), {
   ssr: false,
@@ -606,7 +610,8 @@ const CHARACTER_TEMPLATES: CharacterTemplate[] = [
       palette: "navy / gold",
       camera: "waist-up portrait",
       photoPack: "luxury portraits",
-      publicTagline: "Luxury rivalry with controlled flirtation and elite tension.",
+      publicTagline:
+        "Luxury rivalry with controlled flirtation and elite tension.",
       publicTeaser:
         "A polished rival template designed for status games, chemistry, and restrained attraction.",
       publicTags: ["rival", "elite", "luxury", "sharp"],
@@ -723,6 +728,77 @@ function getStepCompletion(
     default:
       return false;
   }
+}
+
+function enrichDraftForBuilderV2Compat(
+  draft: CharacterDraftInput,
+  args: {
+    form: Pick<
+      StudioFormState,
+      | "mode"
+      | "name"
+      | "age"
+      | "region"
+      | "archetype"
+      | "genderPresentation"
+      | "visibility"
+      | "coreVibes"
+      | "warmth"
+      | "assertiveness"
+      | "mystery"
+      | "playfulness"
+      | "tone"
+      | "setting"
+      | "relationshipToUser"
+      | "sceneGoal"
+      | "customNotes"
+    >;
+  },
+): CharacterDraftInput {
+  const { hiddenPromptInput, promptEngineOutput, notes } =
+    buildLegacyBuilderV2Summary(args.form);
+
+  const safePayload =
+    draft.payload &&
+    typeof draft.payload === "object" &&
+    !Array.isArray(draft.payload)
+      ? draft.payload
+      : {};
+
+  return {
+    ...draft,
+    payload: {
+      ...safePayload,
+      builderV2: true,
+      styleType: hiddenPromptInput.styleType,
+      builderMode: hiddenPromptInput.builderMode,
+      promptVersion: "v1",
+      promptSummary: promptEngineOutput.promptSummary,
+      canonicalPrompt: promptEngineOutput.canonicalPrompt,
+      negativePrompt: promptEngineOutput.negativePrompt,
+      identityLock: promptEngineOutput.identityLock,
+      generationHints: promptEngineOutput.generationHints,
+      moderationFlags: promptEngineOutput.moderationFlags,
+      visualProfile: {
+        visualAura: notes["Visual aura"] || "",
+        avatarStyle: notes["Avatar style"] || "",
+        hair: notes["Hair"] || "",
+        eyes: notes["Eyes"] || "",
+        outfit: notes["Outfit"] || "",
+        palette: notes["Palette"] || "",
+        camera: notes["Camera"] || "",
+        photoPack: notes["Photo pack"] || "",
+      },
+      publicProfile: {
+        tagline: notes["Public tagline"] || "",
+        teaser: notes["Public teaser"] || "",
+        tags: (notes["Public tags"] || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      },
+    },
+  };
 }
 
 function Section({
@@ -1161,9 +1237,8 @@ export default function CreateCharacterPage() {
   const [avatarQueuedExternalJobId, setAvatarQueuedExternalJobId] = useState<
     string | null
   >(null);
-  const [queuedJobProvider, setQueuedJobProvider] = useState<ImageProvider | null>(
-    null,
-  );
+  const [queuedJobProvider, setQueuedJobProvider] =
+    useState<ImageProvider | null>(null);
   const [avatarJobStatus, setAvatarJobStatus] =
     useState<AvatarJobLifecycle>("idle");
   const [lastAvatarPromptInput, setLastAvatarPromptInput] =
@@ -1436,6 +1511,46 @@ export default function CreateCharacterPage() {
     ],
   );
 
+  const builderV2Summary = useMemo(() => {
+    return buildLegacyBuilderV2Summary({
+      mode: form.mode,
+      name: form.name,
+      age: form.age,
+      region: form.region,
+      archetype: form.archetype,
+      genderPresentation: form.genderPresentation,
+      visibility: form.visibility,
+      coreVibes: form.coreVibes,
+      warmth: form.warmth,
+      assertiveness: form.assertiveness,
+      mystery: form.mystery,
+      playfulness: form.playfulness,
+      tone: form.tone,
+      setting: form.setting,
+      relationshipToUser: form.relationshipToUser,
+      sceneGoal: form.sceneGoal,
+      customNotes: form.customNotes,
+    });
+  }, [
+    form.mode,
+    form.name,
+    form.age,
+    form.region,
+    form.archetype,
+    form.genderPresentation,
+    form.visibility,
+    form.coreVibes,
+    form.warmth,
+    form.assertiveness,
+    form.mystery,
+    form.playfulness,
+    form.tone,
+    form.setting,
+    form.relationshipToUser,
+    form.sceneGoal,
+    form.customNotes,
+  ]);
+
   function clearAvatarPreview() {
     setGeneratedAvatarUrl(null);
     setAvatarResultMessage(null);
@@ -1476,123 +1591,123 @@ export default function CreateCharacterPage() {
     return payload;
   }
 
- useEffect(() => {
-  if (
-    avatarQueuedExternalJobId === null ||
-    queuedJobProvider === null ||
-    generatedAvatarUrl
-  ) {
-    return;
-  }
+  useEffect(() => {
+    if (
+      avatarQueuedExternalJobId === null ||
+      queuedJobProvider === null ||
+      generatedAvatarUrl
+    ) {
+      return;
+    }
 
-  const safeExternalJobId: string = avatarQueuedExternalJobId;
-  const safeProvider: ImageProvider = queuedJobProvider;
+    const safeExternalJobId: string = avatarQueuedExternalJobId;
+    const safeProvider: ImageProvider = queuedJobProvider;
 
-  let cancelled = false;
+    let cancelled = false;
 
-  async function pollOnce(provider: ImageProvider, externalJobId: string) {
-    try {
-      const result = await fetchProviderJobStatus({
-        provider,
-        externalJobId,
-      });
+    async function pollOnce(provider: ImageProvider, externalJobId: string) {
+      try {
+        const result = await fetchProviderJobStatus({
+          provider,
+          externalJobId,
+        });
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (!result.ok) {
-        throw new Error(result.errorMessage || "Avatar polling failed.");
-      }
+        if (!result.ok) {
+          throw new Error(result.errorMessage || "Avatar polling failed.");
+        }
 
-      if (result.revisedPrompt) {
-        setLastAvatarResolvedPrompt(result.revisedPrompt);
-      }
+        if (result.revisedPrompt) {
+          setLastAvatarResolvedPrompt(result.revisedPrompt);
+        }
 
-      if (typeof result.revisedNegativePrompt === "string") {
-        setLastAvatarNegativePrompt(result.revisedNegativePrompt);
-      }
+        if (typeof result.revisedNegativePrompt === "string") {
+          setLastAvatarNegativePrompt(result.revisedNegativePrompt);
+        }
 
-      if (result.status === "queued") {
-        setAvatarJobStatus("queued");
-        setAvatarResultMessage(
-          "Avatar request is queued. Waiting for provider response...",
-        );
-        return;
-      }
+        if (result.status === "queued") {
+          setAvatarJobStatus("queued");
+          setAvatarResultMessage(
+            "Avatar request is queued. Waiting for provider response...",
+          );
+          return;
+        }
 
-      if (result.status === "processing") {
-        setAvatarJobStatus("processing");
-        setAvatarResultMessage(
-          "Avatar is being generated. Preview will appear automatically.",
-        );
-        return;
-      }
+        if (result.status === "processing") {
+          setAvatarJobStatus("processing");
+          setAvatarResultMessage(
+            "Avatar is being generated. Preview will appear automatically.",
+          );
+          return;
+        }
 
-      if (result.status === "completed") {
-        setAvatarJobStatus("completed");
+        if (result.status === "completed") {
+          setAvatarJobStatus("completed");
 
-        if (result.imageUrl) {
-          setGeneratedAvatarUrl(result.imageUrl);
+          if (result.imageUrl) {
+            setGeneratedAvatarUrl(result.imageUrl);
+            setAvatarQueuedExternalJobId(null);
+            setQueuedJobProvider(null);
+            setAvatarResultMessage("Avatar preview generated successfully.");
+            setBanner({
+              type: "success",
+              message:
+                "Avatar preview is ready. It will be attached when you create the character.",
+            });
+            return;
+          }
+
           setAvatarQueuedExternalJobId(null);
           setQueuedJobProvider(null);
-          setAvatarResultMessage("Avatar preview generated successfully.");
+          setAvatarResultMessage(
+            "Generation completed, but no preview image URL was returned.",
+          );
           setBanner({
-            type: "success",
+            type: "error",
             message:
-              "Avatar preview is ready. It will be attached when you create the character.",
+              "The provider completed the job without returning a preview image.",
           });
           return;
         }
 
-        setAvatarQueuedExternalJobId(null);
-        setQueuedJobProvider(null);
-        setAvatarResultMessage(
-          "Generation completed, but no preview image URL was returned.",
-        );
+        if (result.status === "failed") {
+          setAvatarJobStatus("failed");
+          setAvatarQueuedExternalJobId(null);
+          setQueuedJobProvider(null);
+          setAvatarResultMessage(null);
+          setBanner({
+            type: "error",
+            message:
+              result.errorMessage || "Avatar generation failed at the provider.",
+          });
+        }
+      } catch (error) {
+        if (cancelled) return;
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Could not refresh avatar status.";
+
         setBanner({
           type: "error",
-          message:
-            "The provider completed the job without returning a preview image.",
-        });
-        return;
-      }
-
-      if (result.status === "failed") {
-        setAvatarJobStatus("failed");
-        setAvatarQueuedExternalJobId(null);
-        setQueuedJobProvider(null);
-        setAvatarResultMessage(null);
-        setBanner({
-          type: "error",
-          message:
-            result.errorMessage || "Avatar generation failed at the provider.",
+          message,
         });
       }
-    } catch (error) {
-      if (cancelled) return;
-
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Could not refresh avatar status.";
-
-      setBanner({
-        type: "error",
-        message,
-      });
     }
-  }
 
-  void pollOnce(safeProvider, safeExternalJobId);
-
-  const intervalId = window.setInterval(() => {
     void pollOnce(safeProvider, safeExternalJobId);
-  }, 4000);
 
-  return () => {
-    cancelled = true;
-    window.clearInterval(intervalId);
-  };
-}, [avatarQueuedExternalJobId, queuedJobProvider, generatedAvatarUrl]);
+    const intervalId = window.setInterval(() => {
+      void pollOnce(safeProvider, safeExternalJobId);
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [avatarQueuedExternalJobId, queuedJobProvider, generatedAvatarUrl]);
 
   function rebuildCustomNotes(
     next: Partial<Record<(typeof structuredKeys)[number], string>>,
@@ -1699,9 +1814,31 @@ export default function CreateCharacterPage() {
       .concat(bodyNotes ? [bodyNotes] : [])
       .join("\n");
 
-    return buildCharacterDraftFromStudio({
+    const baseDraft = buildCharacterDraftFromStudio({
       ...form,
       customNotes: mergedNotes,
+    });
+
+    return enrichDraftForBuilderV2Compat(baseDraft, {
+      form: {
+        mode: form.mode,
+        name: form.name,
+        age: form.age,
+        region: form.region,
+        archetype: form.archetype,
+        genderPresentation: form.genderPresentation,
+        visibility: form.visibility,
+        coreVibes: form.coreVibes,
+        warmth: form.warmth,
+        assertiveness: form.assertiveness,
+        mystery: form.mystery,
+        playfulness: form.playfulness,
+        tone: form.tone,
+        setting: form.setting,
+        relationshipToUser: form.relationshipToUser,
+        sceneGoal: form.sceneGoal,
+        customNotes: mergedNotes,
+      },
     });
   }, [
     form,
@@ -1839,53 +1976,25 @@ export default function CreateCharacterPage() {
   );
 
   function buildAvatarPromptInput(): ProviderCharacterImagePromptInput {
-    const parsedPublicTags = parseCsv(publicTags);
-    const firstExpression =
-      currentEnergy ||
-      (form.tone.includes("playful")
-        ? "playful"
-        : form.tone.includes("cold")
-          ? "guarded"
-          : "composed");
-    const bodyType = parsedPublicTags.find((tag) =>
-      ["athletic", "slim", "curvy", "lean", "toned"].includes(
-        tag.toLowerCase(),
-      ),
-    );
-
-    return {
-      characterName: form.name.trim() || "Untitled character",
-      archetype: form.archetype || undefined,
-      visualAura: visualNote || undefined,
-      ageBand:
-        ageValue <= 20
-          ? "18-20"
-          : ageValue <= 24
-            ? "21-24"
-            : ageValue <= 29
-              ? "25-29"
-              : ageValue <= 39
-                ? "30-39"
-                : "40+",
-      genderPresentation: form.genderPresentation || undefined,
-      region: form.region.trim() || undefined,
-      hair: hair || undefined,
-      eyes: eyes || undefined,
-      outfit: outfit || undefined,
-      palette: palette || undefined,
-      camera: camera || undefined,
-      avatarStyle: avatarStyle || undefined,
-      bodyType: bodyType || undefined,
-      pose:
-        relationshipStage === "rivals"
-          ? "confident pose"
-          : relationshipStage === "lovers"
-            ? "intimate pose"
-            : "composed portrait pose",
-      expression: firstExpression,
-      environment: form.setting || undefined,
-      nsfwLevel: "adult",
-    };
+    return buildLegacyAvatarPromptInputCompat({
+      mode: form.mode,
+      name: form.name,
+      age: form.age,
+      region: form.region,
+      archetype: form.archetype,
+      genderPresentation: form.genderPresentation,
+      visibility: form.visibility,
+      coreVibes: form.coreVibes,
+      warmth: form.warmth,
+      assertiveness: form.assertiveness,
+      mystery: form.mystery,
+      playfulness: form.playfulness,
+      tone: form.tone,
+      setting: form.setting,
+      relationshipToUser: form.relationshipToUser,
+      sceneGoal: form.sceneGoal,
+      customNotes: form.customNotes,
+    });
   }
 
   function setField<K extends keyof StudioFormState>(
@@ -2075,8 +2184,16 @@ export default function CreateCharacterPage() {
       }
 
       setLastAvatarPromptInput(promptInput);
-      setLastAvatarResolvedPrompt(result.revisedPrompt ?? null);
-      setLastAvatarNegativePrompt(result.revisedNegativePrompt ?? null);
+      setLastAvatarResolvedPrompt(
+        result.revisedPrompt ??
+          builderV2Summary.promptEngineOutput.canonicalPrompt ??
+          null,
+      );
+      setLastAvatarNegativePrompt(
+        result.revisedNegativePrompt ??
+          builderV2Summary.promptEngineOutput.negativePrompt ??
+          null,
+      );
 
       if (result.imageUrl) {
         setGeneratedAvatarUrl(result.imageUrl);
@@ -2296,7 +2413,11 @@ export default function CreateCharacterPage() {
               <TopNavLink href="/" label="Home" />
               <TopNavLink href="/my-characters" label="My Characters" />
               <TopNavLink href="/characters" label="Public Characters" />
-              <TopNavLink href="/create-character" label="Create Character" active />
+              <TopNavLink
+                href="/create-character"
+                label="Create Character"
+                active
+              />
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -2336,7 +2457,10 @@ export default function CreateCharacterPage() {
                 </p>
 
                 <div className="mt-6 grid gap-3 sm:grid-cols-4">
-                  <StatPill label="Mode" value={isQuickMode ? "Quick" : "Deep"} />
+                  <StatPill
+                    label="Mode"
+                    value={isQuickMode ? "Quick" : "Deep"}
+                  />
                   <StatPill label="Engine" value="Roleplay-first" />
                   <StatPill label="Memory" value="Reset-safe" />
                   <StatPill label="Flow" value="Supabase-safe" />
@@ -2365,7 +2489,10 @@ export default function CreateCharacterPage() {
                   ) : (
                     <>
                       <div>• Relationship stage + chemistry logic</div>
-                      <div>• Conflict, affection, initiative, emotional availability</div>
+                      <div>
+                        • Conflict, affection, initiative, emotional
+                        availability
+                      </div>
                       <div>• Public card customization + visual prep</div>
                     </>
                   )}
@@ -2477,12 +2604,9 @@ export default function CreateCharacterPage() {
                     onClick={() => {
                       setField("mode", "quick");
                       if (
-                        ![
-                          "identity",
-                          "personality",
-                          "scenario",
-                          "publish",
-                        ].includes(activeStep)
+                        !["identity", "personality", "scenario", "publish"].includes(
+                          activeStep,
+                        )
                       ) {
                         setActiveStep("identity");
                       }
@@ -2518,7 +2642,9 @@ export default function CreateCharacterPage() {
                     <SelectField
                       label="Gender presentation"
                       value={form.genderPresentation}
-                      onChange={(value) => setField("genderPresentation", value)}
+                      onChange={(value) =>
+                        setField("genderPresentation", value)
+                      }
                       options={GENDER_OPTIONS}
                     />
                   </div>
@@ -2664,7 +2790,9 @@ export default function CreateCharacterPage() {
                           <SliderField
                             label="Assertiveness"
                             value={form.assertiveness}
-                            onChange={(value) => setField("assertiveness", value)}
+                            onChange={(value) =>
+                              setField("assertiveness", value)
+                            }
                           />
                           <SliderField
                             label="Mystery"
@@ -2828,7 +2956,9 @@ export default function CreateCharacterPage() {
                           <SliderField
                             label="Assertiveness"
                             value={form.assertiveness}
-                            onChange={(value) => setField("assertiveness", value)}
+                            onChange={(value) =>
+                              setField("assertiveness", value)
+                            }
                           />
                           <SliderField
                             label="Mystery"
@@ -2874,7 +3004,9 @@ export default function CreateCharacterPage() {
                             key={preset}
                             label={preset}
                             active={form.relationshipToUser === preset}
-                            onClick={() => setField("relationshipToUser", preset)}
+                            onClick={() =>
+                              setField("relationshipToUser", preset)
+                            }
                           />
                         ))}
                       </div>
@@ -3112,7 +3244,9 @@ export default function CreateCharacterPage() {
                               key={preset}
                               label={preset}
                               active={form.relationshipToUser === preset}
-                              onClick={() => setField("relationshipToUser", preset)}
+                              onClick={() =>
+                                setField("relationshipToUser", preset)
+                              }
                             />
                           ))}
                         </div>
@@ -3178,7 +3312,9 @@ export default function CreateCharacterPage() {
                           <TextAreaField
                             label="Opening state"
                             value={form.openingState}
-                            onChange={(value) => setField("openingState", value)}
+                            onChange={(value) =>
+                              setField("openingState", value)
+                            }
                             placeholder="tired after a brutal shift, but unusually honest tonight"
                             rows={4}
                           />
@@ -3241,7 +3377,10 @@ export default function CreateCharacterPage() {
                     </div>
                   </Section>
 
-                  <Section title="Creator intent" description="Use this for extra nuance.">
+                  <Section
+                    title="Creator intent"
+                    description="Use this for extra nuance."
+                  >
                     <div className="grid gap-4">
                       <InputField
                         label="Tags"
@@ -3288,7 +3427,10 @@ export default function CreateCharacterPage() {
                         (hair || HAIR_OPTIONS[0]) as (typeof HAIR_OPTIONS)[number]
                       }
                       onChange={(value) => rebuildCustomNotes({ Hair: value })}
-                      options={HAIR_OPTIONS.map((v) => ({ value: v, label: v }))}
+                      options={HAIR_OPTIONS.map((v) => ({
+                        value: v,
+                        label: v,
+                      }))}
                     />
                     <SelectField
                       label="Eyes"
@@ -3296,7 +3438,10 @@ export default function CreateCharacterPage() {
                         (eyes || EYE_OPTIONS[0]) as (typeof EYE_OPTIONS)[number]
                       }
                       onChange={(value) => rebuildCustomNotes({ Eyes: value })}
-                      options={EYE_OPTIONS.map((v) => ({ value: v, label: v }))}
+                      options={EYE_OPTIONS.map((v) => ({
+                        value: v,
+                        label: v,
+                      }))}
                     />
                     <SelectField
                       label="Outfit"
@@ -3304,7 +3449,9 @@ export default function CreateCharacterPage() {
                         (outfit ||
                           OUTFIT_OPTIONS[0]) as (typeof OUTFIT_OPTIONS)[number]
                       }
-                      onChange={(value) => rebuildCustomNotes({ Outfit: value })}
+                      onChange={(value) =>
+                        rebuildCustomNotes({ Outfit: value })
+                      }
                       options={OUTFIT_OPTIONS.map((v) => ({
                         value: v,
                         label: v,
@@ -3316,7 +3463,9 @@ export default function CreateCharacterPage() {
                         (palette ||
                           PALETTE_OPTIONS[0]) as (typeof PALETTE_OPTIONS)[number]
                       }
-                      onChange={(value) => rebuildCustomNotes({ Palette: value })}
+                      onChange={(value) =>
+                        rebuildCustomNotes({ Palette: value })
+                      }
                       options={PALETTE_OPTIONS.map((v) => ({
                         value: v,
                         label: v,
@@ -3328,7 +3477,9 @@ export default function CreateCharacterPage() {
                         (camera ||
                           CAMERA_OPTIONS[0]) as (typeof CAMERA_OPTIONS)[number]
                       }
-                      onChange={(value) => rebuildCustomNotes({ Camera: value })}
+                      onChange={(value) =>
+                        rebuildCustomNotes({ Camera: value })
+                      }
                       options={CAMERA_OPTIONS.map((v) => ({
                         value: v,
                         label: v,
@@ -3414,7 +3565,9 @@ export default function CreateCharacterPage() {
                     </div>
 
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-7 text-white/65">
-                      Adult-only fictional avatar flow is enabled. The preview generator is blocked for minors, real people, public figures, non-consensual scenarios, and illegal content.
+                      Adult-only fictional avatar flow is enabled. The preview
+                      generator is blocked for minors, real people, public
+                      figures, non-consensual scenarios, and illegal content.
                     </div>
 
                     {avatarResultMessage ? (
@@ -3453,7 +3606,9 @@ export default function CreateCharacterPage() {
                 >
                   <div className="grid gap-5">
                     <div>
-                      <div className="mb-2 text-sm text-white/75">Visibility</div>
+                      <div className="mb-2 text-sm text-white/75">
+                        Visibility
+                      </div>
                       <div className="flex flex-wrap gap-3">
                         <SegmentButton
                           active={form.visibility === "private"}
@@ -3505,8 +3660,8 @@ export default function CreateCharacterPage() {
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm leading-7 text-white/60">
-                        Quick Mode keeps publish settings minimal on purpose. You
-                        still keep full payload compatibility, public/private
+                        Quick Mode keeps publish settings minimal on purpose.
+                        You still keep full payload compatibility, public/private
                         control, and can deepen the character later without
                         rebuilding it.
                       </div>
@@ -3606,6 +3761,31 @@ export default function CreateCharacterPage() {
                     </div>
                   </div>
 
+                  <DividerLabel label="Builder V2 summary" />
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                      Prompt summary
+                    </div>
+                    <p className="mt-2 text-sm leading-7 text-white/75">
+                      {builderV2Summary.promptEngineOutput.promptSummary ||
+                        "No prompt summary yet."}
+                    </p>
+
+                    <div className="mt-4 text-[11px] uppercase tracking-[0.18em] text-white/35">
+                      Canonical prompt
+                    </div>
+                    <p className="mt-2 max-h-40 overflow-auto rounded-2xl border border-white/10 bg-black/20 p-3 text-xs leading-6 text-white/70">
+                      {builderV2Summary.promptEngineOutput.canonicalPrompt}
+                    </p>
+
+                    <div className="mt-4 text-[11px] uppercase tracking-[0.18em] text-white/35">
+                      Negative prompt
+                    </div>
+                    <p className="mt-2 max-h-32 overflow-auto rounded-2xl border border-white/10 bg-black/20 p-3 text-xs leading-6 text-white/70">
+                      {builderV2Summary.promptEngineOutput.negativePrompt}
+                    </p>
+                  </div>
+
                   <DividerLabel label="Avatar preview" />
                   <div className="mt-4 rounded-[24px] border border-white/10 bg-gradient-to-br from-fuchsia-400/10 via-white/[0.02] to-cyan-400/10 p-4">
                     {generatedAvatarUrl ? (
@@ -3627,7 +3807,15 @@ export default function CreateCharacterPage() {
                             {visualSummary || "Visual prep not fully set yet"}
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {[avatarStyle, hair, eyes, outfit, palette, camera, photoPack]
+                            {[
+                              avatarStyle,
+                              hair,
+                              eyes,
+                              outfit,
+                              palette,
+                              camera,
+                              photoPack,
+                            ]
                               .filter(Boolean)
                               .map((item) => (
                                 <span
@@ -3801,6 +3989,7 @@ export default function CreateCharacterPage() {
                     <li>• Publish visibility</li>
                     <li>• Avatar preview generation</li>
                     <li>• Avatar queue polling</li>
+                    <li>• Builder-v2 metadata enrichment</li>
                   </ul>
                 ) : (
                   <ul className="space-y-3 text-sm text-white/68">
@@ -3819,6 +4008,7 @@ export default function CreateCharacterPage() {
                     <li>• Visual lab prep</li>
                     <li>• Avatar preview generation</li>
                     <li>• Avatar queue polling</li>
+                    <li>• Builder-v2 prompt summary + canonical prompt</li>
                   </ul>
                 )}
               </Section>

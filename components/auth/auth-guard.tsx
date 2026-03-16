@@ -15,13 +15,9 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
-  const [currentSearch, setCurrentSearch] = useState("");
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setCurrentSearch(window.location.search ?? "");
-    }
-  }, []);
+  const [currentSearch] = useState(() =>
+    typeof window !== "undefined" ? window.location.search ?? "" : "",
+  );
 
   const nextPath = useMemo(() => {
     const query = currentSearch.startsWith("?")

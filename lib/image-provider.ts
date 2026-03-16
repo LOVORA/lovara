@@ -1,14 +1,5 @@
 export type ImageProvider = "mage" | "self-hosted-comfy";
 
-export type ImageGenerationStatus =
-  | "idle"
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed";
-
-export type ImageGenerationKind = "avatar" | "variation";
-
 export type CharacterImageSafetyInput = {
   isAdultOnly: boolean;
   subjectDeclared18Plus: boolean;
@@ -37,227 +28,396 @@ export type CharacterImagePromptInput = {
   pose?: string;
   expression?: string;
   environment?: string;
-  nsfwLevel?: "none" | "suggestive" | "adult";
+  nsfwLevel?: "adult" | "suggestive" | "none";
 };
 
-export type UnifiedImageGenerationRequest = {
-  provider?: ImageProvider;
-  kind: ImageGenerationKind;
+export type RequestImageGenerationArgs = {
+  provider: ImageProvider;
+  kind: "avatar" | "gallery";
   characterId: string;
-  jobId?: string;
   promptInput: CharacterImagePromptInput;
   safety: CharacterImageSafetyInput;
 };
 
-export type UnifiedImageGenerationResult = {
+export type RequestImageGenerationResult = {
   ok: boolean;
-  provider: ImageProvider;
-  status: ImageGenerationStatus;
-  externalJobId?: string | null;
   imageUrl?: string | null;
+  externalJobId?: string | null;
   revisedPrompt?: string | null;
   revisedNegativePrompt?: string | null;
-  errorCode?: string | null;
   errorMessage?: string | null;
-  raw?: unknown;
 };
 
-export type UnifiedImageProviderConfig = {
-  provider: ImageProvider;
-  enabled: boolean;
-  baseUrl?: string;
-  apiKey?: string;
-  timeoutMs: number;
-};
-
-function readEnv(name: string): string | undefined {
-  const value =
-    typeof process !== "undefined" ? process.env[name] : undefined;
-  return value && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-export function getDefaultImageProvider(): ImageProvider {
-  const configured =
-    readEnv("IMAGE_PROVIDER") ??
-    readEnv("NEXT_PUBLIC_IMAGE_PROVIDER") ??
-    "mage";
-
-  if (configured === "self-hosted-comfy") {
-    return "self-hosted-comfy";
-  }
-
-  return "mage";
-}
-
-export function getImageProviderConfig(
-  provider: ImageProvider = getDefaultImageProvider(),
-): UnifiedImageProviderConfig {
-  if (provider === "self-hosted-comfy") {
-    return {
-      provider,
-      enabled: true,
-      baseUrl: readEnv("COMFYUI_BASE_URL"),
-      apiKey: readEnv("COMFYUI_API_KEY"),
-      timeoutMs: Number(readEnv("COMFYUI_TIMEOUT_MS") ?? "120000"),
-    };
-  }
-
-  return {
-    provider: "mage",
-    enabled: true,
-    baseUrl: readEnv("MAGE_API_BASE_URL"),
-    apiKey: readEnv("MAGE_API_KEY"),
-    timeoutMs: Number(readEnv("MAGE_TIMEOUT_MS") ?? "120000"),
-  };
-}
-
-export function assertImageSafety(input: CharacterImageSafetyInput) {
+function ensureSafety(input: CharacterImageSafetyInput) {
   if (!input.isAdultOnly) {
-    throw new Error("ADULT_ONLY_REQUIRED");
+    throw new Error("Only adult character generation is allowed.");
   }
 
   if (!input.subjectDeclared18Plus) {
-    throw new Error("SUBJECT_MUST_BE_18_PLUS");
+    throw new Error("Character must be explicitly 18+.");
   }
 
   if (!input.consentConfirmed) {
-    throw new Error("CONSENT_REQUIRED");
+    throw new Error("Consent confirmation is required.");
   }
 
   if (input.depictsRealPerson) {
-    throw new Error("REAL_PERSON_NOT_ALLOWED");
+    throw new Error("Real-person generation is not allowed in this flow.");
   }
 
   if (input.depictsPublicFigure) {
-    throw new Error("PUBLIC_FIGURE_NOT_ALLOWED");
+    throw new Error("Public-figure generation is not allowed.");
   }
 
   if (input.nonConsensualFlag) {
-    throw new Error("NON_CONSENSUAL_NOT_ALLOWED");
+    throw new Error("Non-consensual sexual content is not allowed.");
   }
 
   if (input.underageRiskFlag) {
-    throw new Error("UNDERAGE_RISK_BLOCKED");
+    throw new Error("Underage-risk content is blocked.");
   }
 
   if (input.illegalContentFlag) {
-    throw new Error("ILLEGAL_CONTENT_BLOCKED");
+    throw new Error("Illegal sexual content is blocked.");
   }
 }
 
-export function buildAdultAvatarPrompt(input: CharacterImagePromptInput) {
-  const parts = [
-    "adult fictional character portrait, age 21+",
-    input.characterName ? `character name: ${input.characterName}` : "",
-    input.archetype ? `archetype: ${input.archetype}` : "",
-    input.visualAura ? `visual aura: ${input.visualAura}` : "",
-    input.ageBand ? `age band: ${input.ageBand}` : "",
-    input.genderPresentation
-      ? `gender presentation: ${input.genderPresentation}`
-      : "",
-    input.region ? `region-inspired look: ${input.region}` : "",
-    input.hair ? `hair: ${input.hair}` : "",
-    input.eyes ? `eyes: ${input.eyes}` : "",
-    input.outfit ? `outfit: ${input.outfit}` : "",
-    input.palette ? `color palette: ${input.palette}` : "",
-    input.camera ? `camera framing: ${input.camera}` : "",
-    input.avatarStyle ? `avatar style: ${input.avatarStyle}` : "",
-    input.bodyType ? `body type: ${input.bodyType}` : "",
-    input.pose ? `pose: ${input.pose}` : "",
-    input.expression ? `expression: ${input.expression}` : "",
-    input.environment ? `environment: ${input.environment}` : "",
-    input.nsfwLevel === "adult"
-      ? "tasteful erotic adult aesthetic, clearly adult, consensual, fictional"
-      : input.nsfwLevel === "suggestive"
-        ? "suggestive adult aesthetic, sensual but restrained, clearly adult"
-        : "fully clothed premium portrait",
-    "high detail, cinematic lighting, premium portrait, cohesive face, clean anatomy",
-  ].filter(Boolean);
+export function getDefaultImageProvider(): ImageProvider {
+  const envValue =
+    typeof process !== "undefined"
+      ? process.env.NEXT_PUBLIC_DEFAULT_IMAGE_PROVIDER
+      : undefined;
 
-  return parts.join(", ");
+  return envValue === "self-hosted-comfy" ? "self-hosted-comfy" : "mage";
 }
 
-export function buildAdultAvatarNegativePrompt() {
-  return [
+function compact(parts: Array<string | undefined | null | false>) {
+  return parts.filter(Boolean).join(", ");
+}
+
+function buildPositivePrompt(input: CharacterImagePromptInput) {
+  return compact([
+    `${input.characterName}, fictional adult character`,
+    input.ageBand ? `age ${input.ageBand}` : undefined,
+    input.genderPresentation,
+    input.region,
+    input.archetype,
+    input.visualAura,
+    input.avatarStyle,
+    input.bodyType,
+    input.hair,
+    input.eyes,
+    input.outfit,
+    input.palette ? `color palette ${input.palette}` : undefined,
+    input.camera,
+    input.pose,
+    input.expression,
+    input.environment,
+    "high detail",
+    "cinematic lighting",
+    "coherent anatomy",
+    "premium portrait",
+    input.nsfwLevel === "adult"
+      ? "adult fictional character, tasteful erotic energy"
+      : input.nsfwLevel === "suggestive"
+        ? "suggestive styling"
+        : undefined,
+  ]);
+}
+
+function buildNegativePrompt() {
+  return compact([
     "minor",
-    "underage",
+    "young-looking",
     "child",
     "teen",
-    "young-looking",
-    "school uniform",
-    "non-consensual",
-    "coercion",
-    "rape",
-    "forced",
+    "underage",
     "real person",
     "celebrity",
     "public figure",
-    "watermark",
-    "text",
-    "extra fingers",
-    "bad hands",
-    "deformed anatomy",
+    "non-consensual",
+    "rape",
+    "violence",
+    "gore",
+    "bestiality",
+    "incest",
     "low quality",
     "blurry",
-  ].join(", ");
+    "deformed hands",
+    "extra fingers",
+    "bad anatomy",
+    "duplicate body",
+    "watermark",
+    "text",
+    "logo",
+  ]);
 }
 
-export function normalizeImageProviderResult(args: {
-  provider: ImageProvider;
-  raw: unknown;
-  status?: ImageGenerationStatus;
-  externalJobId?: string | null;
-  imageUrl?: string | null;
-  revisedPrompt?: string | null;
-  revisedNegativePrompt?: string | null;
-  errorCode?: string | null;
-  errorMessage?: string | null;
-}): UnifiedImageGenerationResult {
-  return {
-    ok: !args.errorMessage,
-    provider: args.provider,
-    status: args.status ?? (args.errorMessage ? "failed" : "completed"),
-    externalJobId: args.externalJobId ?? null,
-    imageUrl: args.imageUrl ?? null,
-    revisedPrompt: args.revisedPrompt ?? null,
-    revisedNegativePrompt: args.revisedNegativePrompt ?? null,
-    errorCode: args.errorCode ?? null,
-    errorMessage: args.errorMessage ?? null,
-    raw: args.raw,
-  };
+async function safeJson(response: Response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
 }
 
-export async function requestImageGeneration(
-  request: UnifiedImageGenerationRequest,
-): Promise<UnifiedImageGenerationResult> {
-  assertImageSafety(request.safety);
+async function requestMageImage(args: {
+  prompt: string;
+  negativePrompt: string;
+  kind: "avatar" | "gallery";
+}): Promise<RequestImageGenerationResult> {
+  const baseUrl = process.env.NEXT_PUBLIC_MAGE_API_BASE_URL;
+  const apiKey = process.env.NEXT_PUBLIC_MAGE_API_KEY;
 
-  const provider = request.provider ?? getDefaultImageProvider();
-  const response = await fetch("/api/image/generate", {
+  if (!baseUrl) {
+    return {
+      ok: false,
+      errorMessage: "NEXT_PUBLIC_MAGE_API_BASE_URL is missing.",
+    };
+  }
+
+  const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     body: JSON.stringify({
-      ...request,
-      provider,
-      prompt: buildAdultAvatarPrompt(request.promptInput),
-      negativePrompt: buildAdultAvatarNegativePrompt(),
+      prompt: args.prompt,
+      negative_prompt: args.negativePrompt,
+      kind: args.kind,
     }),
   });
 
-  const data = (await response.json()) as UnifiedImageGenerationResult;
+  const payload = await safeJson(response);
 
   if (!response.ok) {
     return {
       ok: false,
-      provider,
-      status: "failed",
-      errorCode: data.errorCode ?? "REQUEST_FAILED",
-      errorMessage: data.errorMessage ?? "Image generation request failed.",
-      raw: data.raw ?? data,
+      errorMessage:
+        (payload &&
+          typeof payload === "object" &&
+          typeof (payload as Record<string, unknown>).message === "string" &&
+          ((payload as Record<string, unknown>).message as string)) ||
+        "Mage request failed.",
     };
   }
 
-  return data;
+  const data =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : {};
+
+  const imageUrl =
+    typeof data.imageUrl === "string"
+      ? data.imageUrl
+      : typeof data.image_url === "string"
+        ? data.image_url
+        : null;
+
+  const externalJobId =
+    typeof data.jobId === "string"
+      ? data.jobId
+      : typeof data.job_id === "string"
+        ? data.job_id
+        : typeof data.id === "string"
+          ? data.id
+          : null;
+
+  const revisedPrompt =
+    typeof data.revisedPrompt === "string"
+      ? data.revisedPrompt
+      : typeof data.revised_prompt === "string"
+        ? data.revised_prompt
+        : args.prompt;
+
+  const revisedNegativePrompt =
+    typeof data.revisedNegativePrompt === "string"
+      ? data.revisedNegativePrompt
+      : typeof data.revised_negative_prompt === "string"
+        ? data.revised_negative_prompt
+        : args.negativePrompt;
+
+  if (imageUrl) {
+    return {
+      ok: true,
+      imageUrl,
+      externalJobId: null,
+      revisedPrompt,
+      revisedNegativePrompt,
+    };
+  }
+
+  if (externalJobId) {
+    return {
+      ok: true,
+      imageUrl: null,
+      externalJobId,
+      revisedPrompt,
+      revisedNegativePrompt,
+    };
+  }
+
+  return {
+    ok: false,
+    errorMessage: "Mage returned neither imageUrl nor job id.",
+  };
+}
+
+async function requestComfyImage(args: {
+  prompt: string;
+  negativePrompt: string;
+  kind: "avatar" | "gallery";
+}): Promise<RequestImageGenerationResult> {
+  const baseUrl = process.env.NEXT_PUBLIC_COMFY_API_BASE_URL;
+  const apiKey = process.env.NEXT_PUBLIC_COMFY_API_KEY;
+
+  if (!baseUrl) {
+    return {
+      ok: false,
+      errorMessage: "NEXT_PUBLIC_COMFY_API_BASE_URL is missing.",
+    };
+  }
+
+  const workflow = {
+    prompt: {
+      "3": {
+        class_type: "KSampler",
+        inputs: {
+          seed: Math.floor(Math.random() * 1_000_000_000),
+          steps: args.kind === "avatar" ? 28 : 30,
+          cfg: 6.5,
+          sampler_name: "euler",
+          scheduler: "normal",
+          denoise: 1,
+          model: ["4", 0],
+          positive: ["6", 0],
+          negative: ["7", 0],
+          latent_image: ["5", 0],
+        },
+      },
+      "4": {
+        class_type: "CheckpointLoaderSimple",
+        inputs: {
+          ckpt_name: "model.safetensors",
+        },
+      },
+      "5": {
+        class_type: "EmptyLatentImage",
+        inputs: {
+          width: 832,
+          height: 1216,
+          batch_size: 1,
+        },
+      },
+      "6": {
+        class_type: "CLIPTextEncode",
+        inputs: {
+          text: args.prompt,
+          clip: ["4", 1],
+        },
+      },
+      "7": {
+        class_type: "CLIPTextEncode",
+        inputs: {
+          text: args.negativePrompt,
+          clip: ["4", 1],
+        },
+      },
+      "8": {
+        class_type: "VAEDecode",
+        inputs: {
+          samples: ["3", 0],
+          vae: ["4", 2],
+        },
+      },
+      "9": {
+        class_type: "SaveImage",
+        inputs: {
+          filename_prefix: "lovora_avatar",
+          images: ["8", 0],
+        },
+      },
+    },
+  };
+
+  const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/prompt`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify(workflow),
+  });
+
+  const payload = await safeJson(response);
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      errorMessage:
+        (payload &&
+          typeof payload === "object" &&
+          typeof (payload as Record<string, unknown>).error === "string" &&
+          ((payload as Record<string, unknown>).error as string)) ||
+        "ComfyUI request failed.",
+    };
+  }
+
+  const data =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : {};
+
+  const externalJobId =
+    typeof data.prompt_id === "string"
+      ? data.prompt_id
+      : typeof data.jobId === "string"
+        ? data.jobId
+        : null;
+
+  if (!externalJobId) {
+    return {
+      ok: false,
+      errorMessage: "ComfyUI did not return a prompt id.",
+    };
+  }
+
+  return {
+    ok: true,
+    imageUrl: null,
+    externalJobId,
+    revisedPrompt: args.prompt,
+    revisedNegativePrompt: args.negativePrompt,
+  };
+}
+
+export async function requestImageGeneration(
+  args: RequestImageGenerationArgs,
+): Promise<RequestImageGenerationResult> {
+  ensureSafety(args.safety);
+
+  const prompt = buildPositivePrompt(args.promptInput);
+  const negativePrompt = buildNegativePrompt();
+
+  if (!prompt.trim()) {
+    return {
+      ok: false,
+      errorMessage: "Prompt could not be built.",
+    };
+  }
+
+  if (args.provider === "mage") {
+    return requestMageImage({
+      prompt,
+      negativePrompt,
+      kind: args.kind,
+    });
+  }
+
+  return requestComfyImage({
+    prompt,
+    negativePrompt,
+    kind: args.kind,
+  });
 }

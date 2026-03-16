@@ -18,10 +18,10 @@ export default function AuthStatus() {
         data: { user: currentUser },
       } = await supabase.auth.getUser();
 
-      if (mounted) {
-        setUser(currentUser ?? null);
-        setLoading(false);
-      }
+      if (!mounted) return;
+
+      setUser(currentUser ?? null);
+      setLoading(false);
     }
 
     bootstrap();
@@ -43,6 +43,7 @@ export default function AuthStatus() {
     if (isLoggingOut) return;
 
     setIsLoggingOut(true);
+
     try {
       await supabase.auth.signOut();
       clearLegacyLovoraLocalData();
@@ -64,7 +65,7 @@ export default function AuthStatus() {
     return (
       <div className="flex items-center gap-2">
         <Link
-          href="/login"
+          href="/sign-in"
           className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10"
         >
           Login

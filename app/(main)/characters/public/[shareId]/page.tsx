@@ -113,7 +113,7 @@ export default function PublicCharacterDetailPage() {
 
   async function loadPrimaryAvatar(characterId: string) {
     try {
-      const db = supabase as any;
+      const db = supabase;
 
       const { data: rowRaw, error } = await db
         .from("character_images")
