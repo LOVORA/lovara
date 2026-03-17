@@ -14,7 +14,10 @@ import {
   getSelectedCandidate,
   mapInitialCandidatesToImageInsertPayloads,
 } from "@/lib/image-generation/service";
-import type { ImageModerationSnapshot } from "@/lib/image-generation/types";
+import type {
+  ImageModerationSnapshot,
+  ImageProvider,
+} from "@/lib/image-generation/types";
 import {
   createCharacterImage,
   setPrimaryCharacterImage,
@@ -30,9 +33,6 @@ import {
   getCustomCharacterById,
   setCustomCharacterImageLinks,
 } from "@/lib/character-repository/custom-characters";
-
-type ServiceImageProvider = "runware";
-type PublicImageProvider = "mage" | "self-hosted-comfy";
 
 type CharacterImageSafetyInput = {
   isAdultOnly: boolean;
@@ -66,9 +66,9 @@ type CharacterImagePromptInput = {
 };
 
 type GenerateImageRouteBody = {
-  userId: string;
+  userId?: string;
   characterId: string;
-  provider?: PublicImageProvider;
+  provider?: ImageProvider;
   kind?: "avatar" | "gallery";
   promptInput: CharacterImagePromptInput;
   safety: CharacterImageSafetyInput;
@@ -110,24 +110,13 @@ function normalizeModerationSnapshot(
   };
 }
 
-function isPublicProvider(value: unknown): value is PublicImageProvider {
-  return value === "mage" || value === "self-hosted-comfy";
-}
-
-/**
- * Geçici uyumluluk:
- * lib/image-generation/types.ts şu an sadece "runware" kabul ediyor.
- * Dışarıda mage/comfy kullansak da iç servis katmanına tek geçerli provider veriyoruz.
- */
-function toServiceProvider(_provider: PublicImageProvider): ServiceImageProvider {
-  return "runware";
-}
-
 function buildHiddenPromptInputFromRequest(args: {
   promptInput: CharacterImagePromptInput;
 }): HiddenPromptEngineInput {
   const styleType: CharacterStyleType =
-    args.promptInput.avatarStyle?.toLowerCase().includes("anime") ? "anime" : "realistic";
+    args.promptInput.avatarStyle?.toLowerCase().includes("anime")
+      ? "anime"
+      : "realistic";
 
   const builderMode: CharacterBuilderMode = "preset";
 
@@ -159,23 +148,27 @@ function parseBody(input: unknown): GenerateImageRouteBody | null {
   if (!isRecord(input.promptInput)) return null;
   if (!isRecord(input.safety)) return null;
 
-  const userId = typeof input.userId === "string" ? input.userId.trim() : "";
   const characterId =
     typeof input.characterId === "string" ? input.characterId.trim() : "";
 
-  if (!userId || !characterId) {
+  if (!characterId) {
     return null;
   }
 
   return {
-    userId,
+    userId:
+      typeof input.userId === "string" && input.userId.trim()
+        ? input.userId.trim()
+        : undefined,
     characterId,
-    provider: isPublicProvider(input.provider) ? input.provider : "mage",
+    provider: "runware",
     kind: input.kind === "gallery" ? "gallery" : "avatar",
     promptInput: input.promptInput as CharacterImagePromptInput,
     safety: input.safety as CharacterImageSafetyInput,
     selectedCandidateId:
-      typeof input.selectedCandidateId === "string" ? input.selectedCandidateId : null,
+      typeof input.selectedCandidateId === "string"
+        ? input.selectedCandidateId
+        : null,
     candidateCount:
       typeof input.candidateCount === "number" ? input.candidateCount : undefined,
     model: typeof input.model === "string" ? input.model : null,
@@ -185,6 +178,10 @@ function parseBody(input: unknown): GenerateImageRouteBody | null {
   };
 }
 
+function isDraftCharacterId(characterId: string) {
+  return characterId.startsWith("draft-");
+}
+
 export async function POST(request: Request) {
   try {
     const rawBody = await request.json().catch(() => null);
@@ -192,6 +189,12 @@ export async function POST(request: Request) {
 
     if (!body) {
       return jsonError("Invalid request body.");
+    }
+
+    const isDraft = isDraftCharacterId(body.characterId);
+
+    if (!isDraft && !body.userId) {
+      return jsonError("User authentication required.", 401);
     }
 
     const moderation = normalizeModerationSnapshot(body.moderation);
@@ -230,32 +233,8 @@ export async function POST(request: Request) {
       });
     }
 
-    const character = await getCustomCharacterById(body.characterId, body.userId);
-    if (!character) {
-      return jsonError("Character not found.", 404);
-    }
-
-    const serviceProvider = toServiceProvider(body.provider ?? "mage");
-
-    const jobInput = createInitialGenerationJobInput({
-      userId: body.userId,
-      characterId: body.characterId,
-      provider: serviceProvider,
-      styleType: hiddenPromptInput.styleType,
-      builderMode: hiddenPromptInput.builderMode,
-      hiddenPromptInput,
-      promptEngineOutput,
-      model: body.model ?? null,
-      moderation,
-    });
-
-    const jobInsertPayload = createImageJobInsertPayload(jobInput);
-    const job = await createCharacterImageJob(jobInsertPayload);
-
-    await markCharacterImageJobProcessing(job.id);
-
     const generationResult = await generateInitialCharacterCandidatesWithService({
-      provider: serviceProvider,
+      provider: "runware",
       styleType: hiddenPromptInput.styleType,
       builderMode: hiddenPromptInput.builderMode,
       hiddenPromptInput,
@@ -265,12 +244,6 @@ export async function POST(request: Request) {
     });
 
     if (!generationResult.ok) {
-      await markCharacterImageJobFailed({
-        jobId: job.id,
-        errorCode: generationResult.errorCode,
-        errorMessage: generationResult.errorMessage,
-      });
-
       return NextResponse.json(
         {
           ok: false,
@@ -289,8 +262,52 @@ export async function POST(request: Request) {
         body.selectedCandidateId ?? null,
       ) ?? generationResult.candidates[0] ?? null;
 
+    if (isDraft) {
+      return NextResponse.json({
+        ok: true,
+        provider: "runware",
+        kind: body.kind ?? "avatar",
+        characterId: body.characterId,
+        promptSummary: promptEngineOutput.promptSummary,
+        canonicalPrompt: promptEngineOutput.canonicalPrompt,
+        negativePrompt: promptEngineOutput.negativePrompt,
+        moderationFlags: promptEngineOutput.moderationFlags,
+        generationHints: promptEngineOutput.generationHints,
+        identityLock: promptEngineOutput.identityLock,
+        selectedCandidateId: selectedCandidate?.tempId ?? null,
+        primaryImageId: null,
+        primaryImageUrl: selectedCandidate?.imageUrl ?? null,
+        imageUrl: selectedCandidate?.imageUrl ?? null,
+        externalJobId: generationResult.externalJobId ?? null,
+        candidates: generationResult.candidates,
+        previewMode: true,
+      });
+    }
+
+    const character = await getCustomCharacterById(body.characterId, body.userId!);
+    if (!character) {
+      return jsonError("Character not found.", 404);
+    }
+
+    const jobInput = createInitialGenerationJobInput({
+      userId: body.userId!,
+      characterId: body.characterId,
+      provider: "runware",
+      styleType: hiddenPromptInput.styleType,
+      builderMode: hiddenPromptInput.builderMode,
+      hiddenPromptInput,
+      promptEngineOutput,
+      model: body.model ?? null,
+      moderation,
+    });
+
+    const jobInsertPayload = createImageJobInsertPayload(jobInput);
+    const job = await createCharacterImageJob(jobInsertPayload);
+
+    await markCharacterImageJobProcessing(job.id);
+
     const imagePayloads = mapInitialCandidatesToImageInsertPayloads({
-      userId: body.userId,
+      userId: body.userId!,
       characterId: body.characterId,
       jobId: job.id,
       candidates: generationResult.candidates,
@@ -309,7 +326,7 @@ export async function POST(request: Request) {
     if (!primaryImage && selectedCandidate) {
       primaryImage = await createCharacterImage(
         createPrimaryReferenceImageInsertPayload({
-          userId: body.userId,
+          userId: body.userId!,
           characterId: body.characterId,
           jobId: job.id,
           candidate: selectedCandidate,
@@ -324,7 +341,7 @@ export async function POST(request: Request) {
 
       await setCustomCharacterImageLinks({
         characterId: body.characterId,
-        userId: body.userId,
+        userId: body.userId!,
         avatarImageId: primaryImage.id,
         primaryReferenceImageId: primaryImage.id,
         baseGenerationId: job.id,
@@ -345,7 +362,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      provider: body.provider ?? "mage",
+      provider: "runware",
       kind: body.kind ?? "avatar",
       jobId: job.id,
       characterId: body.characterId,
@@ -361,6 +378,7 @@ export async function POST(request: Request) {
       imageUrl: primaryImage?.public_url ?? null,
       externalJobId: generationResult.externalJobId ?? null,
       candidates: generationResult.candidates,
+      previewMode: false,
     });
   } catch (error) {
     const message =

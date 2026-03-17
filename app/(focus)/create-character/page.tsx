@@ -1225,9 +1225,7 @@ export default function CreateCharacterPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
   const [avatarGenerating, setAvatarGenerating] = useState(false);
-  const [avatarProvider, setAvatarProvider] = useState<ImageProvider>(
-    getDefaultImageProvider(),
-  );
+  const [avatarProvider] = useState<ImageProvider>(getDefaultImageProvider());
   const [generatedAvatarUrl, setGeneratedAvatarUrl] = useState<string | null>(
     null,
   );
@@ -2224,8 +2222,7 @@ export default function CreateCharacterPage() {
         setAvatarJobStatus("failed");
         setBanner({
           type: "error",
-          message:
-            "The provider did not return a preview image. Try again or switch provider later.",
+          message: "Runware did not return a preview image. Try again.",
         });
       }
     } catch (error) {
@@ -2245,10 +2242,7 @@ export default function CreateCharacterPage() {
     }
   }
 
-  async function persistGeneratedAvatar(args: {
-    characterId: string;
-    provider: ImageProvider;
-  }) {
+  async function persistGeneratedAvatar(args: { characterId: string }) {
     if (!generatedAvatarUrl || !lastAvatarPromptInput) {
       return;
     }
@@ -2256,9 +2250,8 @@ export default function CreateCharacterPage() {
     const job = await createCharacterImageJob({
       characterId: args.characterId,
       promptInput: lastAvatarPromptInput,
-      model: args.provider === "mage" ? "mage" : "sd3.5-medium",
-      workflowName:
-        args.provider === "mage" ? "mage-avatar-v1" : "character-avatar-v1",
+      model: "runware-default",
+      workflowName: "runware-avatar-v1",
     });
 
     const imageResponse = await fetch(generatedAvatarUrl);
@@ -2282,9 +2275,8 @@ export default function CreateCharacterPage() {
       blob,
       extension,
       mimeType,
-      model: args.provider === "mage" ? "mage" : "sd3.5-medium",
-      workflowName:
-        args.provider === "mage" ? "mage-avatar-v1" : "character-avatar-v1",
+      model: "runware-default",
+      workflowName: "runware-avatar-v1",
       promptInput: lastAvatarPromptInput,
       resolvedPrompt: lastAvatarResolvedPrompt ?? undefined,
       negativePrompt: lastAvatarNegativePrompt ?? undefined,
@@ -2347,7 +2339,6 @@ export default function CreateCharacterPage() {
         try {
           await persistGeneratedAvatar({
             characterId: created.id,
-            provider: queuedJobProvider || avatarProvider,
           });
         } catch (avatarError) {
           console.error("Avatar persistence failed:", avatarError);
@@ -3518,24 +3509,15 @@ export default function CreateCharacterPage() {
               {(activeStep === "visual" || activeStep === "publish") && (
                 <Section
                   title="AI avatar preview"
-                  description="Generate a provider-backed avatar preview now. If a preview image is returned, it will be attached automatically after character creation."
+                  description="Generate a Runware-backed avatar preview now. If a preview image is returned, it will be attached automatically after character creation."
                   accent="cyan"
                 >
                   <div className="grid gap-4">
                     <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <SegmentButton
-                          active={avatarProvider === "mage"}
-                          onClick={() => setAvatarProvider("mage")}
-                        >
-                          Mage
-                        </SegmentButton>
-                        <SegmentButton
-                          active={avatarProvider === "self-hosted-comfy"}
-                          onClick={() => setAvatarProvider("self-hosted-comfy")}
-                        >
-                          Self-hosted ComfyUI
-                        </SegmentButton>
+                      <div className="flex items-center">
+                        <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-100">
+                          Provider: Runware
+                        </div>
                       </div>
 
                       <button
@@ -3550,18 +3532,7 @@ export default function CreateCharacterPage() {
 
                     <div className="flex flex-wrap gap-2">
                       <StatPill label="Avatar status" value={avatarStatusLabel} />
-                      <StatPill
-                        label="Provider"
-                        value={
-                          queuedJobProvider
-                            ? queuedJobProvider === "mage"
-                              ? "Mage"
-                              : "Self-hosted ComfyUI"
-                            : avatarProvider === "mage"
-                              ? "Mage"
-                              : "Self-hosted ComfyUI"
-                        }
-                      />
+                      <StatPill label="Provider" value="Runware" />
                     </div>
 
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-7 text-white/65">

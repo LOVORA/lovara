@@ -1,4 +1,4 @@
-export type ImageProvider = "mage" | "self-hosted-comfy";
+export type ImageProvider = "runware";
 
 export type CharacterImageSafetyInput = {
   isAdultOnly: boolean;
@@ -35,6 +35,7 @@ export type RequestImageGenerationArgs = {
   provider: ImageProvider;
   kind: "avatar" | "gallery";
   characterId: string;
+  userId?: string;
   promptInput: CharacterImagePromptInput;
   safety: CharacterImageSafetyInput;
 };
@@ -42,6 +43,7 @@ export type RequestImageGenerationArgs = {
 export type RequestImageGenerationResult = {
   ok: boolean;
   imageUrl?: string | null;
+  primaryImageUrl?: string | null;
   externalJobId?: string | null;
   revisedPrompt?: string | null;
   revisedNegativePrompt?: string | null;
@@ -66,7 +68,7 @@ function ensureSafety(input: CharacterImageSafetyInput) {
   }
 
   if (input.depictsPublicFigure) {
-    throw new Error("Public-figure generation is not allowed.");
+    throw new Error("Public-figure generation is not allowed in this flow.");
   }
 
   if (input.nonConsensualFlag) {
@@ -83,20 +85,7 @@ function ensureSafety(input: CharacterImageSafetyInput) {
 }
 
 export function getDefaultImageProvider(): ImageProvider {
-  const envValue =
-    typeof process !== "undefined"
-      ? process.env.NEXT_PUBLIC_DEFAULT_IMAGE_PROVIDER
-      : undefined;
-
-  return envValue === "self-hosted-comfy" ? "self-hosted-comfy" : "mage";
-}
-
-async function safeJson(response: Response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
+  return "runware";
 }
 
 export async function requestImageGeneration(
@@ -104,21 +93,26 @@ export async function requestImageGeneration(
 ): Promise<RequestImageGenerationResult> {
   ensureSafety(args.safety);
 
+  const requestBody = {
+    characterId: args.characterId,
+    provider: "runware" as const,
+    kind: args.kind,
+    promptInput: args.promptInput,
+    safety: args.safety,
+    ...(args.userId ? { userId: args.userId } : {}),
+  };
+
   const response = await fetch("/api/image/generate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      provider: args.provider,
-      kind: args.kind,
-      characterId: args.characterId,
-      promptInput: args.promptInput,
-      safety: args.safety,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
-  const payload = (await safeJson(response)) as
+  const rawText = await response.text();
+
+  let payload:
     | {
         ok?: boolean;
         imageUrl?: string | null;
@@ -132,7 +126,13 @@ export async function requestImageGeneration(
         error?: string;
         errorMessage?: string;
       }
-    | null;
+    | null = null;
+
+  try {
+    payload = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    payload = null;
+  }
 
   if (!response.ok || !payload?.ok) {
     return {
@@ -140,6 +140,7 @@ export async function requestImageGeneration(
       errorMessage:
         payload?.errorMessage ||
         payload?.error ||
+        rawText ||
         "Image generation request failed.",
     };
   }
@@ -147,9 +148,14 @@ export async function requestImageGeneration(
   return {
     ok: true,
     imageUrl: payload.imageUrl ?? payload.primaryImageUrl ?? null,
+    primaryImageUrl: payload.primaryImageUrl ?? payload.imageUrl ?? null,
     externalJobId: payload.externalJobId ?? null,
     revisedPrompt:
-      payload.revisedPrompt ?? payload.canonicalPrompt ?? payload.promptSummary ?? null,
-    revisedNegativePrompt: payload.revisedNegativePrompt ?? payload.negativePrompt ?? null,
+      payload.revisedPrompt ??
+      payload.canonicalPrompt ??
+      payload.promptSummary ??
+      null,
+    revisedNegativePrompt:
+      payload.revisedNegativePrompt ?? payload.negativePrompt ?? null,
   };
 }

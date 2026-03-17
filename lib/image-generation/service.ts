@@ -1,360 +1,264 @@
 import type {
-  CharacterBuilderMode,
-  CharacterConsistencyMode,
-  CharacterConsistencyStrength,
-  CharacterImageInsert,
-  CharacterImageJobInsert,
-  CharacterStyleType,
-  HiddenPromptEngineInput,
-  PromptEngineOutput,
-} from "../character-builder/types";
-import {
-  generateCharacterVariation,
-  generateInitialCharacterCandidates,
-} from "./runware";
-import type {
-  BuildVariationRequestInput,
-  BuildVariationRequestOutput,
-  CharacterImageJobRepositoryInsert,
-  CharacterImageRepositoryInsert,
-  GenerateInitialCharacterCandidatesParams,
-  GenerateVariationParams,
-  ImageGenerationCandidate,
-  ImageGenerationResult,
+  GeneratedImageCandidate,
   ImageModerationSnapshot,
   ImageProvider,
-  ImageProviderConfig,
-  ImageProviderConfig as _ImageProviderConfig,
-  ImageJobCreateInput,
-  SaveGeneratedImageInput,
-  SelectPrimaryReferenceCandidateInput,
-} from "./types";
-import { IMAGE_PROVIDER_CONFIGS } from "./types";
+  InitialGenerationJobInput,
+  InitialGenerationServiceArgs,
+  InitialGenerationServiceResult,
+} from "@/lib/image-generation/types";
+import { generateInitialCharacterCandidates } from "@/lib/image-generation/runware";
 
-function normalizeModerationSnapshot(
-  moderation?: Partial<ImageModerationSnapshot>,
-): ImageModerationSnapshot {
+type CreateImageJobInsertPayloadResult = {
+  user_id: string;
+  character_id: string;
+  provider: ImageProvider;
+  status: "queued";
+  request_type: "avatar";
+  prompt_version: number;
+  prompt_input: Record<string, unknown>;
+  resolved_prompt: string;
+  negative_prompt: string;
+  style_type: string;
+  request_mode: string;
+  variation_type: string | null;
+  model: string;
+  workflow_name: string;
+  moderation_status: string;
+  moderation_notes: string | null;
+  is_adult_only: boolean;
+  subject_declared_18_plus: boolean;
+  consent_confirmed: boolean;
+  depicts_real_person: boolean;
+  depicts_public_figure: boolean;
+  non_consensual_flag: boolean;
+  underage_risk_flag: boolean;
+  illegal_content_flag: boolean;
+};
+
+type CreatePrimaryReferenceImageInsertPayloadArgs = {
+  userId: string;
+  characterId: string;
+  jobId: string;
+  candidate: GeneratedImageCandidate;
+  moderation: ImageModerationSnapshot;
+};
+
+type MapInitialCandidatesToImageInsertPayloadsArgs = {
+  userId: string;
+  characterId: string;
+  jobId: string;
+  candidates: GeneratedImageCandidate[];
+  selectedCandidateId: string | null;
+  moderation: ImageModerationSnapshot;
+};
+
+function normalizeCandidate(candidate: GeneratedImageCandidate): GeneratedImageCandidate {
   return {
-    isAdultOnly: moderation?.isAdultOnly ?? true,
-    subjectDeclared18Plus: moderation?.subjectDeclared18Plus ?? true,
-    consentConfirmed: moderation?.consentConfirmed ?? true,
-    depictsRealPerson: moderation?.depictsRealPerson ?? false,
-    depictsPublicFigure: moderation?.depictsPublicFigure ?? false,
-    nonConsensualFlag: moderation?.nonConsensualFlag ?? false,
-    underageRiskFlag: moderation?.underageRiskFlag ?? false,
-    illegalContentFlag: moderation?.illegalContentFlag ?? false,
-    moderationStatus: moderation?.moderationStatus ?? "approved",
-    moderationNotes: moderation?.moderationNotes ?? null,
+    tempId: candidate.tempId,
+    imageUrl: candidate.imageUrl,
+    width: candidate.width ?? null,
+    height: candidate.height ?? null,
+    seed: candidate.seed ?? null,
+    model: candidate.model ?? null,
+    prompt: candidate.prompt ?? null,
+    negativePrompt: candidate.negativePrompt ?? null,
   };
 }
 
-function inferJobStatusFromResult(
-  result: ImageGenerationResult,
-): "queued" | "processing" | "completed" | "failed" {
-  return result.ok ? "completed" : "failed";
-}
-
-function buildPromptInputJson(
-  hiddenPromptInput: HiddenPromptEngineInput,
-): Record<string, unknown> {
-  return {
-    styleType: hiddenPromptInput.styleType,
-    builderMode: hiddenPromptInput.builderMode,
-    presetSelections: hiddenPromptInput.presetSelections ?? null,
-    customPrompt: hiddenPromptInput.customPrompt ?? null,
-  };
-}
-
-function mapVariationKind(
-  variationType: string | null | undefined,
-): CharacterImageInsert["variantKind"] {
-  switch (variationType) {
-    case "outfit":
-    case "selfie":
-    case "pose":
-    case "location":
-    case "full_body":
-      return variationType;
-    default:
-      return "base";
-  }
-}
-
-export function getImageProviderConfig(provider: ImageProvider): ImageProviderConfig {
-  return IMAGE_PROVIDER_CONFIGS[provider];
+export function createInitialGenerationJobInput(
+  input: InitialGenerationJobInput,
+): InitialGenerationJobInput {
+  return input;
 }
 
 export function createImageJobInsertPayload(
-  input: ImageJobCreateInput,
-): CharacterImageJobRepositoryInsert {
-  const moderation = normalizeModerationSnapshot(input.moderation);
-
-  const base: CharacterImageJobInsert = {
+  input: InitialGenerationJobInput,
+): CreateImageJobInsertPayloadResult {
+  return {
+    user_id: input.userId,
+    character_id: input.characterId,
     provider: input.provider,
-    model: input.model ?? null,
-    styleType: input.styleType,
-    requestMode: input.builderMode,
-    promptInputJson: buildPromptInputJson(input.hiddenPromptInput),
-    canonicalPrompt: input.promptEngineOutput.canonicalPrompt,
-    negativePrompt: input.promptEngineOutput.negativePrompt,
-    seed: input.seed ?? null,
-    referenceImageIds: input.referenceImageIds ?? [],
-    variationType: input.variationType ?? null,
-  };
-
-  return {
-    ...base,
-    userId: input.userId,
-    characterId: input.characterId,
-    kind: input.kind,
-    moderation,
-  };
-}
-
-export function createCharacterImageInsertPayload(
-  input: SaveGeneratedImageInput,
-): CharacterImageRepositoryInsert {
-  const moderation = normalizeModerationSnapshot(input.moderation);
-
-  return {
-    userId: input.userId,
-    characterId: input.characterId,
-    jobId: input.jobId,
-    imageType: input.imageType,
-    variantKind: input.variantKind,
-    imageUrl: input.image.imageUrl,
-    storageBucket: null,
-    storagePath: null,
-    width: input.image.width,
-    height: input.image.height,
-    mimeType: "image/jpeg",
-    fileSizeBytes: null,
-    seed: input.image.seed,
-    modelUsed: input.image.model,
-    providerUsed: input.image.provider,
-    promptSnapshot: input.image.promptUsed,
-    negativePromptSnapshot: input.image.negativePromptUsed,
-    isPrimary: input.isPrimary,
-    isReference: input.isReference,
-    moderation,
-  };
-}
-
-export function createPrimaryReferenceImageInsertPayload(args: {
-  userId: string;
-  characterId: string;
-  jobId: string | null;
-  candidate: ImageGenerationCandidate;
-  moderation?: Partial<ImageModerationSnapshot>;
-}): CharacterImageRepositoryInsert {
-  return createCharacterImageInsertPayload({
-    userId: args.userId,
-    characterId: args.characterId,
-    jobId: args.jobId,
-    image: args.candidate,
-    imageType: "reference",
-    variantKind: "base",
-    isPrimary: true,
-    isReference: true,
-    moderation: normalizeModerationSnapshot(args.moderation),
-  });
-}
-
-export function selectPrimaryReferenceCandidate(
-  input: SelectPrimaryReferenceCandidateInput,
-): {
-  primaryReferenceImageUrl: string;
-  promptSummary: string;
-  canonicalPrompt: string;
-  negativePrompt: string;
-} {
-  return {
-    primaryReferenceImageUrl: input.candidate.imageUrl,
-    promptSummary: input.promptEngineOutput.promptSummary,
-    canonicalPrompt: input.promptEngineOutput.canonicalPrompt,
-    negativePrompt: input.promptEngineOutput.negativePrompt,
-  };
-}
-
-export function buildVariationRequestFromService(
-  input: BuildVariationRequestInput,
-): BuildVariationRequestOutput {
-  const positivePrompt = [
-    input.lockedCanonicalPrompt,
-    input.variationPromptDelta,
-    input.consistencyStrength === "strict"
-      ? "preserve same face identity, preserve same body identity"
-      : "keep similar identity, allow light scene variation",
-  ]
-    .filter(Boolean)
-    .join(", ");
-
-  return {
-    positivePrompt,
-    negativePrompt: input.lockedNegativePrompt,
-    referenceImageUrls: [input.primaryReferenceImageUrl],
-    seed:
-      input.consistencyMode === "seed_only"
-        ? input.baseSeed ?? null
-        : input.baseSeed ?? null,
+    status: "queued",
+    request_type: "avatar",
+    prompt_version: 1,
+    prompt_input: input.hiddenPromptInput,
+    resolved_prompt: input.promptEngineOutput.canonicalPrompt,
+    negative_prompt: input.promptEngineOutput.negativePrompt,
+    style_type: input.styleType,
+    request_mode: input.builderMode,
+    variation_type: null,
+    model: input.model ?? "runware-default",
+    workflow_name: "runware-avatar-v1",
+    moderation_status: input.moderation.moderationStatus,
+    moderation_notes: input.moderation.moderationNotes ?? null,
+    is_adult_only: input.moderation.isAdultOnly,
+    subject_declared_18_plus: input.moderation.subjectDeclared18Plus,
+    consent_confirmed: input.moderation.consentConfirmed,
+    depicts_real_person: input.moderation.depictsRealPerson,
+    depicts_public_figure: input.moderation.depictsPublicFigure,
+    non_consensual_flag: input.moderation.nonConsensualFlag,
+    underage_risk_flag: input.moderation.underageRiskFlag,
+    illegal_content_flag: input.moderation.illegalContentFlag,
   };
 }
 
 export async function generateInitialCharacterCandidatesWithService(
-  params: GenerateInitialCharacterCandidatesParams,
-): Promise<ImageGenerationResult> {
-  return generateInitialCharacterCandidates(params);
-}
+  args: InitialGenerationServiceArgs,
+): Promise<InitialGenerationServiceResult> {
+  try {
+    const result = await generateInitialCharacterCandidates({
+      provider: "runware",
+      styleType: args.styleType,
+      builderMode: args.builderMode,
+      hiddenPromptInput: args.hiddenPromptInput,
+      promptEngineOutput: args.promptEngineOutput,
+      candidateCount: args.candidateCount,
+      model: args.model ?? null,
+    });
 
-export async function generateCharacterVariationWithService(
-  params: GenerateVariationParams,
-): Promise<ImageGenerationResult> {
-  return generateCharacterVariation(params);
-}
+    if (!result.ok) {
+      return {
+        ok: false,
+        provider: "runware",
+        kind: "initial",
+        errorCode: result.errorCode,
+        errorMessage: result.errorMessage,
+      };
+    }
 
-export function createInitialGenerationJobInput(args: {
-  userId: string;
-  characterId: string;
-  provider: ImageProvider;
-  styleType: CharacterStyleType;
-  builderMode: CharacterBuilderMode;
-  hiddenPromptInput: HiddenPromptEngineInput;
-  promptEngineOutput: PromptEngineOutput;
-  model?: string | null;
-  seed?: number | null;
-  moderation?: Partial<ImageModerationSnapshot>;
-}): ImageJobCreateInput {
-  return {
-    userId: args.userId,
-    characterId: args.characterId,
-    provider: args.provider,
-    kind: "avatar",
-    styleType: args.styleType,
-    builderMode: args.builderMode,
-    hiddenPromptInput: args.hiddenPromptInput,
-    promptEngineOutput: args.promptEngineOutput,
-    model: args.model ?? null,
-    seed: args.seed ?? null,
-    referenceImageIds: [],
-    moderation: normalizeModerationSnapshot(args.moderation),
-  };
-}
-
-export function createVariationGenerationJobInput(args: {
-  userId: string;
-  characterId: string;
-  provider: ImageProvider;
-  styleType: CharacterStyleType;
-  builderMode: CharacterBuilderMode;
-  hiddenPromptInput: HiddenPromptEngineInput;
-  promptEngineOutput: PromptEngineOutput;
-  model?: string | null;
-  seed?: number | null;
-  referenceImageIds?: string[];
-  variationType?: string | null;
-  moderation?: Partial<ImageModerationSnapshot>;
-}): ImageJobCreateInput {
-  return {
-    userId: args.userId,
-    characterId: args.characterId,
-    provider: args.provider,
-    kind: "variation",
-    styleType: args.styleType,
-    builderMode: args.builderMode,
-    hiddenPromptInput: args.hiddenPromptInput,
-    promptEngineOutput: args.promptEngineOutput,
-    model: args.model ?? null,
-    seed: args.seed ?? null,
-    referenceImageIds: args.referenceImageIds ?? [],
-    variationType: args.variationType ?? null,
-    moderation: normalizeModerationSnapshot(args.moderation),
-  };
-}
-
-export function mapInitialCandidatesToImageInsertPayloads(args: {
-  userId: string;
-  characterId: string;
-  jobId: string | null;
-  candidates: ImageGenerationCandidate[];
-  selectedCandidateId?: string | null;
-  moderation?: Partial<ImageModerationSnapshot>;
-}): CharacterImageRepositoryInsert[] {
-  const moderation = normalizeModerationSnapshot(args.moderation);
-
-  return args.candidates.map((candidate) =>
-    createCharacterImageInsertPayload({
-      userId: args.userId,
-      characterId: args.characterId,
-      jobId: args.jobId,
-      image: candidate,
-      imageType: candidate.tempId === args.selectedCandidateId ? "avatar" : "gallery",
-      variantKind: "base",
-      isPrimary: candidate.tempId === args.selectedCandidateId,
-      isReference: candidate.tempId === args.selectedCandidateId,
-      moderation,
-    }),
-  );
-}
-
-export function mapVariationCandidatesToImageInsertPayloads(args: {
-  userId: string;
-  characterId: string;
-  jobId: string | null;
-  candidates: ImageGenerationCandidate[];
-  variationType?: string | null;
-  moderation?: Partial<ImageModerationSnapshot>;
-}): CharacterImageRepositoryInsert[] {
-  const moderation = normalizeModerationSnapshot(args.moderation);
-  const variantKind = mapVariationKind(args.variationType);
-
-  return args.candidates.map((candidate) =>
-    createCharacterImageInsertPayload({
-      userId: args.userId,
-      characterId: args.characterId,
-      jobId: args.jobId,
-      image: candidate,
-      imageType: "variation",
-      variantKind,
-      isPrimary: false,
-      isReference: false,
-      moderation,
-    }),
-  );
-}
-
-export function buildImageJobStatusUpdate(args: {
-  jobId: string;
-  result: ImageGenerationResult;
-}): {
-  jobId: string;
-  status: "queued" | "processing" | "completed" | "failed";
-  externalJobId?: string | null;
-  errorCode?: string | null;
-  errorMessage?: string | null;
-} {
-  if (args.result.ok) {
     return {
-      jobId: args.jobId,
-      status: inferJobStatusFromResult(args.result),
-      externalJobId: args.result.externalJobId ?? null,
-      errorCode: null,
-      errorMessage: null,
+      ok: true,
+      provider: "runware",
+      kind: "initial",
+      externalJobId: null,
+      candidates: result.candidates.map(
+  (
+    candidate: {
+      tempId: string;
+      imageUrl: string;
+      width?: number | null;
+      height?: number | null;
+      seed?: number | null;
+      model?: string | null;
+      promptUsed?: string | null;
+      negativePromptUsed?: string | null;
+    },
+  ) =>
+    normalizeCandidate({
+      tempId: candidate.tempId,
+      imageUrl: candidate.imageUrl,
+      width: candidate.width ?? null,
+      height: candidate.height ?? null,
+      seed: candidate.seed ?? null,
+      model: candidate.model ?? null,
+      prompt: candidate.promptUsed ?? null,
+      negativePrompt: candidate.negativePromptUsed ?? null,
+    }),
+),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      provider: "runware",
+      kind: "initial",
+      errorCode: "RUNWARE_GENERATION_FAILED",
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : "Unknown Runware generation error.",
     };
   }
-
-  return {
-    jobId: args.jobId,
-    status: "failed",
-    errorCode: args.result.errorCode,
-    errorMessage: args.result.errorMessage,
-    externalJobId: null,
-  };
 }
 
 export function getSelectedCandidate(
-  candidates: ImageGenerationCandidate[],
-  selectedCandidateId?: string | null,
-): ImageGenerationCandidate | null {
-  if (!selectedCandidateId) return null;
-  return candidates.find((candidate) => candidate.tempId === selectedCandidateId) ?? null;
+  candidates: GeneratedImageCandidate[],
+  selectedCandidateId: string | null,
+): GeneratedImageCandidate | null {
+  if (!candidates.length) return null;
+
+  if (!selectedCandidateId) {
+    return candidates[0] ?? null;
+  }
+
+  return (
+    candidates.find((candidate) => candidate.tempId === selectedCandidateId) ?? null
+  );
+}
+
+export function mapInitialCandidatesToImageInsertPayloads(
+  args: MapInitialCandidatesToImageInsertPayloadsArgs,
+) {
+  return args.candidates.map((candidate, index) => ({
+    user_id: args.userId,
+    character_id: args.characterId,
+    job_id: args.jobId,
+    kind: "avatar",
+    image_type: index === 0 ? "reference" : "gallery",
+    variant_kind: "base",
+    source: "generated",
+    visibility: "private",
+    public_url: candidate.imageUrl,
+    width: candidate.width ?? null,
+    height: candidate.height ?? null,
+    seed: candidate.seed ?? null,
+    model: candidate.model ?? "runware-default",
+    model_used: candidate.model ?? "runware-default",
+    provider_used: "runware",
+    workflow_name: "runware-avatar-v1",
+    prompt_version: 1,
+    prompt_input: {},
+    resolved_prompt: candidate.prompt ?? null,
+    negative_prompt: candidate.negativePrompt ?? null,
+    prompt_snapshot: candidate.prompt ?? null,
+    negative_prompt_snapshot: candidate.negativePrompt ?? null,
+    is_primary: candidate.tempId === args.selectedCandidateId,
+    is_reference: candidate.tempId === args.selectedCandidateId,
+    sort_order: index,
+    is_adult_only: args.moderation.isAdultOnly,
+    subject_declared_18_plus: args.moderation.subjectDeclared18Plus,
+    consent_confirmed: args.moderation.consentConfirmed,
+    depicts_real_person: args.moderation.depictsRealPerson,
+    depicts_public_figure: args.moderation.depictsPublicFigure,
+    moderation_status: args.moderation.moderationStatus,
+    moderation_notes: args.moderation.moderationNotes ?? null,
+  }));
+}
+
+export function createPrimaryReferenceImageInsertPayload(
+  args: CreatePrimaryReferenceImageInsertPayloadArgs,
+) {
+  return {
+    user_id: args.userId,
+    character_id: args.characterId,
+    job_id: args.jobId,
+    kind: "avatar",
+    image_type: "reference",
+    variant_kind: "base",
+    source: "generated",
+    visibility: "private",
+    public_url: args.candidate.imageUrl,
+    width: args.candidate.width ?? null,
+    height: args.candidate.height ?? null,
+    seed: args.candidate.seed ?? null,
+    model: args.candidate.model ?? "runware-default",
+    model_used: args.candidate.model ?? "runware-default",
+    provider_used: "runware",
+    workflow_name: "runware-avatar-v1",
+    prompt_version: 1,
+    prompt_input: {},
+    resolved_prompt: args.candidate.prompt ?? null,
+    negative_prompt: args.candidate.negativePrompt ?? null,
+    prompt_snapshot: args.candidate.prompt ?? null,
+    negative_prompt_snapshot: args.candidate.negativePrompt ?? null,
+    is_primary: true,
+    is_reference: true,
+    sort_order: 0,
+    is_adult_only: args.moderation.isAdultOnly,
+    subject_declared_18_plus: args.moderation.subjectDeclared18Plus,
+    consent_confirmed: args.moderation.consentConfirmed,
+    depicts_real_person: args.moderation.depictsRealPerson,
+    depicts_public_figure: args.moderation.depictsPublicFigure,
+    moderation_status: args.moderation.moderationStatus,
+    moderation_notes: args.moderation.moderationNotes ?? null,
+  };
 }
