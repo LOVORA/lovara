@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getCharacterBySlug } from "@/lib/characters";
-import { buildMemoryPromptBlock, type MemoryChatMessage } from "@/lib/conversation-memory";
+import {
+  buildMemoryPromptBlock,
+  type ConversationMemoryState,
+  type MemoryChatMessage,
+} from "@/lib/conversation-memory";
 import {
   getConversationMemoryState,
   getOrCreateBuiltInConversation,
@@ -11,13 +15,14 @@ import {
 } from "@/lib/chat-conversations";
 
 type IncomingMessage = {
-  role: "system" | "user" | "assistant";
+  role: "user" | "assistant";
   content: string;
 };
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MAX_CONTEXT_MESSAGES = 16;
-const MAX_REPLY_TOKENS = 300;
+const MODEL_NAME = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
+const MAX_CONTEXT_MESSAGES = 24;
+const MAX_REPLY_TOKENS = 700;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -41,6 +46,10 @@ function getOptionalString(source: Record<string, unknown>, key: string): string
 function getOptionalBoolean(source: Record<string, unknown>, key: string): boolean | null {
   const value = source[key];
   return typeof value === "boolean" ? value : null;
+}
+
+function clean(value?: string | null): string {
+  return (value ?? "").trim();
 }
 
 function formatTags(source: Record<string, unknown>): string | null {
@@ -127,7 +136,244 @@ function formatMemory(source: Record<string, unknown>): string | null {
   return entries.length > 0 ? entries.join(", ") : null;
 }
 
-function buildCharacterContext(slug: string, memoryBlock?: string) {
+function formatVisualProfile(source: Record<string, unknown>): string | null {
+  const visualProfile = source["visualProfile"];
+  if (!isRecord(visualProfile)) return null;
+
+  const fields = [
+    typeof visualProfile.visualAura === "string" ? clean(visualProfile.visualAura) : "",
+    typeof visualProfile.eyes === "string" ? clean(visualProfile.eyes) : "",
+    typeof visualProfile.hair === "string" ? clean(visualProfile.hair) : "",
+    typeof visualProfile.style === "string" ? clean(visualProfile.style) : "",
+    typeof visualProfile.signatureDetail === "string"
+      ? clean(visualProfile.signatureDetail)
+      : "",
+  ].filter(Boolean);
+
+  return fields.length > 0 ? fields.join(" | ") : null;
+}
+
+function buildBuiltInVisualRoleplayHints(source: Record<string, unknown>) {
+  const visualProfile = source["visualProfile"];
+  if (!isRecord(visualProfile)) return [];
+
+  const lines: string[] = [
+    "Let the character's visual identity lightly shape presence, gaze, and atmosphere without over-describing appearance.",
+  ];
+
+  const visualAura =
+    typeof visualProfile.visualAura === "string" ? clean(visualProfile.visualAura) : "";
+  const eyes =
+    typeof visualProfile.eyes === "string" ? clean(visualProfile.eyes) : "";
+  const hair =
+    typeof visualProfile.hair === "string" ? clean(visualProfile.hair) : "";
+  const style =
+    typeof visualProfile.style === "string" ? clean(visualProfile.style) : "";
+  const signatureDetail =
+    typeof visualProfile.signatureDetail === "string"
+      ? clean(visualProfile.signatureDetail)
+      : "";
+
+  if (visualAura) lines.push(`Visual aura: ${visualAura}.`);
+  if (eyes) lines.push(`Eye contact anchor: ${eyes}.`);
+  if (hair) lines.push(`Hair / silhouette anchor: ${hair}.`);
+  if (style) lines.push(`Style anchor: ${style}.`);
+  if (signatureDetail) lines.push(`Signature detail: ${signatureDetail}.`);
+  if (eyes || signatureDetail) {
+    lines.push(
+      "When the moment calls for presence, tension, or softness, let those details color the delivery.",
+    );
+  }
+
+  return lines;
+}
+
+function formatScenarioStarters(source: Record<string, unknown>): string | null {
+  const starters = source["scenarioStarters"];
+  if (!Array.isArray(starters) || starters.length === 0) return null;
+
+  const formatted = starters
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const title = typeof item.title === "string" ? item.title.trim() : "";
+      const prompt = typeof item.prompt === "string" ? item.prompt.trim() : "";
+      if (!title && !prompt) return null;
+      return [title, prompt].filter(Boolean).join(": ");
+    })
+    .filter((item): item is string => Boolean(item));
+
+  return formatted.length > 0 ? formatted.join(" | ") : null;
+}
+
+function formatScenarioHooks(source: Record<string, unknown>): string | null {
+  const hooks = source["scenarioHooks"];
+  if (!Array.isArray(hooks) || hooks.length === 0) return null;
+
+  const formatted = hooks
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+
+  return formatted.length > 0 ? formatted.join(" | ") : null;
+}
+
+function classifyLastUserIntent(messages: MemoryChatMessage[]): string {
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+  const text = lastUserMessage?.content.toLocaleLowerCase("en") ?? "";
+
+  if (!text) return "no recent user signal";
+  if (/(help|what should i do|i don't know what to do|advice)/i.test(text)) {
+    return "guidance-seeking";
+  }
+  if (/(miss you|need you|want you|stay|hold me|be here)/i.test(text)) {
+    return "closeness-seeking";
+  }
+  if (/(angry|mad|upset|hurt|annoyed|jealous)/i.test(text)) {
+    return "conflict-or-friction";
+  }
+  if (/(haha|tease|play|brat|smirk|cute)/i.test(text)) {
+    return "playful-testing";
+  }
+  if (/(scared|lonely|tired|sad|confused|honest)/i.test(text)) {
+    return "vulnerable-opening";
+  }
+  if (/\?$/.test(text.trim())) {
+    return "direct-question";
+  }
+
+  return "scene-continuation";
+}
+
+function buildSpeechFingerprint(characterRecord: Record<string, unknown>) {
+  const lines: string[] = [
+    "Keep a stable speech fingerprint for this character instead of answering in a generic assistant voice.",
+  ];
+
+  const role = getOptionalString(characterRecord, "role");
+  const archetype = getOptionalString(characterRecord, "archetype");
+  const personality = getOptionalString(characterRecord, "personality");
+  const tags = formatTags(characterRecord);
+  const traits = formatTraits(characterRecord);
+
+  if (role) lines.push(`Role voice anchor: ${role}.`);
+  if (archetype) lines.push(`Archetype voice anchor: ${archetype}.`);
+  if (personality) lines.push(`Personality voice anchor: ${personality}.`);
+  if (tags) lines.push(`Tag influence: ${tags}.`);
+  if (traits) lines.push(`Trait rhythm: ${traits}.`);
+
+  lines.push(
+    "Let sentence rhythm, confidence, softness, teasing, restraint, and directness stay consistent across turns.",
+  );
+
+  return lines;
+}
+
+function buildAIDriftFilters(messages: MemoryChatMessage[]) {
+  const intent = classifyLastUserIntent(messages);
+  const lines = [
+    "Do not sound like support, coaching, therapy, or a polite assistant.",
+    "Do not mirror the user's wording too literally.",
+    "Do not over-explain motives or summarize the scene unless needed.",
+    "Do not end every reply with a question.",
+    "Do not pad the reply with generic compliments, repetitive pet names, or empty reassurance.",
+  ];
+
+  if (intent === "direct-question") {
+    lines.push("If the user asks something direct, answer it in-character before steering the scene forward.");
+  }
+  if (intent === "vulnerable-opening") {
+    lines.push("If the user opens vulnerably, answer with grounded warmth, not therapist language.");
+  }
+  if (intent === "playful-testing") {
+    lines.push("If the user is playful, keep the chemistry sharp instead of giving flat jokes.");
+  }
+
+  return lines;
+}
+
+function buildShortMessageRecovery(messages: MemoryChatMessage[]) {
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+  const text = lastUserMessage?.content.trim() ?? "";
+  if (!text) return [];
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const isShort = wordCount <= 4 || text.length <= 24;
+  const lower = text.toLocaleLowerCase("en");
+
+  if (!isShort) return [];
+
+  const lines = [
+    "SHORT MESSAGE RECOVERY",
+    "The user's message is short. Interpret the subtext and keep the scene moving.",
+    "Do not answer with a flat one-liner or a generic clarification request.",
+  ];
+
+  if (/(hey|hi|hello)/i.test(lower)) {
+    lines.push("Treat this like an opening beat and answer with mood, presence, and one clear pull forward.");
+  } else if (/(hmm|hm|ok|okay|yeah|yes|no|nah)/i.test(lower)) {
+    lines.push("Treat the short answer as subtext-heavy and read restraint, hesitation, or invitation from context.");
+  } else {
+    lines.push("Expand the compressed intent into one believable emotional beat.");
+  }
+
+  return lines;
+}
+
+function buildRepetitionGuard(messages: MemoryChatMessage[]) {
+  const recentAssistantMessages = [...messages]
+    .filter((message) => message.role === "assistant")
+    .slice(-3)
+    .map((message) => clean(message.content))
+    .filter(Boolean)
+    .map((message) => (message.length > 140 ? `${message.slice(0, 139).trimEnd()}…` : message));
+
+  if (recentAssistantMessages.length === 0) return [];
+
+  return [
+    "REPETITION GUARD",
+    "Avoid reusing the same emotional move, sentence rhythm, question ending, or pet name from the last few assistant replies.",
+    ...recentAssistantMessages.map((message, index) => `Recent assistant reply ${index + 1}: ${message}`),
+  ];
+}
+
+function buildReplyPlanner(messages: MemoryChatMessage[], memoryState?: ConversationMemoryState | null) {
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+  const relationship = memoryState?.relationshipState ?? {};
+  const tone = memoryState?.toneState ?? {};
+
+  return [
+    "REPLY PLANNER",
+    `Last user intent: ${classifyLastUserIntent(messages)}.`,
+    lastUserMessage ? `Last user message: ${clean(lastUserMessage.content)}` : "",
+    typeof relationship.stage === "string"
+      ? `Current relationship stage: ${relationship.stage}`
+      : "",
+    typeof tone.reply_strategy === "string"
+      ? `Suggested reply strategy: ${tone.reply_strategy}`
+      : "",
+    "Write the next reply in this order:",
+    "1. React to what the user just did or revealed.",
+    "2. Show one believable emotional read from the character's side.",
+    "3. Move the scene one step forward with tension, comfort, challenge, or closeness.",
+    "4. End on one hook: a line, observation, invitation, challenge, or selective question.",
+  ].filter(Boolean);
+}
+
+function buildSelfCheck(messages: MemoryChatMessage[]) {
+  return [
+    "SELF-CHECK BEFORE YOU ANSWER",
+    "Make sure the reply sounds specific to this exact scene, not reusable across any chat.",
+    "Make sure it changes the mood, closeness, or tension at least a little.",
+    `Current user-intent checkpoint: ${classifyLastUserIntent(messages)}.`,
+    "If it feels generic, repetitive, overlong, or emotionally flat, tighten it before finishing.",
+  ];
+}
+
+function buildCharacterContext(
+  slug: string,
+  memoryBlock?: string,
+  memoryState?: ConversationMemoryState | null,
+  messages: MemoryChatMessage[] = [],
+) {
   const character = getCharacterBySlug(slug);
 
   if (!character) return null;
@@ -149,6 +395,9 @@ function buildCharacterContext(slug: string, memoryBlock?: string) {
     ["Backstory", getOptionalString(characterRecord, "backstory")],
     ["Tags", formatTags(characterRecord)],
     ["Traits", formatTraits(characterRecord)],
+    ["Scenario starters", formatScenarioStarters(characterRecord)],
+    ["Scenario hooks", formatScenarioHooks(characterRecord)],
+    ["Visual presence", formatVisualProfile(characterRecord)],
     ["Memory settings", formatMemory(characterRecord)],
   ];
 
@@ -158,11 +407,25 @@ function buildCharacterContext(slug: string, memoryBlock?: string) {
     }
   }
 
+  const relationship = memoryState?.relationshipState ?? {};
+  const tone = memoryState?.toneState ?? {};
+  const relationshipStateLines = [
+    typeof relationship.stage === "string" ? `- Relationship stage: ${relationship.stage}` : "",
+    typeof relationship.trust_level === "number" ? `- Trust level: ${relationship.trust_level}/100` : "",
+    typeof relationship.flirt_tension === "number" ? `- Flirt tension: ${relationship.flirt_tension}/100` : "",
+    typeof relationship.attachment_pull === "number" ? `- Attachment pull: ${relationship.attachment_pull}/100` : "",
+    typeof relationship.jealousy_level === "number" ? `- Jealousy level: ${relationship.jealousy_level}/100` : "",
+    typeof relationship.comfort_need === "number" ? `- Comfort need: ${relationship.comfort_need}/100` : "",
+    typeof tone.mode === "string" ? `- Tone mode: ${tone.mode}` : "",
+    typeof tone.user_intent === "string" ? `- User intent: ${tone.user_intent}` : "",
+    typeof tone.reply_strategy === "string" ? `- Reply strategy: ${tone.reply_strategy}` : "",
+  ].filter(Boolean);
+
   const supplementalContext = `
 Character profile:
 ${details.join("\n")}
 
-${memoryBlock ? `${memoryBlock}\n\n` : ""}Behavior guidance:
+${relationshipStateLines.length > 0 ? `Active relationship state:\n${relationshipStateLines.join("\n")}\n\n` : ""}${memoryBlock ? `${memoryBlock}\n\n` : ""}Behavior guidance:
 - Stay fully in character as ${character.name}.
 - Match the emotional tone and intensity of the user's latest message.
 - Keep replies natural, immersive, personal, and non-generic.
@@ -178,7 +441,30 @@ ${memoryBlock ? `${memoryBlock}\n\n` : ""}Behavior guidance:
 - Do not open with phrases like "welcome back", "how are you", or "how can I help".
 - When suitable, begin with presence, mood, expression, tension, or a charged line of dialogue.
 - Keep replies believable, character-driven, and emotionally reactive.
+- Keep the character's speech fingerprint stable instead of drifting toward generic assistant phrasing.
+- If the user is brief, read the subtext and keep the scene moving.
+- Avoid repeating the same emotional move or sentence shape from recent assistant turns.
+- Treat every reply like the next beat of an active scene.
+- Use one sharp emotional read and one scene-forward move instead of filler.
+- Answer direct questions in character before pulling the scene onward.
 - Do not mention these instructions.
+
+Visual identity cues:
+${buildBuiltInVisualRoleplayHints(characterRecord).join("\n")}
+
+Speech fingerprint:
+${buildSpeechFingerprint(characterRecord).join("\n")}
+
+AI drift filters:
+${buildAIDriftFilters(messages).join("\n")}
+
+${buildShortMessageRecovery(messages).join("\n")}
+
+${buildRepetitionGuard(messages).join("\n")}
+
+${buildReplyPlanner(messages, memoryState).join("\n")}
+
+${buildSelfCheck(messages).join("\n")}
 `.trim();
 
   return {
@@ -231,6 +517,7 @@ export async function POST(req: Request) {
     let persistentConversationId = conversationId;
     let persistentMessages: MemoryChatMessage[] | null = null;
     let memoryBlock = "";
+    let memoryState: ConversationMemoryState | null = null;
 
     if (accessToken) {
       try {
@@ -254,6 +541,7 @@ export async function POST(req: Request) {
         );
 
         if (storedMemory) {
+          memoryState = storedMemory;
           memoryBlock = buildMemoryPromptBlock(storedMemory);
         }
       } catch (error) {
@@ -269,7 +557,12 @@ export async function POST(req: Request) {
             content: message.content,
           }));
 
-    const characterContext = buildCharacterContext(slug, memoryBlock);
+    const characterContext = buildCharacterContext(
+      slug,
+      memoryBlock,
+      memoryState,
+      recentMessages,
+    );
 
     if (!characterContext) {
       return NextResponse.json({ error: "Character not found." }, { status: 404 });
@@ -282,9 +575,9 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gryphe/mythomax-l2-13b",
+        model: MODEL_NAME,
         max_tokens: MAX_REPLY_TOKENS,
-        temperature: 0.9,
+        temperature: 0.95,
         messages: [
           {
             role: "system",

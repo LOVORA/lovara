@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/auth/auth-guard";
 import {
@@ -8,6 +9,7 @@ import {
   updateDisplayName,
   updatePassword,
 } from "@/lib/account";
+import { buildMonetizationSnapshot } from "@/lib/monetization";
 import { clearLegacyLovoraLocalData, supabase } from "@/lib/supabase";
 
 type Summary = Awaited<ReturnType<typeof getProfileSummary>>;
@@ -127,7 +129,7 @@ export default function MyProfilePage() {
               </h1>
               <p className="max-w-2xl text-base leading-7 text-white/65">
                 Manage your email-linked identity, update security settings, and control
-                active sessions from one premium account surface.
+                active sessions from one place.
               </p>
             </div>
           </header>
@@ -150,6 +152,120 @@ export default function MyProfilePage() {
             </div>
           ) : (
             <>
+              {(() => {
+                const monetization = buildMonetizationSnapshot({
+                  user: summary.user,
+                  usage: {
+                    characterCount: summary.characterCount,
+                    conversationCount: summary.conversationCount,
+                    publicCharacterCount: summary.publicCharacterCount,
+                    rerollsThisMonth: summary.rerollsThisMonth,
+                  },
+                });
+
+                return (
+                  <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+                    <div className="rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(217,70,239,0.14),rgba(255,255,255,0.04))] p-6">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.24em] text-fuchsia-200/80">
+                            Creator limits
+                          </div>
+                          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+                            {monetization.currentPlan.label} level
+                          </h2>
+                          <p className="mt-2 max-w-xl text-sm leading-7 text-white/68">
+                            Your current usage, remaining room, and the plan preview for later.
+                          </p>
+                        </div>
+
+                        <div className="rounded-[24px] border border-white/10 bg-black/20 px-5 py-4 text-right">
+                          <div className="text-[11px] uppercase tracking-[0.2em] text-white/42">
+                            Current level
+                          </div>
+                          <div className="mt-2 text-3xl font-semibold text-white">{monetization.currentPlan.label}</div>
+                          <div className="mt-1 text-sm text-white/52">
+                            {monetization.currentPlan.badge}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 grid gap-4 md:grid-cols-2">
+                        <div className="rounded-[24px] border border-white/10 bg-black/20 p-5">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-white/42">
+                            Character slots
+                          </div>
+                          <div className="mt-2 text-xl font-semibold text-white">
+                            {monetization.remainingCharacterSlots} left
+                          </div>
+                          <div className="mt-2 text-sm text-white/58">
+                            {monetization.slotUsageLabel}
+                          </div>
+                        </div>
+
+                        <div className="rounded-[24px] border border-white/10 bg-black/20 p-5">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-white/42">
+                            Image rerolls
+                          </div>
+                          <div className="mt-2 text-xl font-semibold text-white">
+                            {monetization.remainingRerolls} left this month
+                          </div>
+                          <div className="mt-2 text-sm text-white/58">
+                            {monetization.rerollUsageLabel}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex flex-wrap gap-3">
+                        <Link
+                          href="/pricing"
+                          className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
+                        >
+                          Open plan preview
+                        </Link>
+                        <Link
+                          href="/create-character"
+                          className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10"
+                        >
+                          Create character
+                        </Link>
+                      </div>
+                    </div>
+
+                    <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-6">
+                      <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-200/80">
+                        What opens later
+                      </div>
+                      <div className="mt-4 space-y-3">
+                        {(monetization.upgradeReasons.length > 0
+                          ? monetization.upgradeReasons
+                          : ["Your account still has room. The higher plan preview is only here so limits are visible ahead of time."]).map(
+                          (reason) => (
+                            <div
+                              key={reason}
+                              className="rounded-[22px] border border-white/10 bg-black/20 px-4 py-3 text-sm leading-6 text-white/68"
+                            >
+                              {reason}
+                            </div>
+                          ),
+                        )}
+                      </div>
+
+                      <div className="mt-6 rounded-[24px] border border-fuchsia-400/20 bg-fuchsia-400/10 p-4">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/80">
+                          Plan preview
+                        </div>
+                        <div className="mt-3 grid gap-2 text-sm text-white/72">
+                          <div>{monetization.currentPlan.premiumScenePacks} premium scene packs</div>
+                          <div>{monetization.currentPlan.premiumArchetypes} premium archetypes</div>
+                          <div>{summary.publicCharacterCount} public characters live right now</div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                );
+              })()}
+
               <section className="grid gap-4 md:grid-cols-3">
                 <StatCard label="Email" value={summary.user.email ?? "-"} />
                 <StatCard label="Custom Characters" value={summary.characterCount} />

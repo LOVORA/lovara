@@ -10,16 +10,16 @@ export default function CharactersPreview() {
         <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-2xl">
             <div className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-fuchsia-200/70">
-              Browse characters
+              Professional collection
             </div>
 
             <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              Explore different moods, roles, and dynamics
+              Explore Lovora&apos;s built-in characters
             </h2>
 
             <p className="mt-4 text-base leading-8 text-white/60">
-              Start with a ready-made character or use them as inspiration before
-              building your own custom experience.
+              Start with professionally prepared characters, then jump into chat
+              or use them as inspiration for your own custom build.
             </p>
           </div>
 
@@ -27,7 +27,7 @@ export default function CharactersPreview() {
             href="/characters"
             className="inline-flex h-fit items-center justify-center rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-medium text-white/80 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
           >
-            View All Characters
+            View Professional Characters
           </Link>
         </div>
 

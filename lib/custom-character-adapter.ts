@@ -5,6 +5,7 @@ import {
   type CharacterArchetype,
   type InternalTraitState,
 } from "./character-engine";
+import { buildOpeningPack } from "@/lib/create-character/opening-composer";
 
 export type CustomCharacterTraitBadge = {
   label: string;
@@ -60,12 +61,6 @@ export type LovoraCustomCharacter = {
 function clean(value?: string): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function sentence(value?: string): string | undefined {
-  const trimmed = clean(value);
-  if (!trimmed) return undefined;
-  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 function clampText(value: string, max: number): string {
@@ -337,42 +332,31 @@ function buildGreeting(
   traits: InternalTraitState,
   scenario?: CharacterScenario
 ): string {
-  const name = input.name;
-  const flavor = inferScenarioFlavor(scenario);
-  const relationship = clean(scenario?.relationshipToUser);
-  const goal = clean(scenario?.sceneGoal);
-  const tone = clean(scenario?.tone);
-  const openingState = clean(scenario?.openingState);
+  const pack = buildOpeningPack({
+    name: input.name,
+    setting: scenario?.setting,
+    relationshipToUser: scenario?.relationshipToUser,
+    sceneGoal: scenario?.sceneGoal,
+    tone: scenario?.tone,
+    openingState: scenario?.openingState,
+    currentEnergy: describeTraitLevel(
+      traits.responseTemperature,
+      "controlled",
+      "emotionally present",
+      "intense",
+    ),
+    replyObjective: scenario?.sceneGoal,
+    attentionHook: describeTraitLevel(
+      traits.sceneLeadership,
+      "small shifts in hesitation",
+      "changes in the user's tone",
+      "the exact moment the user gives something real away",
+    ),
+    sensoryPalette: scenario?.setting,
+    chemistryTemplate: scenario?.tone,
+  });
 
-  const openingLine = scenario?.setting
-    ? `${name} feels fully present in ${scenario.setting}, carrying a sense of ${flavor.openingEnergy} the second you notice them.`
-    : `${name} looks at you like the moment already matters.`;
-
-  const warmthLine = describeTraitLevel(
-    traits.affectionWarmth,
-    "Their warmth is controlled, but not absent.",
-    "There is a quiet softness under their composure.",
-    "Their attention lands on you with unmistakable warmth."
-  );
-
-  const leadLine = describeTraitLevel(
-    traits.sceneLeadership,
-    `${name} lets the silence breathe before speaking.`,
-    `${name} meets you with immediate presence.`,
-    `${name} steps into the interaction like they were already expecting you.`
-  );
-
-  return [
-    openingLine,
-    leadLine,
-    warmthLine,
-    relationship ? `Between you, the dynamic already feels like ${relationship}.` : undefined,
-    tone ? `The mood leans ${tone}.` : undefined,
-    openingState ? `Right now, it begins with ${openingState}.` : undefined,
-    goal ? `Underneath it all, the moment is pulling toward ${goal}.` : undefined,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  return pack.greeting;
 }
 
 function buildPreviewMessage(
@@ -380,40 +364,31 @@ function buildPreviewMessage(
   traits: InternalTraitState,
   scenario?: CharacterScenario
 ): string {
-  const name = input.name;
-  const setting = scenario?.setting?.toLowerCase() ?? "";
-  const tone = scenario?.tone?.toLowerCase() ?? "";
+  const pack = buildOpeningPack({
+    name: input.name,
+    setting: scenario?.setting,
+    relationshipToUser: scenario?.relationshipToUser,
+    sceneGoal: scenario?.sceneGoal,
+    tone: scenario?.tone,
+    openingState: scenario?.openingState,
+    currentEnergy: describeTraitLevel(
+      traits.responseTemperature,
+      "controlled",
+      "emotionally present",
+      "intense",
+    ),
+    replyObjective: scenario?.sceneGoal,
+    attentionHook: describeTraitLevel(
+      traits.sceneLeadership,
+      "small shifts in hesitation",
+      "changes in the user's tone",
+      "the exact moment the user gives something real away",
+    ),
+    sensoryPalette: scenario?.setting,
+    chemistryTemplate: scenario?.tone,
+  });
 
-  if (/(bar|club|lounge|party|pub|night)/i.test(setting)) {
-    return `${name} tilts their glass toward you with a half-smile. “There you are. Sit down before somebody else steals my attention.”`;
-  }
-
-  if (/(hospital|clinic|ward|medical|er)/i.test(setting)) {
-    return `${name} keeps their voice low and steady. “Look at me first. Breathe. Then tell me what happened.”`;
-  }
-
-  if (/(military|army|base|command|drill)/i.test(setting)) {
-    return `${name} straightens, eyes fixed on you. “You’re here now. Good. Talk clearly, and don’t waste the moment.”`;
-  }
-
-  if (/(school|class|campus|library|college)/i.test(setting)) {
-    return `${name} glances up from what they were doing, already amused. “You’ve been hovering long enough. Say what you came here to say.”`;
-  }
-
-  if (/(soft|gentle|comforting|warm)/i.test(tone)) {
-    return `${name} studies your face for a second, then softens. “Come here. You don’t have to act fine with me.”`;
-  }
-
-  if (/(playful|flirty|teasing|light)/i.test(tone)) {
-    return `${name} looks you over with open curiosity. “So... are you always this distracting, or is today special?”`;
-  }
-
-  return describeTraitLevel(
-    traits.responseTemperature,
-    `${name} watches you quietly. “You can talk to me. I’m listening.”`,
-    `${name} holds your gaze a second too long. “You look like you came here for more than small talk.”`,
-    `${name} leans closer, like the air already changed when you arrived. “Don’t start something unless you want me to remember it.”`
-  );
+  return pack.previewMessage;
 }
 
 function buildBackstory(
@@ -674,4 +649,3 @@ export function buildCustomCharacterFromBuilder(
 ): LovoraCustomCharacter {
   return adaptBuilderInputToCharacter(input);
 }
-

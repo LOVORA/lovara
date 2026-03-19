@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 
 import { createMyCustomCharacter, type CharacterDraftInput } from "@/lib/account";
-import { CHARACTER_IMAGES_BUCKET } from "@/lib/character-images";
+import { CHARACTER_IMAGES_BUCKET } from "@/lib/image-storage";
 import { supabase } from "@/lib/supabase";
 import {
   getIdentitySummary,
@@ -380,10 +381,13 @@ export default function PublicCharacterDetailPage() {
               <div className="overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04]">
                 <div className="relative h-[360px] w-full bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
                   {avatarUrl ? (
-                    <img
+                    <Image
                       src={avatarUrl}
                       alt={`${character.name} avatar`}
-                      className="h-full w-full object-cover"
+                      fill
+                      unoptimized
+                      sizes="100vw"
+                      className="object-cover"
                     />
                   ) : (
                     <div className="flex h-full w-full items-end p-6">
@@ -478,8 +482,8 @@ export default function PublicCharacterDetailPage() {
                   </div>
 
                   <p className="mt-3 text-sm leading-7 text-white/68">
-                    This public character is now in your private library. You can edit it, rename
-                    it, change visibility, and make it fully your own.
+                    This public character is now in your private library. It stays
+                    locked after creation, so you can open it and chat right away.
                   </p>
 
                   <div className="mt-5 flex flex-wrap gap-3">
@@ -581,8 +585,8 @@ export default function PublicCharacterDetailPage() {
                 Best workflow
               </div>
               <p className="mt-3 text-sm leading-7 text-white/68">
-                Save this character to your private library first, then edit details, refine the
-                scenario, and use it as your own long-term character.
+                Save this character to your private library first, then keep it as
+                your own locked long-term character for chat.
               </p>
             </div>
           </div>

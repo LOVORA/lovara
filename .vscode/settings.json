@@ -1,0 +1,25 @@
+{
+  "chatgpt.openOnStartup": false,
+  "files.exclude": {
+    "**/.next/dev": true
+  },
+  "files.watcherExclude": {
+    "**/.next/dev/**": true
+  },
+  "search.exclude": {
+    "**/.next/dev/**": true
+  },
+  "typescript.tsserver.watchOptions": {
+    "excludeDirectories": [
+      ".next",
+      ".next/dev",
+      ".next/dev/types",
+      "node_modules"
+    ],
+    "excludeFiles": [
+      ".next/dev/types/validator.ts",
+      ".next/dev/types/routes.d.ts",
+      ".next/dev/types/cache-life.d.ts"
+    ]
+  }
+}

@@ -297,6 +297,50 @@ function buildGenerationHints(
   };
 }
 
+function buildContextualNegativePrompt(
+  input: HiddenPromptEngineInput,
+  generationHints: PromptEngineGenerationHints,
+  identityLock: PromptEngineIdentityLock,
+): string {
+  const outputTypeExtras =
+    generationHints.outputType === "selfie"
+      ? [
+          "bad selfie angle",
+          "distorted arm length",
+          "phone covering face",
+          "awkward handheld crop",
+        ]
+      : generationHints.outputType === "full_body"
+        ? [
+            "cut off legs",
+            "missing feet",
+            "cropped knees",
+            "bad full body proportions",
+          ]
+        : [
+            "cropped hairline",
+            "cropped shoulders",
+            "awkward portrait crop",
+          ];
+
+  const styleExtras =
+    input.styleType === "anime"
+      ? ["messy linework", "muddy shading", "off-model face"]
+      : ["cgi skin", "wax face", "unnatural skin retouching"];
+
+  const lockExtras = identityLock.immutableTokens.flatMap((token) => {
+    const lowered = token.toLowerCase();
+
+    if (lowered.includes("hair")) return ["wrong hair color", "wrong hairstyle"];
+    if (lowered.includes("eye")) return ["wrong eye color"];
+    if (lowered.includes("adult")) return ["younger-looking subject"];
+    if (lowered.includes("skin")) return ["wrong skin tone"];
+    return [];
+  });
+
+  return buildNegativePrompt([...outputTypeExtras, ...styleExtras, ...lockExtras]);
+}
+
 export function buildHiddenPromptEngineInputFromPreset(args: {
   styleType: HiddenPromptEngineInput["styleType"];
   presetSelections: NonNullable<HiddenPromptEngineInput["presetSelections"]>;
@@ -352,7 +396,11 @@ export function runPromptEngine(
     outputType: generationHints.outputType,
   });
 
-  const negativePrompt = buildNegativePrompt();
+  const negativePrompt = buildContextualNegativePrompt(
+    input,
+    generationHints,
+    identityLock,
+  );
 
   const promptSummary =
     input.builderMode === "custom_prompt"

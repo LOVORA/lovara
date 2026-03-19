@@ -24,6 +24,7 @@ export const QUALITY_NEGATIVE_PROMPT_BLOCK: string[] = [
   "worst quality",
   "blurry",
   "out of focus",
+  "soft focus blur",
   "bad anatomy",
   "bad hands",
   "extra fingers",
@@ -31,15 +32,32 @@ export const QUALITY_NEGATIVE_PROMPT_BLOCK: string[] = [
   "extra limbs",
   "malformed limbs",
   "deformed body",
+  "warped torso",
+  "broken spine pose",
+  "twisted shoulders",
+  "uneven breasts",
+  "melted hands",
+  "bad feet",
   "distorted face",
+  "face distortion",
+  "identity drift",
+  "different face",
+  "unrecognizable face",
   "crossed eyes",
   "asymmetrical eyes",
+  "lazy eye",
   "mutated hands",
   "poorly drawn hands",
   "poorly drawn face",
   "cropped head",
+  "cut off forehead",
+  "cropped chin",
+  "cropped limbs",
   "duplicate body",
   "double face",
+  "duplicate person",
+  "extra person",
+  "background people",
   "watermark",
   "text",
   "logo",
@@ -48,6 +66,17 @@ export const QUALITY_NEGATIVE_PROMPT_BLOCK: string[] = [
   "oversaturated",
   "underexposed",
   "overexposed",
+  "flat lighting",
+  "harsh flash",
+  "plastic skin",
+  "over-smoothed skin",
+  "uncanny face",
+  "bad teeth",
+  "bad mouth",
+  "mismatched earrings",
+  "messy clothing edges",
+  "floating accessories",
+  "bad composition",
 ];
 
 export const SAFETY_NEGATIVE_PROMPT_BLOCK: string[] = [
@@ -74,6 +103,20 @@ export const SAFETY_NEGATIVE_PROMPT_BLOCK: string[] = [
   "family sexual content",
   "graphic explicit sex act",
   "pornographic penetration focus",
+];
+
+export const IDENTITY_NEGATIVE_PROMPT_BLOCK: string[] = [
+  "age ambiguity",
+  "childlike proportions",
+  "baby face",
+  "face mismatch",
+  "inconsistent eye color",
+  "inconsistent hair color",
+  "inconsistent hairstyle",
+  "unstable facial structure",
+  "facial feature drift",
+  "different body type",
+  "identity inconsistency",
 ];
 
 export const REALISTIC_QUALITY_BLOCK: string[] = [
@@ -148,10 +191,14 @@ export function joinPromptParts(parts: Array<string | null | undefined>): string
   return normalizePromptParts(parts).join(", ");
 }
 
-export function buildNegativePrompt(): string {
+export function buildNegativePrompt(
+  extras: Array<string | null | undefined> = [],
+): string {
   return joinPromptParts([
     ...QUALITY_NEGATIVE_PROMPT_BLOCK,
+    ...IDENTITY_NEGATIVE_PROMPT_BLOCK,
     ...SAFETY_NEGATIVE_PROMPT_BLOCK,
+    ...extras,
   ]);
 }
 

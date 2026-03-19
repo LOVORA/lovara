@@ -261,15 +261,15 @@ function buildCreatePayload(input: CreateCharacterImageInput) {
     cfg_scale: null,
     sampler: null,
     model: input.modelUsed,
-    workflow_name: null,
+    workflow_name: input.workflowName ?? null,
 
     prompt_version: 1,
-    prompt_input: {},
-    resolved_prompt: input.promptSnapshot,
-    negative_prompt: input.negativePromptSnapshot,
+    prompt_input: input.promptInputJson ?? {},
+    resolved_prompt: input.promptSnapshot ?? null,
+    negative_prompt: input.negativePromptSnapshot ?? null,
 
-    is_primary: input.isPrimary,
-    sort_order: 0,
+    is_primary: input.isPrimary ?? false,
+    sort_order: input.sortOrder ?? 0,
 
     is_adult_only: input.moderation.isAdultOnly,
     subject_declared_18_plus: input.moderation.subjectDeclared18Plus,
@@ -280,12 +280,12 @@ function buildCreatePayload(input: CreateCharacterImageInput) {
     moderation_notes: input.moderation.moderationNotes ?? null,
 
     image_type: input.imageType,
-    variant_kind: input.variantKind,
-    is_reference: input.isReference,
-    model_used: input.modelUsed,
-    provider_used: input.providerUsed,
-    prompt_snapshot: input.promptSnapshot,
-    negative_prompt_snapshot: input.negativePromptSnapshot,
+    variant_kind: input.variantKind ?? null,
+    is_reference: input.isReference ?? false,
+    model_used: input.modelUsed ?? null,
+    provider_used: input.providerUsed ?? null,
+    prompt_snapshot: input.promptSnapshot ?? null,
+    negative_prompt_snapshot: input.negativePromptSnapshot ?? null,
   };
 }
 

@@ -119,6 +119,21 @@ const VARIATION_GENERATION_DEFAULTS = {
   strength: 0.7,
 } as const;
 
+function getInitialDimensions(outputType?: unknown) {
+  if (outputType === "selfie") {
+    return { width: 1024, height: 1024 };
+  }
+
+  if (outputType === "full_body") {
+    return { width: 896, height: 1344 };
+  }
+
+  return {
+    width: INITIAL_GENERATION_DEFAULTS.width,
+    height: INITIAL_GENERATION_DEFAULTS.height,
+  };
+}
+
 function getRequiredEnv(name: string): string {
   const value = process.env[name]?.trim();
 
@@ -285,14 +300,17 @@ export async function generateInitialCharacterCandidates(
   params: GenerateInitialCharacterCandidatesParams,
 ): Promise<InitialGenerationServiceResult> {
   try {
+    const outputType = params.promptEngineOutput.generationHints?.outputType;
+    const dimensions = getInitialDimensions(outputType);
+
     const task = buildTextToImageTask({
       positivePrompt: params.promptEngineOutput.canonicalPrompt,
       negativePrompt: params.promptEngineOutput.negativePrompt,
       numberResults:
         params.candidateCount ?? INITIAL_GENERATION_DEFAULTS.numberResults,
       model: params.model ?? RUNWARE_DEFAULT_MODEL,
-      width: INITIAL_GENERATION_DEFAULTS.width,
-      height: INITIAL_GENERATION_DEFAULTS.height,
+      width: dimensions.width,
+      height: dimensions.height,
     });
 
     const raw = await callRunware([task]);
@@ -370,4 +388,60 @@ export async function generateCharacterVariation(
   });
 
   return callRunware([task]);
+}
+
+export async function generateCharacterVariationCandidates(
+  params: GenerateVariationParams,
+): Promise<InitialGenerationServiceResult> {
+  try {
+    const built = buildVariationRequest({
+      characterId: params.characterId,
+      styleType: params.styleType,
+      lockedCanonicalPrompt: params.basePrompt,
+      lockedNegativePrompt: params.negativePrompt,
+      primaryReferenceImageUrl: params.primaryReferenceImageUrl,
+      variationPromptDelta: params.variationPromptDelta,
+      consistencyMode: params.consistencyMode,
+      consistencyStrength: params.consistencyStrength,
+      baseSeed: params.baseSeed ?? null,
+      model: params.model ?? null,
+    });
+
+    const raw = await generateCharacterVariation(params);
+    const items = extractRunwareItems(raw);
+    const candidates = normalizeCandidates(
+      items,
+      built.positivePrompt,
+      built.negativePrompt,
+    );
+
+    if (candidates.length === 0) {
+      return {
+        ok: false,
+        provider: "runware",
+        kind: "variation",
+        errorCode: "RUNWARE_EMPTY_VARIATION_RESULT",
+        errorMessage: "Runware returned no variation candidates.",
+      };
+    }
+
+    return {
+      ok: true,
+      provider: "runware",
+      kind: "variation",
+      externalJobId: null,
+      candidates,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      provider: "runware",
+      kind: "variation",
+      errorCode: "RUNWARE_VARIATION_FAILED",
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : "Runware variation request failed",
+    };
+  }
 }

@@ -3,9 +3,17 @@ import type {
   CharacterImagePromptInput,
   ImageProvider,
 } from "@/lib/image-provider";
-
-export const CHARACTER_IMAGES_BUCKET =
-  process.env.NEXT_PUBLIC_CHARACTER_IMAGES_BUCKET || "character-images";
+import { CHARACTER_IMAGES_BUCKET } from "@/lib/image-storage";
+import {
+  createCharacterImage as createRepositoryCharacterImage,
+  setPrimaryCharacterImage,
+  setReferenceCharacterImage,
+} from "@/lib/character-repository/images";
+import {
+  createCharacterImageJob as createRepositoryCharacterImageJob,
+  markCharacterImageJobCompleted as markRepositoryCharacterImageJobCompleted,
+} from "@/lib/character-repository/image-jobs";
+import { setCustomCharacterImageLinks } from "@/lib/character-repository/custom-characters";
 
 export type ImageModerationStatus =
   | "pending"
@@ -64,34 +72,6 @@ type CharacterImageJobRecord = {
   updated_at: string;
 };
 
-type QueryResult<T> = Promise<{ data: T; error: { message: string } | null }>;
-
-type UpdateBuilder = {
-  eq(column: string, value: string): QueryResult<unknown>;
-};
-
-type UpdateCapableTable = {
-  update(values: Record<string, unknown>): UpdateBuilder;
-};
-
-type InsertSelectionBuilder<T> = {
-  select(columns: string): {
-    single(): QueryResult<T>;
-  };
-};
-
-type InsertCapableTable<T> = {
-  insert(values: Record<string, unknown>): InsertSelectionBuilder<T>;
-};
-
-function asUpdateCapableTable(tableName: string): UpdateCapableTable {
-  return supabase.from(tableName) as unknown as UpdateCapableTable;
-}
-
-function asInsertCapableTable<T>(tableName: string): InsertCapableTable<T> {
-  return supabase.from(tableName) as unknown as InsertCapableTable<T>;
-}
-
 function getStorageBucket() {
   return CHARACTER_IMAGES_BUCKET;
 }
@@ -148,94 +128,48 @@ async function getCurrentUserOrThrow() {
   return user;
 }
 
-async function clearPrimaryImageForCharacter(characterId: string) {
-  const table = asUpdateCapableTable("character_images");
-
-  const { error } = await table
-    .update({ is_primary: false })
-    .eq("character_id", characterId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-}
-
-async function setCharacterAvatarReference(characterId: string, imageId: string) {
-  const table = asUpdateCapableTable("custom_characters");
-
-  const { error } = await table
-    .update({
-      avatar_image_id: imageId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", characterId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+function buildDefaultModeration() {
+  return {
+    isAdultOnly: true,
+    subjectDeclared18Plus: true,
+    consentConfirmed: true,
+    depictsRealPerson: false,
+    depictsPublicFigure: false,
+    nonConsensualFlag: false,
+    underageRiskFlag: false,
+    illegalContentFlag: false,
+    moderationStatus: "approved" as const,
+    moderationNotes: null,
+  };
 }
 
 export async function createCharacterImageJob(
   input: CreateCharacterImageJobInput,
-): Promise<CharacterImageJobRecord> {
+) {
   const user = await getCurrentUserOrThrow();
 
-  const now = new Date().toISOString();
-  const provider = input.provider ?? "mage";
-  const model = input.model ?? "unknown-model";
-  const workflowName = input.workflowName ?? "character-avatar-v1";
-
-  const row = {
-    user_id: user.id,
-    character_id: input.characterId,
-    provider,
-    engine: provider,
-    model,
-    workflow_name: workflowName,
-    status: "processing",
-    request_type: "generate",
-    prompt_version: 1,
-    prompt_input: buildPublicPromptSnapshot(input.promptInput),
-    resolved_prompt: null,
-    negative_prompt: null,
-    error_code: null,
-    error_message: null,
-    moderation_status: "pending" as ImageModerationStatus,
-    moderation_notes: null,
-    completed_at: null,
-    created_at: now,
-    updated_at: now,
-  };
-
-  const table = asInsertCapableTable<CharacterImageJobRecord>("character_image_jobs");
-
-  const { data, error } = await table.insert(row).select("*").single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data as CharacterImageJobRecord;
+  return createRepositoryCharacterImageJob({
+    userId: user.id,
+    characterId: input.characterId,
+    provider: input.provider ?? "runware",
+    kind: "avatar",
+    promptInputJson: buildPublicPromptSnapshot(input.promptInput),
+    canonicalPrompt: "",
+    negativePrompt: "",
+    styleType: "realistic",
+    requestMode: "preset",
+    model: input.model ?? "runware-default",
+    moderation: buildDefaultModeration(),
+  }) as unknown as CharacterImageJobRecord;
 }
 
 export async function markCharacterImageJobCompleted(
   input: MarkCharacterImageJobCompletedInput,
 ) {
-  const table = asUpdateCapableTable("character_image_jobs");
-
-  const { error } = await table
-    .update({
-      status: "completed",
-      moderation_status: "approved",
-      moderation_notes: null,
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.jobId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  await markRepositoryCharacterImageJobCompleted({
+    jobId: input.jobId,
+    completedAt: new Date().toISOString(),
+  });
 
   return { ok: true };
 }
@@ -244,7 +178,6 @@ export async function uploadGeneratedCharacterImage(
   input: UploadGeneratedCharacterImageInput,
 ) {
   const user = await getCurrentUserOrThrow();
-
   const bucket = getStorageBucket();
   const extension = sanitizeFileExtension(input.extension);
   const fileName = `${input.imageId}.${extension}`;
@@ -265,53 +198,46 @@ export async function uploadGeneratedCharacterImage(
   const publicUrlResult = supabase.storage.from(bucket).getPublicUrl(filePath);
   const publicUrl = publicUrlResult.data?.publicUrl ?? null;
 
-  if (input.isPrimary) {
-    await clearPrimaryImageForCharacter(input.characterId);
-  }
-
-  const imageRow = {
-    id: input.imageId,
-    user_id: user.id,
-    character_id: input.characterId,
-    job_id: input.jobId,
-    kind: "avatar",
-    source: input.provider ?? "generated",
-    visibility: "private",
-    storage_bucket: bucket,
-    storage_path: filePath,
-    public_url: publicUrl,
-    width: null,
-    height: null,
-    mime_type: input.mimeType || "image/png",
-    file_size_bytes:
-      typeof input.blob.size === "number" ? input.blob.size : null,
-    provider: input.provider ?? "mage",
-    engine: input.provider ?? "mage",
-    model: input.model ?? "unknown-model",
-    workflow_name: input.workflowName ?? "character-avatar-v1",
-    request_type: "generate",
-    prompt_version: 1,
-    prompt_input: buildPublicPromptSnapshot(input.promptInput),
-    resolved_prompt: input.resolvedPrompt ?? null,
-    negative_prompt: input.negativePrompt ?? null,
-    moderation_status: "approved" as ImageModerationStatus,
-    moderation_notes: null,
-    is_primary: Boolean(input.isPrimary),
-    created_at: now,
-    updated_at: now,
-  };
-
-  const table = asInsertCapableTable<Record<string, unknown>>("character_images");
-
-  const { data, error } = await table.insert(imageRow).select("*").single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  const image = await createRepositoryCharacterImage({
+    userId: user.id,
+    characterId: input.characterId,
+    jobId: input.jobId,
+    imageType: "avatar",
+    variantKind: "base",
+    storageBucket: bucket,
+    storagePath: filePath,
+    imageUrl: publicUrl,
+    mimeType: input.mimeType || "image/png",
+    fileSizeBytes: typeof input.blob.size === "number" ? input.blob.size : null,
+    modelUsed: input.model ?? "runware-default",
+    providerUsed: input.provider ?? "runware",
+    workflowName: input.workflowName ?? "character-avatar-v1",
+    promptInputJson: buildPublicPromptSnapshot(input.promptInput),
+    promptSnapshot: input.resolvedPrompt ?? null,
+    negativePromptSnapshot: input.negativePrompt ?? null,
+    isPrimary: Boolean(input.isPrimary),
+    isReference: Boolean(input.isPrimary),
+    moderation: buildDefaultModeration(),
+  });
 
   if (input.isPrimary) {
-    await setCharacterAvatarReference(input.characterId, input.imageId);
+    await setPrimaryCharacterImage(input.characterId, image.id);
+    await setReferenceCharacterImage(image.id, true);
+    await setCustomCharacterImageLinks({
+      characterId: input.characterId,
+      userId: user.id,
+      avatarImageId: image.id,
+      primaryReferenceImageId: image.id,
+      baseGenerationId: input.jobId,
+      primaryImageUrl: publicUrl,
+      imageStatus: "ready",
+      imageVisibility: "private",
+      imagePromptVersion: 1,
+      imageLastGeneratedAt: now,
+      imageGenerationEnabled: true,
+      consistencyStatus: "ready",
+    });
   }
 
-  return data as Record<string, unknown>;
+  return image as unknown as Record<string, unknown>;
 }

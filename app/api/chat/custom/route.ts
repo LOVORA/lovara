@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { buildMemoryPromptBlock } from "@/lib/conversation-memory";
+import {
+  buildMemoryPromptBlock,
+  type ConversationMemoryState,
+} from "@/lib/conversation-memory";
 import {
   getConversationMemoryState,
   insertCustomConversationMessage,
@@ -7,6 +10,17 @@ import {
   toCustomMemoryMessages,
   upsertConversationMemoryState,
 } from "@/lib/chat-conversations";
+import {
+  buildConversationalGuardrails,
+  buildConsentAndPacingDirectives,
+  buildMemoryBehaviorDirectives,
+  buildVisualIdentityRoleplayDirectives,
+  buildRelationshipProgressionDirectives,
+  buildReplyFlowDirectives,
+  buildResponseQualityDirectives,
+  buildRelationshipRoleGuidance,
+  buildSceneImmersionDirectives,
+} from "@/lib/create-character/deep-prompting";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL_NAME = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
@@ -46,6 +60,10 @@ type CharacterInput = {
 type MessageInput = {
   role: ChatRole;
   content: string;
+};
+
+type LiveScenarioInput = {
+  note: string;
 };
 
 function clean(value?: string | null): string {
@@ -92,6 +110,15 @@ function normalizeScenario(input: unknown): CharacterScenario | undefined {
   };
 
   return Object.values(scenario).some(Boolean) ? scenario : undefined;
+}
+
+function normalizeLiveScenario(input: unknown): LiveScenarioInput | undefined {
+  if (typeof input !== "string") return undefined;
+  const note = clean(input);
+  if (!note) return undefined;
+  return {
+    note: note.slice(0, 700),
+  };
 }
 
 function normalizeCharacter(input: unknown): CharacterInput | null {
@@ -245,6 +272,28 @@ function getMemorySeed(payload?: Record<string, unknown>) {
   };
 }
 
+function getStructuredNotes(payload?: Record<string, unknown>) {
+  const metadata = payload && isRecord(payload.metadata) ? payload.metadata : null;
+  const builderInput =
+    metadata && isRecord(metadata.builderInput) ? metadata.builderInput : null;
+  const customNotes =
+    builderInput && typeof builderInput.customNotes === "string"
+      ? builderInput.customNotes
+      : "";
+
+  const values: Record<string, string> = {};
+
+  for (const line of customNotes.split("\n")) {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex <= 0) continue;
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    if (key && value) values[key] = value;
+  }
+
+  return values;
+}
+
 function scoreStyle(value: number | null, low: string, mid: string, high: string) {
   if (value === null) return mid;
   if (value <= 33) return low;
@@ -324,6 +373,181 @@ function buildSpeechDNA(payload?: Record<string, unknown>): string[] {
   return lines;
 }
 
+function classifyLastUserIntent(messages: MessageInput[]): string {
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+  const text = lastUserMessage?.content.toLocaleLowerCase("en") ?? "";
+
+  if (!text) return "no recent user signal";
+  if (/(help|what should i do|i don't know what to do|advice)/i.test(text)) {
+    return "guidance-seeking";
+  }
+  if (/(miss you|need you|want you|stay|hold me|be here)/i.test(text)) {
+    return "closeness-seeking";
+  }
+  if (/(angry|mad|upset|hurt|annoyed|jealous)/i.test(text)) {
+    return "conflict-or-friction";
+  }
+  if (/(haha|tease|play|brat|smirk|cute)/i.test(text)) {
+    return "playful-testing";
+  }
+  if (/(scared|lonely|tired|sad|confused|honest)/i.test(text)) {
+    return "vulnerable-opening";
+  }
+  if (/\?$/.test(text.trim())) {
+    return "direct-question";
+  }
+
+  return "scene-continuation";
+}
+
+function buildSpeechFingerprint(
+  character: CharacterInput,
+  payload?: Record<string, unknown>,
+): string[] {
+  const studio = getStudioData(payload);
+  const identity = getIdentityData(payload);
+  const lines: string[] = [
+    "Keep a stable speech fingerprint for this character instead of replying in a generic assistant voice.",
+  ];
+
+  if (character.archetype) {
+    lines.push(`Archetype voice anchor: ${character.archetype}.`);
+  }
+  if (identity.region) {
+    lines.push(`Regional flavor should stay subtle but present: ${identity.region}.`);
+  }
+  if (studio.speechStyle) {
+    lines.push(`Speech style anchor: ${studio.speechStyle}.`);
+  }
+  if (studio.replyLength) {
+    lines.push(`Preferred reply length: ${studio.replyLength}.`);
+  }
+  if (studio.relationshipPace) {
+    lines.push(`Relationship pacing anchor: ${studio.relationshipPace}.`);
+  }
+  if (studio.coreVibes.length > 0) {
+    lines.push(`Core voice influences: ${studio.coreVibes.join(", ")}.`);
+  }
+
+  lines.push(
+    "Use repeatable voice habits: sentence rhythm, favorite level of directness, and emotional weight should feel specific to this character.",
+  );
+
+  return lines;
+}
+
+function buildAIDriftFilters(messages: MessageInput[]): string[] {
+  const lastUserIntent = classifyLastUserIntent(messages);
+
+  const lines = [
+    "Do not sound like customer support, coaching, therapy, or an assistant trying to be helpful.",
+    "Do not mirror the user's wording too literally.",
+    "Do not over-explain your motives or summarize the scene unless the moment requires it.",
+    "Do not ask a question at the end of every reply.",
+    "Do not pad the reply with generic compliments, pet names, or empty reassurance.",
+  ];
+
+  if (lastUserIntent === "direct-question") {
+    lines.push("If the user asks something direct, answer it in-character before steering the scene forward.");
+  }
+  if (lastUserIntent === "playful-testing") {
+    lines.push("For playful testing, avoid flat jokes; answer with rhythm, chemistry, and one controlled push back.");
+  }
+  if (lastUserIntent === "vulnerable-opening") {
+    lines.push("For vulnerable openings, avoid therapist language and respond with grounded, human warmth.");
+  }
+
+  return lines;
+}
+
+function buildShortMessageRecovery(messages: MessageInput[]): string[] {
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+  const text = lastUserMessage?.content.trim() ?? "";
+  if (!text) return [];
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const compactText = text.toLocaleLowerCase("en");
+  const isShort = wordCount <= 4 || text.length <= 24;
+
+  if (!isShort) return [];
+
+  const lines = [
+    "SHORT MESSAGE RECOVERY",
+    "The user's message is short. Do more interpretation work yourself and keep the scene moving.",
+    "Do not reply with a flat one-liner or a generic 'what do you mean?' style question.",
+    "Infer tone from the scene, relationship, and recent rhythm before answering.",
+  ];
+
+  if (/(hey|hi|hello)/i.test(compactText)) {
+    lines.push("Treat the short greeting as an opening beat and answer with mood, presence, and one clear pull forward.");
+  } else if (/(come here|come closer|here)/i.test(compactText)) {
+    lines.push("Treat this as a scene move. Answer with embodied reaction, proximity, and one emotional read.");
+  } else if (/(hmm|hm|...|ok|okay|yeah|yes|no|nah)/i.test(compactText)) {
+    lines.push("Treat the short answer as subtext-heavy. Read hesitation, restraint, or invitation from context.");
+  } else {
+    lines.push("Treat the short line as compressed intent. Expand it into a believable emotional beat.");
+  }
+
+  return lines;
+}
+
+function buildRepetitionGuard(messages: MessageInput[]): string[] {
+  const recentAssistantMessages = [...messages]
+    .filter((message) => message.role === "assistant")
+    .slice(-3)
+    .map((message) => truncate(message.content, 140));
+
+  if (recentAssistantMessages.length === 0) return [];
+
+  return [
+    "REPETITION GUARD",
+    "Avoid repeating the same emotional move, sentence rhythm, pet name, or closing question from the last few assistant replies.",
+    "If a line feels like something the character already said recently, rephrase it or choose a fresher move.",
+    ...recentAssistantMessages.map((message, index) => `Recent assistant reply ${index + 1}: ${message}`),
+  ];
+}
+
+function buildReplyPlanner(
+  character: CharacterInput,
+  messages: MessageInput[],
+  memoryState?: ConversationMemoryState | null,
+): string[] {
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+  const lastIntent = classifyLastUserIntent(messages);
+  const relationship = memoryState?.relationshipState ?? {};
+  const tone = memoryState?.toneState ?? {};
+
+  return [
+    "REPLY PLANNER",
+    `Last user intent: ${lastIntent}.`,
+    lastUserMessage ? `Last user message: ${truncate(lastUserMessage.content, 160)}` : "",
+    typeof relationship.stage === "string"
+      ? `Current relationship stage: ${relationship.stage}`
+      : "",
+    typeof tone.reply_strategy === "string"
+      ? `Suggested reply strategy: ${tone.reply_strategy}`
+      : "",
+    `Write the next reply as ${character.name} using this order:`,
+    "1. React to what the user just did or revealed.",
+    "2. Show one believable emotional read from the character's side.",
+    "3. Move the scene one step forward with tension, comfort, challenge, or closeness.",
+    "4. End on one hook: a line, invitation, challenge, observation, or selective question.",
+  ].filter(Boolean);
+}
+
+function buildSelfCheckDirectives(messages: MessageInput[]): string[] {
+  const lastIntent = classifyLastUserIntent(messages);
+
+  return [
+    "SELF-CHECK BEFORE YOU ANSWER",
+    "Make sure the reply is specific to this scene, not reusable across any chat.",
+    "Make sure the reply changes the mood, closeness, or tension at least a little.",
+    "Make sure the reply sounds like this character and not like a polished AI template.",
+    `Current user-intent checkpoint: ${lastIntent}.`,
+    "If the reply feels generic, overlong, repetitive, or emotionally flat, tighten it before finishing.",
+  ];
+}
+
 function getRecentMessages(messages: MessageInput[], count: number) {
   return messages.slice(Math.max(0, messages.length - count));
 }
@@ -333,6 +557,9 @@ function buildFallbackSystemPrompt(character: CharacterInput): string {
   const studio = getStudioData(character.payload);
   const memorySeed = getMemorySeed(character.payload);
   const speechDNA = buildSpeechDNA(character.payload);
+  const visualIdentityLines = buildVisualIdentityRoleplayDirectives(
+    getStructuredNotes(character.payload),
+  );
 
   const lines: string[] = [
     `You are fully embodying ${character.name}.`,
@@ -362,6 +589,7 @@ function buildFallbackSystemPrompt(character: CharacterInput): string {
     ...(character.tags && character.tags.length > 0
       ? [`Tags: ${character.tags.join(", ")}`]
       : []),
+    ...visualIdentityLines,
     "",
     "SPEECH DNA",
     ...speechDNA,
@@ -401,12 +629,50 @@ function buildSystemPrompt(
   character: CharacterInput,
   messages: MessageInput[],
   memoryBlock?: string,
+  liveScenario?: LiveScenarioInput,
+  memoryState?: ConversationMemoryState | null,
 ): string {
   const identity = getIdentityData(character.payload);
   const studio = getStudioData(character.payload);
   const memorySeed = getMemorySeed(character.payload);
+  const structuredNotes = getStructuredNotes(character.payload);
   const speechDNA = buildSpeechDNA(character.payload);
   const enginePrompt = clean(character.engine?.systemPrompt);
+  const relationshipGuidance = buildRelationshipRoleGuidance({
+    name: character.name,
+    archetype: character.archetype ?? "",
+    relationshipToUser: character.scenario?.relationshipToUser ?? "",
+    tone: character.scenario?.tone ?? "",
+    setting: character.scenario?.setting ?? "",
+    sceneGoal: character.scenario?.sceneGoal ?? "",
+    coreVibes: studio.coreVibes,
+    customNotes: "",
+  });
+  const guardrailLines = buildConversationalGuardrails(structuredNotes);
+  const responseQualityLines = buildResponseQualityDirectives(structuredNotes);
+  const memoryDirectives = buildMemoryBehaviorDirectives(structuredNotes);
+  const sceneImmersionLines = buildSceneImmersionDirectives({
+    ...structuredNotes,
+    "Custom scenario": liveScenario?.note ?? "",
+    "Opening state": character.scenario?.openingState ?? "",
+  });
+  const visualIdentityLines = buildVisualIdentityRoleplayDirectives(
+    structuredNotes,
+  );
+  const replyFlowLines = buildReplyFlowDirectives(structuredNotes);
+  const relationshipProgressionLines =
+    buildRelationshipProgressionDirectives(structuredNotes);
+  const consentAndPacingLines = buildConsentAndPacingDirectives({
+    ...structuredNotes,
+    "Relationship pace": studio.relationshipPace ?? "",
+    "Current energy": clean(structuredNotes["Current energy"]) || character.scenario?.tone || "",
+  });
+  const speechFingerprintLines = buildSpeechFingerprint(character, character.payload);
+  const aiDriftFilters = buildAIDriftFilters(messages);
+  const shortMessageRecoveryLines = buildShortMessageRecovery(messages);
+  const repetitionGuardLines = buildRepetitionGuard(messages);
+  const replyPlannerLines = buildReplyPlanner(character, messages, memoryState);
+  const selfCheckLines = buildSelfCheckDirectives(messages);
 
   const lines: string[] = [
     "ROLEPLAY LOCK",
@@ -441,6 +707,7 @@ function buildSystemPrompt(
     "",
     "BEHAVIORAL ENGINE",
     ...speechDNA,
+    ...speechFingerprintLines,
     "",
     "SCENE ENGINE",
     character.scenario?.setting ? `Current setting: ${character.scenario.setting}` : "",
@@ -452,6 +719,7 @@ function buildSystemPrompt(
     character.scenario?.openingState
       ? `Starting emotional state: ${character.scenario.openingState}`
       : "",
+    liveScenario?.note ? `Live scene direction: ${liveScenario.note}` : "",
     "",
     ...(memoryBlock ? [memoryBlock, ""] : []),
     "MEMORY SEEDS",
@@ -478,10 +746,33 @@ function buildSystemPrompt(
     "If the user is vulnerable, respond with grounded emotional intelligence.",
     "If the user is playful, match with coherent teasing rather than noise.",
     "If the user escalates intimacy, keep it in-character and atmosphere-aware.",
+    "If the scene becomes more mature or intimate, stay natural, confident, and in-character without becoming mechanical or evasive.",
     "If the conversation is tense, do not abruptly reset into sweetness.",
     "Do not dump exposition unless the moment truly needs it.",
     "Do not overuse pet names, emojis, or repetitive affirmations.",
     "Do not write like a generic fanfiction narrator unless the style naturally calls for it.",
+    ...(liveScenario?.note
+      ? [
+          "",
+          "LIVE SCENE PRIORITY",
+          "The user added a live scene direction for this session. Treat it as the active moment unless the conversation clearly changes course.",
+          "Stay faithful to that note in emotional tone, scene pressure, and character intent.",
+        ]
+      : []),
+    ...relationshipGuidance.lines,
+    ...visualIdentityLines,
+    ...sceneImmersionLines,
+    ...guardrailLines,
+    ...replyFlowLines,
+    ...responseQualityLines,
+    ...relationshipProgressionLines,
+    ...consentAndPacingLines,
+    ...memoryDirectives,
+    ...aiDriftFilters,
+    ...shortMessageRecoveryLines,
+    ...repetitionGuardLines,
+    "",
+    ...replyPlannerLines,
   ];
 
   if (enginePrompt) {
@@ -494,6 +785,8 @@ function buildSystemPrompt(
     lines.push(buildFallbackSystemPrompt(character));
   }
 
+  lines.push("");
+  lines.push(...selfCheckLines);
   lines.push("");
   lines.push("FINAL INSTRUCTION");
   lines.push(
@@ -512,6 +805,7 @@ export async function POST(request: Request) {
       typeof body?.accessToken === "string" ? clean(body.accessToken) : "";
     const conversationId =
       typeof body?.conversationId === "string" ? clean(body.conversationId) : "";
+    const liveScenario = normalizeLiveScenario(body?.liveScenario);
 
     if (!character) {
       return NextResponse.json(
@@ -537,11 +831,13 @@ export async function POST(request: Request) {
 
     let promptMessages = messages;
     let memoryBlock = "";
+    let memoryState: ConversationMemoryState | null = null;
 
     if (accessToken && conversationId) {
       try {
         const storedMemory = await getConversationMemoryState(accessToken, conversationId);
         if (storedMemory) {
+          memoryState = storedMemory;
           memoryBlock = buildMemoryPromptBlock(storedMemory);
         }
 
@@ -559,7 +855,13 @@ export async function POST(request: Request) {
       }
     }
 
-    const systemPrompt = buildSystemPrompt(character, promptMessages, memoryBlock);
+    const systemPrompt = buildSystemPrompt(
+      character,
+      promptMessages,
+      memoryBlock,
+      liveScenario,
+      memoryState,
+    );
     const recentMessages = getRecentMessages(promptMessages, 24);
 
     const completionResponse = await fetch(OPENROUTER_URL, {

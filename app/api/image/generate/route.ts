@@ -1,22 +1,20 @@
 import { NextResponse } from "next/server";
 
-import type {
-  CharacterBuilderMode,
-  CharacterStyleType,
-  HiddenPromptEngineInput,
-} from "@/lib/character-builder/types";
-import { runPromptEngine } from "@/lib/character-builder/prompt-engine";
+import { buildStudioImagePromptSummary } from "@/lib/create-character/studio-builder";
+import type { GenerateImageRouteBody } from "@/lib/image-generation/contracts";
 import {
   createInitialGenerationJobInput,
   createImageJobInsertPayload,
   createPrimaryReferenceImageInsertPayload,
   generateInitialCharacterCandidatesWithService,
+  generateVariationCandidatesWithService,
   getSelectedCandidate,
   mapInitialCandidatesToImageInsertPayloads,
 } from "@/lib/image-generation/service";
 import type {
+  CharacterImagePromptInput,
+  CharacterImageSafetyInput,
   ImageModerationSnapshot,
-  ImageProvider,
 } from "@/lib/image-generation/types";
 import {
   createCharacterImage,
@@ -33,50 +31,6 @@ import {
   getCustomCharacterById,
   setCustomCharacterImageLinks,
 } from "@/lib/character-repository/custom-characters";
-
-type CharacterImageSafetyInput = {
-  isAdultOnly: boolean;
-  subjectDeclared18Plus: boolean;
-  consentConfirmed: boolean;
-  depictsRealPerson: boolean;
-  depictsPublicFigure: boolean;
-  nonConsensualFlag: boolean;
-  underageRiskFlag: boolean;
-  illegalContentFlag: boolean;
-};
-
-type CharacterImagePromptInput = {
-  characterName: string;
-  archetype?: string;
-  visualAura?: string;
-  ageBand?: "18-20" | "21-24" | "25-29" | "30-39" | "40+";
-  genderPresentation?: string;
-  region?: string;
-  hair?: string;
-  eyes?: string;
-  outfit?: string;
-  palette?: string;
-  camera?: string;
-  avatarStyle?: string;
-  bodyType?: string;
-  pose?: string;
-  expression?: string;
-  environment?: string;
-  nsfwLevel?: "adult" | "suggestive" | "none";
-};
-
-type GenerateImageRouteBody = {
-  userId?: string;
-  characterId: string;
-  provider?: ImageProvider;
-  kind?: "avatar" | "gallery";
-  promptInput: CharacterImagePromptInput;
-  safety: CharacterImageSafetyInput;
-  selectedCandidateId?: string | null;
-  candidateCount?: number;
-  model?: string | null;
-  moderation?: Partial<ImageModerationSnapshot>;
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -108,39 +62,6 @@ function normalizeModerationSnapshot(
     moderationStatus: moderation?.moderationStatus ?? "approved",
     moderationNotes: moderation?.moderationNotes ?? null,
   };
-}
-
-function buildHiddenPromptInputFromRequest(args: {
-  promptInput: CharacterImagePromptInput;
-}): HiddenPromptEngineInput {
-  const styleType: CharacterStyleType =
-    args.promptInput.avatarStyle?.toLowerCase().includes("anime")
-      ? "anime"
-      : "realistic";
-
-  const builderMode: CharacterBuilderMode = "preset";
-
-  return {
-    styleType,
-    builderMode,
-    presetSelections: {
-      ageBand: args.promptInput.ageBand ?? "",
-      region: args.promptInput.region ?? "",
-      archetype: args.promptInput.archetype ?? "",
-      visualAura: args.promptInput.visualAura ?? "",
-      genderPresentation: args.promptInput.genderPresentation ?? "",
-      hair: args.promptInput.hair ?? "",
-      eyes: args.promptInput.eyes ?? "",
-      outfit: args.promptInput.outfit ?? "",
-      palette: args.promptInput.palette ?? "",
-      camera: args.promptInput.camera ?? "",
-      avatarStyle: args.promptInput.avatarStyle ?? "",
-      bodyType: args.promptInput.bodyType ?? "",
-      pose: args.promptInput.pose ?? "",
-      expression: args.promptInput.expression ?? "",
-      environment: args.promptInput.environment ?? "",
-    },
-  } as HiddenPromptEngineInput;
 }
 
 function parseBody(input: unknown): GenerateImageRouteBody | null {
@@ -175,6 +96,32 @@ function parseBody(input: unknown): GenerateImageRouteBody | null {
     moderation: isRecord(input.moderation)
       ? (input.moderation as Partial<ImageModerationSnapshot>)
       : undefined,
+    previewImageUrl:
+      typeof input.previewImageUrl === "string" && input.previewImageUrl.trim()
+        ? input.previewImageUrl.trim()
+        : null,
+    previewResolvedPrompt:
+      typeof input.previewResolvedPrompt === "string"
+        ? input.previewResolvedPrompt
+        : null,
+    previewNegativePrompt:
+      typeof input.previewNegativePrompt === "string"
+        ? input.previewNegativePrompt
+        : null,
+    consistencySourceImageUrl:
+      typeof input.consistencySourceImageUrl === "string" &&
+      input.consistencySourceImageUrl.trim()
+        ? input.consistencySourceImageUrl.trim()
+        : null,
+    consistencyStrength:
+      input.consistencyStrength === "soft" ||
+      input.consistencyStrength === "strict"
+        ? input.consistencyStrength
+        : null,
+    baseSeed:
+      typeof input.baseSeed === "number" && Number.isFinite(input.baseSeed)
+        ? input.baseSeed
+        : null,
   };
 }
 
@@ -182,7 +129,29 @@ function isDraftCharacterId(characterId: string) {
   return characterId.startsWith("draft-");
 }
 
+function buildConsistencyVariationDelta(promptInput: CharacterImagePromptInput) {
+  return [
+    "same character identity",
+    "same face identity",
+    promptInput.hair ? `keep ${promptInput.hair}` : "",
+    promptInput.eyes ? `keep ${promptInput.eyes}` : "",
+    promptInput.bodyType ? `keep ${promptInput.bodyType} body type` : "",
+    promptInput.outfit ? `keep ${promptInput.outfit}` : "",
+    promptInput.signatureDetail
+      ? `keep signature detail: ${promptInput.signatureDetail}`
+      : "",
+    "fresh composition",
+    "light pose change",
+    "slight camera variation",
+    "preserve overall styling",
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
 export async function POST(request: Request) {
+  let createdJobId: string | null = null;
+
   try {
     const rawBody = await request.json().catch(() => null);
     const body = parseBody(rawBody);
@@ -221,11 +190,8 @@ export async function POST(request: Request) {
       return jsonError("Prompt blocked by moderation.");
     }
 
-    const hiddenPromptInput = buildHiddenPromptInputFromRequest({
-      promptInput: body.promptInput,
-    });
-
-    const promptEngineOutput = runPromptEngine(hiddenPromptInput);
+    const { hiddenPromptInput, promptEngineOutput } =
+      buildStudioImagePromptSummary(body.promptInput);
 
     if (promptEngineOutput.moderationFlags.needsBlock) {
       return jsonError("Prompt blocked by moderation.", 400, {
@@ -233,15 +199,64 @@ export async function POST(request: Request) {
       });
     }
 
-    const generationResult = await generateInitialCharacterCandidatesWithService({
-      provider: "runware",
-      styleType: hiddenPromptInput.styleType,
-      builderMode: hiddenPromptInput.builderMode,
-      hiddenPromptInput,
-      promptEngineOutput,
-      candidateCount: body.candidateCount,
-      model: body.model ?? null,
-    });
+    const usePreviewImage =
+      !isDraft &&
+      Boolean(body.previewImageUrl && body.previewImageUrl.trim().length > 0);
+    const useConsistencyReference =
+      Boolean(
+        body.consistencySourceImageUrl &&
+          body.consistencySourceImageUrl.trim().length > 0,
+      ) && !usePreviewImage;
+
+    const generationResult = usePreviewImage
+      ? {
+          ok: true as const,
+          provider: "runware" as const,
+          kind: "initial" as const,
+          externalJobId: null,
+          candidates: [
+            {
+              tempId: "preview-selected",
+              imageUrl: body.previewImageUrl!,
+              width: null,
+              height: null,
+              seed: null,
+              model: body.model ?? "runware-default",
+              prompt:
+                body.previewResolvedPrompt ??
+                promptEngineOutput.canonicalPrompt ??
+                null,
+              negativePrompt:
+                body.previewNegativePrompt ??
+                promptEngineOutput.negativePrompt ??
+                null,
+            },
+          ],
+        }
+      : useConsistencyReference
+        ? await generateVariationCandidatesWithService({
+            provider: "runware",
+            styleType: hiddenPromptInput.styleType,
+            characterId: body.characterId,
+            basePrompt: promptEngineOutput.canonicalPrompt,
+            negativePrompt: promptEngineOutput.negativePrompt,
+            primaryReferenceImageUrl: body.consistencySourceImageUrl!,
+            variationPromptDelta: buildConsistencyVariationDelta(
+              body.promptInput,
+            ),
+            consistencyStrength: body.consistencyStrength ?? "strict",
+            baseSeed: body.baseSeed ?? null,
+            model: body.model ?? null,
+          })
+        : await generateInitialCharacterCandidatesWithService({
+            provider: "runware",
+            styleType: hiddenPromptInput.styleType,
+            builderMode: hiddenPromptInput.builderMode,
+            hiddenPromptInput,
+            promptEngineOutput,
+            candidateCount: body.candidateCount,
+            model: body.model ?? null,
+          });
 
     if (!generationResult.ok) {
       return NextResponse.json(
@@ -303,6 +318,7 @@ export async function POST(request: Request) {
 
     const jobInsertPayload = createImageJobInsertPayload(jobInput);
     const job = await createCharacterImageJob(jobInsertPayload);
+    createdJobId = job.id;
 
     await markCharacterImageJobProcessing(job.id);
 
@@ -313,6 +329,7 @@ export async function POST(request: Request) {
       candidates: generationResult.candidates,
       selectedCandidateId: selectedCandidate?.tempId ?? null,
       moderation,
+      hiddenPromptInput: hiddenPromptInput as Record<string, unknown>,
     });
 
     const savedImages = [];
@@ -331,6 +348,7 @@ export async function POST(request: Request) {
           jobId: job.id,
           candidate: selectedCandidate,
           moderation,
+          hiddenPromptInput: hiddenPromptInput as Record<string, unknown>,
         }),
       );
     }
@@ -383,6 +401,18 @@ export async function POST(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unexpected image generation error.";
+
+    if (createdJobId) {
+      try {
+        await markCharacterImageJobFailed({
+          jobId: createdJobId,
+          errorCode: "UNEXPECTED_IMAGE_GENERATION_ERROR",
+          errorMessage: message,
+        });
+      } catch {
+        // Preserve the original error response if job-status sync also fails.
+      }
+    }
 
     return NextResponse.json(
       {

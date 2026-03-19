@@ -14,7 +14,6 @@ export type CharacterScenario = {
 
 type CustomCharacterRow = Database["public"]["Tables"]["custom_characters"]["Row"];
 type CustomCharacterInsert = Database["public"]["Tables"]["custom_characters"]["Insert"];
-type CustomCharacterUpdate = Database["public"]["Tables"]["custom_characters"]["Update"];
 
 export type DbProfile = {
   id: string;
@@ -267,6 +266,15 @@ export async function getProfileSummary() {
   const user = await requireUser();
   const profile = await ensureProfile(user);
 
+  const { data: characterRows, error: characterRowsError } = await supabase
+    .from("custom_characters")
+    .select("id, payload")
+    .eq("user_id", user.id);
+
+  if (characterRowsError) {
+    throw new Error(characterRowsError.message);
+  }
+
   const { count: characterCount, error: characterCountError } = await supabase
     .from("custom_characters")
     .select("*", { count: "exact", head: true })
@@ -285,11 +293,43 @@ export async function getProfileSummary() {
     throw new Error(conversationCountError.message);
   }
 
+  const characterIds = (characterRows ?? [])
+    .map((row) => (typeof row.id === "string" ? row.id : ""))
+    .filter(Boolean);
+
+  const publicCharacterCount = (characterRows ?? []).filter((row) => {
+    if (!isPlainObject(row.payload)) return false;
+    return row.payload.visibility === "public";
+  }).length;
+
+  let rerollsThisMonth = 0;
+
+  if (characterIds.length > 0) {
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+
+    const { count: rerollCount, error: rerollCountError } = await supabase
+      .from("character_image_jobs")
+      .select("*", { count: "exact", head: true })
+      .in("character_id", characterIds)
+      .eq("kind", "variation")
+      .gte("created_at", monthStart.toISOString());
+
+    if (rerollCountError) {
+      throw new Error(rerollCountError.message);
+    }
+
+    rerollsThisMonth = rerollCount ?? 0;
+  }
+
   return {
     user,
     profile,
     characterCount: characterCount ?? 0,
     conversationCount: conversationCount ?? 0,
+    publicCharacterCount,
+    rerollsThisMonth,
   };
 }
 
@@ -434,64 +474,9 @@ export async function updateMyCustomCharacter(
   id: string,
   input: CharacterDraftInput,
 ): Promise<DbCustomCharacter> {
-  const user = await requireUser();
-
-  const { data: currentData, error: currentError } = await supabase
-    .from("custom_characters")
-    .select("*")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .single();
-
-  const current = (currentData as CustomCharacterRow | null) ?? null;
-
-  if (currentError || !current) {
-    throw new Error(currentError?.message || "Character not found.");
-  }
-
-  let nextSlug = current.slug;
-  const proposedBaseSlug = slugify(input.name) || "custom-character";
-
-  if (proposedBaseSlug !== current.slug) {
-    nextSlug = await makeUniqueSlug(user.id, input.name);
-  }
-
-  const currentMetadata = isPlainObject(current.metadata) ? current.metadata : {};
-
-  const updatePayload: CustomCharacterUpdate = {
-    slug: nextSlug,
-    name: clean(input.name),
-    archetype: clean(input.archetype) || "custom",
-    headline: clean(input.headline),
-    description: clean(input.description),
-    greeting: clean(input.greeting),
-    preview_message: clean(input.previewMessage),
-    backstory: clean(input.backstory),
-    tags: normalizeTags(input.tags),
-    trait_badges: toJson(input.traitBadges.slice(0, 8)),
-    scenario: toJson(normalizeScenario(input.scenario)),
-    metadata: toJson({
-      ...currentMetadata,
-      source: "supabase",
-      version: 1,
-      updatedAt: new Date().toISOString(),
-    }),
-    payload: toJson(input.payload ?? current.payload ?? {}),
-  };
-
-  const { data, error } = await supabase
-    .from("custom_characters")
-    .update(updatePayload)
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .select("*")
-    .single();
-
-  if (error || !data) {
-    throw new Error(error?.message || "Could not update character.");
-  }
-
-  return mapCharacterRow(data as CustomCharacterRow);
+  void id;
+  void input;
+  throw new Error("Character editing is disabled after creation.");
 }
 
 export async function deleteMyCustomCharacter(id: string): Promise<void> {

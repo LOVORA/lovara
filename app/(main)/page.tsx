@@ -1,7 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -16,50 +17,41 @@ import {
   Clock3,
 } from "lucide-react";
 import AuthStatus from "@/components/auth/auth-status";
+import { characters } from "@/lib/characters";
 
 const ONBOARDING_STORAGE_KEY = "lovora.home.onboarding.dismissed";
 const FAVORITES_STORAGE_KEY = "lovora.favorite.characters";
 const RECENT_STORAGE_KEY = "lovora.recent.characters";
 
-const featuredCharacters = [
-  {
-    name: "Isla Vale",
-    label: "Soft luxury",
-    summary:
-      "Elegant, emotionally attentive, slow-burn energy for intimate private chat.",
-    tags: ["slow burn", "warm", "high-end"],
-  },
-  {
-    name: "Kael Mercer",
-    label: "Dark tension",
-    summary:
-      "Controlled, magnetic, sharp dialogue with a colder edge and strong presence.",
-    tags: ["dominant", "cold", "intense"],
-  },
-  {
-    name: "Mina Hart",
-    label: "Playful comfort",
-    summary:
-      "Flirty, affectionate, quick chemistry with lighter banter and emotional warmth.",
-    tags: ["playful", "sweet", "fast chemistry"],
-  },
-];
+const featuredCharacters = characters.slice(0, 3).map((character) => ({
+  id: character.slug,
+  slug: character.slug,
+  name: character.name,
+  label: character.headline,
+  summary: character.description,
+  tags: Array.isArray(character.tags)
+    ? character.tags
+        .map((tag) => (typeof tag === "string" ? tag : tag.label))
+        .slice(0, 3)
+    : [],
+  imageUrl: character.image,
+}));
 
 const studioSteps = [
   {
     title: "Choose the dynamic",
     description:
-      "Set the relationship, tone, setting, and emotional pace so the character starts with a clear role.",
+      "Pick the relationship, tone, and setting so the character starts with a clear role.",
   },
   {
     title: "Shape the personality",
     description:
-      "Control age vibe, archetype, speech style, reply length, and scenario direction without making the flow feel technical.",
+      "Set the personality, speaking style, and mood without dealing with confusing options.",
   },
   {
     title: "Talk instantly",
     description:
-      "Open the custom chat session with a stronger identity, better scene continuity, and more distinct responses.",
+      "Open chat right away and keep the same tone, setting, and feeling.",
   },
 ];
 
@@ -73,21 +65,21 @@ const trustSignals = [
 const featureColumns = [
   {
     eyebrow: "Character quality",
-    title: "Characters feel designed, not randomly generated.",
+    title: "Characters feel clear from the first message.",
     body:
-      "The builder now pushes clearer identity, tone, relationship dynamics, and setting context into every character so outputs feel more intentional and more premium.",
+      "The builder gives each character a stronger identity, clearer tone, and a better starting dynamic.",
   },
   {
     eyebrow: "Conversation quality",
-    title: "Better scene continuity from the first message onward.",
+    title: "Chats stay more consistent.",
     body:
-      "Custom chat is tuned to preserve tone, opening state, and scenario direction more reliably, reducing generic assistant-style drift.",
+      "The chat keeps tone, scene, and personality more stable so replies feel less generic.",
   },
   {
     eyebrow: "Product flow",
-    title: "Create, save, revisit, and continue without friction.",
+    title: "Create, save, and come back easily.",
     body:
-      "The experience is structured as a system: landing, builder, saved characters, and custom chat all feed the same premium loop.",
+      "Everything is connected: create a character, save it, and continue the same conversation later.",
   },
 ];
 
@@ -95,7 +87,7 @@ const onboardingSteps = [
   {
     id: "create",
     title: "Create your first character",
-    description: "Open the studio and choose a template or build from scratch.",
+    description: "Open the studio and start with a template or a blank character.",
     href: "/create-character",
     cta: "Open studio",
     icon: Wand2,
@@ -103,17 +95,17 @@ const onboardingSteps = [
   {
     id: "library",
     title: "Save it to your library",
-    description: "Your private vault keeps characters ready for reuse and edits.",
+    description: "Keep it in your library so it is easy to reopen and reuse later.",
     href: "/my-characters",
     cta: "Open library",
     icon: Library,
   },
   {
     id: "chat",
-    title: "Start a private chat",
-    description: "Move into an immersive roleplay flow with stronger continuity.",
+    title: "Open a ready-made character",
+    description: "Browse Lovora's professional characters and jump into chat right away.",
     href: "/characters",
-    cta: "Explore characters",
+    cta: "Open professional",
     icon: MessageCircle,
   },
 ] as const;
@@ -134,23 +126,34 @@ function safeReadStringArray(key: string): string[] {
   }
 }
 
-function OnboardingCard() {
-  const [mounted, setMounted] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+function subscribeToHydration() {
+  return () => {};
+}
 
-  useEffect(() => {
-    setMounted(true);
+function useHydrated() {
+  return useSyncExternalStore(subscribeToHydration, () => true, () => false);
+}
+
+function OnboardingCard() {
+  const hydrated = useHydrated();
+  const [dismissedOverride, setDismissedOverride] = useState(false);
+  const dismissed = useMemo(() => {
+    if (!hydrated) {
+      return false;
+    }
 
     try {
-      const stored = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
-      setDismissed(stored === "true");
+      return (
+        dismissedOverride ||
+        window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "true"
+      );
     } catch {
-      setDismissed(false);
+      return dismissedOverride;
     }
-  }, []);
+  }, [dismissedOverride, hydrated]);
 
   function handleDismiss() {
-    setDismissed(true);
+    setDismissedOverride(true);
     try {
       window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
     } catch {
@@ -158,7 +161,7 @@ function OnboardingCard() {
     }
   }
 
-  if (!mounted) {
+  if (!hydrated) {
     return (
       <section className="mx-auto mb-8 max-w-7xl px-4 pt-4 md:px-6">
         <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(135deg,rgba(236,72,153,0.10),rgba(255,255,255,0.05),rgba(59,130,246,0.08))] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur">
@@ -257,15 +260,15 @@ function OnboardingCard() {
 }
 
 function ProductStats() {
-  const [mounted, setMounted] = useState(false);
-  const [favoriteCount, setFavoriteCount] = useState(0);
-  const [recentCount, setRecentCount] = useState(0);
-
-  useEffect(() => {
-    setMounted(true);
-    setFavoriteCount(safeReadStringArray(FAVORITES_STORAGE_KEY).length);
-    setRecentCount(safeReadStringArray(RECENT_STORAGE_KEY).length);
-  }, []);
+  const hydrated = useHydrated();
+  const favoriteCount = useMemo(
+    () => (hydrated ? safeReadStringArray(FAVORITES_STORAGE_KEY).length : 0),
+    [hydrated],
+  );
+  const recentCount = useMemo(
+    () => (hydrated ? safeReadStringArray(RECENT_STORAGE_KEY).length : 0),
+    [hydrated],
+  );
 
   const stats = useMemo(
     () => [
@@ -277,13 +280,13 @@ function ProductStats() {
       },
       {
         label: "Favorites saved",
-        value: mounted ? String(favoriteCount) : "0",
+        value: String(favoriteCount),
         helper: "Stored in your browser vault",
         icon: Heart,
       },
       {
         label: "Recently viewed",
-        value: mounted ? String(recentCount) : "0",
+        value: String(recentCount),
         helper: "Characters you explored lately",
         icon: Clock3,
       },
@@ -294,7 +297,7 @@ function ProductStats() {
         icon: BarChart3,
       },
     ],
-    [favoriteCount, recentCount, mounted],
+    [favoriteCount, recentCount],
   );
 
   return (
@@ -374,6 +377,18 @@ export default function HomePage() {
 
           <div className="flex items-center gap-3">
             <Link
+              href="/characters"
+              className="hidden rounded-full border border-white/12 px-4 py-2 text-sm text-white/80 transition hover:border-white/25 hover:bg-white/5 md:inline-flex"
+            >
+              Professional
+            </Link>
+            <Link
+              href="/community"
+              className="hidden rounded-full border border-white/12 px-4 py-2 text-sm text-white/80 transition hover:border-white/25 hover:bg-white/5 md:inline-flex"
+            >
+              Community
+            </Link>
+            <Link
               href="/my-characters"
               className="hidden rounded-full border border-white/12 px-4 py-2 text-sm text-white/80 transition hover:border-white/25 hover:bg-white/5 md:inline-flex"
             >
@@ -395,7 +410,7 @@ export default function HomePage() {
 
         <OnboardingCard />
 
-        <section className="relative z-10 mx-auto grid max-w-7xl gap-10 px-4 pb-20 pt-8 md:px-6 md:pb-28 md:pt-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
+      <section className="relative z-10 mx-auto grid max-w-7xl gap-10 px-4 pb-20 pt-8 md:px-6 md:pb-28 md:pt-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
           <div>
             <div className="mb-6 flex flex-wrap gap-2">
               {trustSignals.map((signal) => (
@@ -408,15 +423,13 @@ export default function HomePage() {
               ))}
             </div>
 
-            <h1 className="max-w-4xl text-4xl font-semibold leading-[1.02] tracking-tight text-white md:text-6xl xl:text-7xl">
-              Build characters that feel more intimate, distinct, and worth coming
-              back to.
+            <h1 className="max-w-4xl text-4xl font-semibold leading-[0.98] tracking-tight text-white md:text-6xl xl:text-7xl">
+              Create characters people actually want to talk to.
             </h1>
 
             <p className="mt-6 max-w-2xl text-base leading-8 text-white/68 md:text-lg">
-              Lovora is designed for premium AI character experiences: create a
-              character with stronger identity, shape the exact dynamic you want,
-              and continue the conversation inside a more immersive private chat.
+              Build the personality, tone, relationship, and style in one place.
+              Then move straight into chat without losing the feeling you created.
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -424,33 +437,33 @@ export default function HomePage() {
                 href="/create-character"
                 className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-pink-400 via-fuchsia-400 to-violet-400 px-6 py-3 text-sm font-semibold text-[#110812] shadow-[0_14px_60px_rgba(236,72,153,0.28)] transition hover:scale-[1.01]"
               >
-                Start creating
+                Create a character
               </Link>
               <Link
                 href="/my-characters"
                 className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-6 py-3 text-sm font-medium text-white/82 backdrop-blur transition hover:border-white/20 hover:bg-white/[0.06]"
               >
-                View saved characters
+                Open my library
               </Link>
             </div>
 
             <div className="mt-10 grid gap-4 sm:grid-cols-3">
-              <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur">
-                <div className="text-2xl font-semibold text-white">Studio</div>
+              <div className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 backdrop-blur">
+                <div className="text-2xl font-semibold text-white">Fast setup</div>
                 <p className="mt-2 text-sm leading-7 text-white/58">
-                  Quick Mode for speed, Detailed Studio for full control.
+                  Quick mode when you want speed, deep mode when you want control.
                 </p>
               </div>
-              <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur">
-                <div className="text-2xl font-semibold text-white">Custom</div>
+              <div className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 backdrop-blur">
+                <div className="text-2xl font-semibold text-white">Clear personality</div>
                 <p className="mt-2 text-sm leading-7 text-white/58">
-                  Fine-tune relationship, tone, setting, and scene direction.
+                  Set the relationship, tone, scene, and speaking style clearly.
                 </p>
               </div>
-              <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur">
-                <div className="text-2xl font-semibold text-white">Memory</div>
+              <div className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 backdrop-blur">
+                <div className="text-2xl font-semibold text-white">Easy return</div>
                 <p className="mt-2 text-sm leading-7 text-white/58">
-                  Return to saved characters and continue the same dynamic.
+                  Save the character and pick the chat back up later.
                 </p>
               </div>
             </div>
@@ -463,9 +476,9 @@ export default function HomePage() {
             <div className="relative overflow-hidden rounded-[34px] border border-white/12 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-5 shadow-[0_24px_100px_rgba(0,0,0,0.45)] backdrop-blur-xl">
               <div className="flex items-center justify-between rounded-[24px] border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/75">
                 <div>
-                  <div className="font-medium text-white">Private session preview</div>
+                  <div className="font-medium text-white">Chat preview</div>
                   <div className="mt-1 text-xs text-white/45">
-                    Stronger scene context, cleaner personality framing.
+                    Clear tone, better scene setup, easier roleplay flow.
                   </div>
                 </div>
                 <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200">
@@ -476,15 +489,14 @@ export default function HomePage() {
               <div className="mt-4 space-y-3">
                 <div className="rounded-[26px] border border-white/8 bg-white/[0.05] p-4">
                   <div className="mb-2 flex items-center justify-between text-xs text-white/45">
-                    <span>Character identity</span>
-                    <span>high-fidelity setup</span>
+                    <span>Character setup</span>
+                    <span>ready to chat</span>
                   </div>
                   <div className="text-lg font-semibold text-white">
-                    Elegant. Playful. Slightly dangerous.
+                    Calm, playful, and a little dangerous.
                   </div>
                   <p className="mt-2 text-sm leading-7 text-white/58">
-                    The builder shapes age vibe, archetype, setting, and the exact
-                    emotional dynamic before the chat even starts.
+                    The studio shapes the mood, personality, and relationship before the first message.
                   </p>
                 </div>
 
@@ -494,9 +506,8 @@ export default function HomePage() {
                     Opening scene
                   </div>
                   <p className="text-sm leading-7 text-white/80">
-                    “You were impossible not to notice the second you walked in.
-                    Sit down for a minute. I want to see if you’re as interesting
-                    as you look.”
+                    “You stood out the second you walked in. Sit with me for a
+                    minute. I want to see if you are as interesting as you look.”
                   </p>
                 </div>
 
@@ -506,7 +517,7 @@ export default function HomePage() {
                       Dynamic
                     </div>
                     <div className="mt-2 text-base font-medium text-white">
-                      Stranger tension with immediate chemistry
+                      Stranger tension with instant chemistry
                     </div>
                   </div>
                   <div className="rounded-[24px] border border-white/8 bg-white/[0.04] p-4">
@@ -514,7 +525,7 @@ export default function HomePage() {
                       Setting
                     </div>
                     <div className="mt-2 text-base font-medium text-white">
-                      Private lounge, late night, luxury energy
+                      Private lounge, late night, soft luxury mood
                     </div>
                   </div>
                 </div>
@@ -530,24 +541,62 @@ export default function HomePage() {
         <div className="mb-10 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="max-w-2xl">
             <p className="text-sm uppercase tracking-[0.28em] text-pink-200/70">
-              Character direction
+              Professional characters
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-5xl">
-              Different moods, different intensities, different kinds of pull.
+              Three ready-made characters to open the mood right away.
             </h2>
           </div>
           <p className="max-w-xl text-sm leading-7 text-white/60 md:text-base">
-            The goal is not just more options. It is clearer identity so each
-            character feels intentionally built from the start.
+            This section is now the site-managed collection. Community characters
+            and your own saved characters each live in their own space.
           </p>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
           {featuredCharacters.map((character) => (
             <div
-              key={character.name}
-              className="group overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] p-6 backdrop-blur transition duration-300 hover:-translate-y-1 hover:border-pink-300/20 hover:bg-white/[0.06]"
+              key={character.id}
+              className="group overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] shadow-[0_22px_70px_rgba(0,0,0,0.22)] backdrop-blur transition duration-300 hover:-translate-y-1 hover:border-pink-300/20 hover:shadow-[0_30px_90px_rgba(0,0,0,0.3)]"
             >
+              <div className="relative mb-5 overflow-hidden rounded-[26px] border border-white/10 bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
+                {character.imageUrl ? (
+                  <Image
+                    src={character.imageUrl}
+                    alt={character.name}
+                    width={1200}
+                    height={900}
+                    unoptimized
+                    className="h-64 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                  />
+                ) : (
+                  <div className="flex h-64 w-full items-center justify-center p-5">
+                    <div className="text-center">
+                      <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[24px] border border-white/10 bg-black/30 text-2xl font-semibold text-white/88">
+                        {character.name.slice(0, 1)}
+                      </div>
+                      <div className="mt-4 text-sm text-white/60">
+                        Avatar preview will appear here
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(6,7,11,0.58),transparent_45%)]" />
+                <div className="absolute inset-x-0 bottom-0 p-4">
+                  <div className="rounded-[22px] border border-white/10 bg-black/28 p-4 backdrop-blur">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
+                      Featured now
+                    </div>
+                    <div className="mt-2 text-xl font-semibold text-white">
+                      {character.name}
+                    </div>
+                    <div className="mt-2 line-clamp-2 text-sm leading-6 text-white/68">
+                      {character.label}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm uppercase tracking-[0.22em] text-pink-200/65">
@@ -557,9 +606,12 @@ export default function HomePage() {
                     {character.name}
                   </h3>
                 </div>
-                <div className="rounded-full border border-white/12 px-3 py-1 text-xs text-white/55">
-                  preview
-                </div>
+                <Link
+                  href={character.slug ? `/characters/${character.slug}` : "/characters"}
+                  className="rounded-full border border-white/12 px-3 py-1 text-xs text-white/70 transition hover:border-white/20 hover:bg-white/5"
+                >
+                  Open
+                </Link>
               </div>
               <p className="mt-4 text-sm leading-7 text-white/60">
                 {character.summary}
@@ -574,8 +626,26 @@ export default function HomePage() {
                   </span>
                 ))}
               </div>
+              <div className="mt-5 border-t border-white/8 pt-4 text-xs uppercase tracking-[0.18em] text-white/42">
+                Open the card, then start chat from the professional collection.
+              </div>
             </div>
           ))}
+        </div>
+
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link
+            href="/characters"
+            className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
+          >
+            Open professional characters
+          </Link>
+          <Link
+            href="/community"
+            className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10"
+          >
+            Explore community
+          </Link>
         </div>
       </section>
 

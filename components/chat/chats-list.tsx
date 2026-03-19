@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { characters } from "@/lib/characters";
 import { getCustomCharacters } from "@/lib/custom-characters-storage";
@@ -191,7 +191,7 @@ function EmptyState({ hasChats }: { hasChats: boolean }) {
             href="/characters"
             className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black"
           >
-            Explore characters
+            Professional characters
           </Link>
           <Link
             href="/create-character"
@@ -384,8 +384,12 @@ export default function ChatsList() {
     setRefreshing(false);
   }
 
+  const loadChatsOnMount = useEffectEvent(() => {
+    void loadChats();
+  });
+
   useEffect(() => {
-    loadChats();
+    loadChatsOnMount();
   }, []);
 
   const chatCards = useMemo<ChatCard[]>(() => {

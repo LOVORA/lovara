@@ -29,6 +29,13 @@
     },
     "incremental": true
   },
+  "watchOptions": {
+    "excludeDirectories": [
+      ".next/dev",
+      ".next/dev/types",
+      "node_modules"
+    ]
+  },
   "include": [
     "next-env.d.ts",
     "**/*.ts",

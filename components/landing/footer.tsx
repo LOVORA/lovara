@@ -2,7 +2,8 @@ import Link from "next/link";
 
 const productLinks = [
   { href: "/", label: "Home" },
-  { href: "/characters", label: "Browse Characters" },
+  { href: "/characters", label: "Professional Characters" },
+  { href: "/community", label: "Community Characters" },
   { href: "/create-character", label: "Create Character" },
   { href: "/my-characters", label: "My Characters" },
 ];
@@ -80,7 +81,13 @@ export default function Footer() {
                   href="/characters"
                   className="text-sm text-white/65 transition hover:text-white"
                 >
-                  Browse ready-made characters
+                  Browse professional characters
+                </Link>
+                <Link
+                  href="/community"
+                  className="text-sm text-white/65 transition hover:text-white"
+                >
+                  Explore community creations
                 </Link>
                 <Link
                   href="/my-characters"
@@ -101,7 +108,10 @@ export default function Footer() {
               Home
             </Link>
             <Link href="/characters" className="transition hover:text-white">
-              Browse
+              Professional
+            </Link>
+            <Link href="/community" className="transition hover:text-white">
+              Community
             </Link>
             <Link href="/create-character" className="transition hover:text-white">
               Create

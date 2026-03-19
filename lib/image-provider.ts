@@ -1,35 +1,19 @@
-export type ImageProvider = "runware";
+import type {
+  CharacterImagePromptInput,
+  CharacterImageSafetyInput,
+  ImageProvider,
+} from "@/lib/image-generation/types";
+import type {
+  GenerateImageRouteBody,
+  GenerateImageRouteFailure,
+  GenerateImageRouteResponse,
+} from "@/lib/image-generation/contracts";
 
-export type CharacterImageSafetyInput = {
-  isAdultOnly: boolean;
-  subjectDeclared18Plus: boolean;
-  consentConfirmed: boolean;
-  depictsRealPerson: boolean;
-  depictsPublicFigure: boolean;
-  nonConsensualFlag: boolean;
-  underageRiskFlag: boolean;
-  illegalContentFlag: boolean;
-};
-
-export type CharacterImagePromptInput = {
-  characterName: string;
-  archetype?: string;
-  visualAura?: string;
-  ageBand?: "18-20" | "21-24" | "25-29" | "30-39" | "40+";
-  genderPresentation?: string;
-  region?: string;
-  hair?: string;
-  eyes?: string;
-  outfit?: string;
-  palette?: string;
-  camera?: string;
-  avatarStyle?: string;
-  bodyType?: string;
-  pose?: string;
-  expression?: string;
-  environment?: string;
-  nsfwLevel?: "adult" | "suggestive" | "none";
-};
+export type {
+  CharacterImagePromptInput,
+  CharacterImageSafetyInput,
+  ImageProvider,
+} from "@/lib/image-generation/types";
 
 export type RequestImageGenerationArgs = {
   provider: ImageProvider;
@@ -38,6 +22,12 @@ export type RequestImageGenerationArgs = {
   userId?: string;
   promptInput: CharacterImagePromptInput;
   safety: CharacterImageSafetyInput;
+  previewImageUrl?: string | null;
+  previewResolvedPrompt?: string | null;
+  previewNegativePrompt?: string | null;
+  consistencySourceImageUrl?: string | null;
+  consistencyStrength?: "soft" | "strict" | null;
+  baseSeed?: number | null;
 };
 
 export type RequestImageGenerationResult = {
@@ -93,12 +83,26 @@ export async function requestImageGeneration(
 ): Promise<RequestImageGenerationResult> {
   ensureSafety(args.safety);
 
-  const requestBody = {
+  const requestBody: GenerateImageRouteBody = {
     characterId: args.characterId,
-    provider: "runware" as const,
+    provider: args.provider,
     kind: args.kind,
     promptInput: args.promptInput,
     safety: args.safety,
+    ...(args.previewImageUrl
+      ? {
+          previewImageUrl: args.previewImageUrl,
+          previewResolvedPrompt: args.previewResolvedPrompt ?? null,
+          previewNegativePrompt: args.previewNegativePrompt ?? null,
+        }
+      : {}),
+    ...(args.consistencySourceImageUrl
+      ? {
+          consistencySourceImageUrl: args.consistencySourceImageUrl,
+          consistencyStrength: args.consistencyStrength ?? "strict",
+          baseSeed: args.baseSeed ?? null,
+        }
+      : {}),
     ...(args.userId ? { userId: args.userId } : {}),
   };
 
@@ -113,19 +117,7 @@ export async function requestImageGeneration(
   const rawText = await response.text();
 
   let payload:
-    | {
-        ok?: boolean;
-        imageUrl?: string | null;
-        primaryImageUrl?: string | null;
-        externalJobId?: string | null;
-        promptSummary?: string | null;
-        canonicalPrompt?: string | null;
-        negativePrompt?: string | null;
-        revisedPrompt?: string | null;
-        revisedNegativePrompt?: string | null;
-        error?: string;
-        errorMessage?: string;
-      }
+    | GenerateImageRouteResponse
     | null = null;
 
   try {
@@ -135,11 +127,16 @@ export async function requestImageGeneration(
   }
 
   if (!response.ok || !payload?.ok) {
+    const errorPayload =
+      payload && payload.ok === false
+        ? (payload as GenerateImageRouteFailure)
+        : null;
+
     return {
       ok: false,
       errorMessage:
-        payload?.errorMessage ||
-        payload?.error ||
+        errorPayload?.errorMessage ||
+        errorPayload?.error ||
         rawText ||
         "Image generation request failed.",
     };

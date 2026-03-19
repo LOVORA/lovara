@@ -5,9 +5,11 @@ import { usePathname } from "next/navigation";
 import AuthStatus from "../auth/auth-status";
 
 const navItems = [
-  { href: "/characters", label: "Browse" },
+  { href: "/characters", label: "Professional" },
+  { href: "/community", label: "Community" },
   { href: "/create-character", label: "Create" },
   { href: "/my-characters", label: "My Characters" },
+  { href: "/my-profile", label: "My Profile" },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -71,7 +73,7 @@ export default function Navbar() {
             href="/characters"
             className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/75 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
           >
-            Explore
+            Professional
           </Link>
 
           <Link

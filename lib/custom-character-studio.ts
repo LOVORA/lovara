@@ -1,5 +1,21 @@
 import type { CharacterDraftInput } from "@/lib/account";
 import { adaptBuilderInputToCharacter } from "@/lib/custom-character-adapter";
+import {
+  buildConversationalGuardrails,
+  buildConsentAndPacingDirectives,
+  buildMemoryBehaviorDirectives,
+  buildVisualIdentityRoleplayDirectives,
+  buildRelationshipProgressionDirectives,
+  buildReplyFlowDirectives,
+  buildResponseQualityDirectives,
+  buildRelationshipRoleGuidance,
+  buildSceneImmersionDirectives,
+} from "@/lib/create-character/deep-prompting";
+import {
+  buildOpeningPack,
+  buildOpeningPromptDirectives,
+} from "@/lib/create-character/opening-composer";
+import { readStructuredNotes } from "@/lib/create-character/studio-notes";
 import type {
   CharacterArchetype,
   CharacterBuilderInput,
@@ -44,6 +60,7 @@ export type StudioFormState = {
   sceneGoal: string;
   tone: string;
   openingState: string;
+  customScenario: string;
   tags: string;
   customNotes: string;
 };
@@ -80,6 +97,7 @@ type SceneProfile = {
   objective: string;
   tone: string;
   openingState: string;
+  customScenario: string;
   atmosphericFrame: string;
 };
 
@@ -564,8 +582,11 @@ function buildSceneProfile(form: StudioFormState): SceneProfile {
   const openingState =
     clean(form.openingState) ||
     "already present in the moment, carrying forward the mood of the scene rather than restarting it";
+  const customScenario = clean(form.customScenario);
 
-  const atmosphericFrame = [setting, tone, openingState].filter(Boolean).join(" | ");
+  const atmosphericFrame = [setting, tone, openingState, customScenario]
+    .filter(Boolean)
+    .join(" | ");
 
   return {
     setting,
@@ -573,6 +594,7 @@ function buildSceneProfile(form: StudioFormState): SceneProfile {
     objective,
     tone,
     openingState,
+    customScenario,
     atmosphericFrame,
   };
 }
@@ -644,6 +666,56 @@ function buildEngineSystemPrompt(
   tags: string[],
 ): string {
   const archetypeLabel = formatArchetypeLabel(form.archetype);
+  const notes = readStructuredNotes(form.customNotes);
+  const relationshipGuidance = buildRelationshipRoleGuidance({
+    name: form.name,
+    archetype: form.archetype,
+    relationshipToUser: form.relationshipToUser,
+    tone: form.tone,
+    setting: form.setting,
+    sceneGoal: form.sceneGoal,
+    coreVibes: form.coreVibes,
+    customNotes: form.customNotes,
+  });
+  const conversationalGuardrails = buildConversationalGuardrails(notes);
+  const responseQualityDirectives = buildResponseQualityDirectives(notes);
+  const memoryDirectives = buildMemoryBehaviorDirectives(notes);
+  const sceneImmersionDirectives = buildSceneImmersionDirectives(notes);
+  const visualIdentityDirectives = buildVisualIdentityRoleplayDirectives(notes);
+  const replyFlowDirectives = buildReplyFlowDirectives(notes);
+  const relationshipProgressionDirectives =
+    buildRelationshipProgressionDirectives(notes);
+  const consentAndPacingDirectives = buildConsentAndPacingDirectives({
+    ...notes,
+    "Relationship pace": form.relationshipPace,
+    "Opening state": form.openingState,
+    "Custom scenario": form.customScenario,
+  });
+  const openingPack = buildOpeningPack({
+    name: form.name,
+    setting: form.setting,
+    relationshipToUser: form.relationshipToUser,
+    sceneGoal: form.sceneGoal,
+    tone: form.tone,
+    openingState: form.openingState,
+    customScenario: form.customScenario,
+    greetingStyle: notes["Greeting style"],
+    nickname: notes["Nickname for user"],
+    userRole: notes["User role"],
+    relationshipDynamic: notes["Relationship dynamic"],
+    sceneType: notes["Scene type"],
+    behaviorMode: notes["Behavior mode"],
+    arcStage: notes["Arc stage"],
+    currentEnergy: notes["Current energy"],
+    replyObjective: notes["Reply objective"],
+    attentionHook: notes["Attention hook"],
+    sensoryPalette: notes["Sensory palette"],
+    chemistryTemplate: notes["Chemistry template"],
+    visualAura: notes["Visual aura"],
+    eyes: notes["Eyes"],
+    hair: notes["Hair"],
+    signatureDetail: notes["Signature detail"],
+  });
   const lines = [
     `You are fully inhabiting the fictional roleplay character "${clean(form.name) || "This character"}".`,
     "You are not an assistant helping the user; you are the character speaking from inside the moment.",
@@ -657,6 +729,8 @@ function buildEngineSystemPrompt(
     `Age profile: ${clean(form.age) || "25"}`,
     `Region / aesthetic influence: ${clean(form.region) || "global / unspecified"}`,
     `Presentation: ${form.genderPresentation}`,
+    notes["Profession"] ? `Profession: ${notes["Profession"]}` : "",
+    notes["Trait stack"] ? `Trait stack: ${notes["Trait stack"]}` : "",
     "",
     "CHARACTER ESSENCE",
     `${clean(form.name) || "The character"} should feel like a specific person with behavioral consistency, emotional timing, and believable human texture.`,
@@ -684,6 +758,10 @@ function buildEngineSystemPrompt(
     `Scene objective: ${scene.objective}.`,
     `Scene tone: ${scene.tone}.`,
     `Opening state: ${scene.openingState}.`,
+    scene.customScenario
+      ? `Custom scenario direction: ${scene.customScenario}.`
+      : "",
+    ...buildOpeningPromptDirectives(openingPack),
     "",
     "ROLEPLAY DISCIPLINE",
     "React to subtext, hesitation, chemistry, tone shifts, and emotional timing rather than only literal text.",
@@ -692,12 +770,28 @@ function buildEngineSystemPrompt(
     "If the user is vulnerable, respond with grounded emotional intelligence, not generic reassurance.",
     "If the interaction is playful, keep it sharp and coherent rather than noisy.",
     "If tension is unresolved, do not prematurely dissolve it.",
+    ...relationshipGuidance.lines,
+    ...visualIdentityDirectives,
+    ...sceneImmersionDirectives,
+    ...replyFlowDirectives,
+    ...relationshipProgressionDirectives,
+    ...consentAndPacingDirectives,
     "",
     "TRAIT SIGNALS",
     `Core vibes: ${form.coreVibes.join(", ") || "none"}.`,
     `Scoring summary: playful ${scores.playful}, romantic ${scores.romantic}, dominant ${scores.dominant}, affectionate ${scores.affectionate}, jealous ${scores.jealous}, mysterious ${scores.mysterious}, confident ${scores.confident}, emotionalDepth ${scores.emotionalDepth}, teasing ${scores.teasing}, humor ${scores.humor}.`,
     tags.length > 0 ? `Tags: ${tags.join(", ")}.` : "",
     clean(form.customNotes) ? `Creator nuance: ${clean(form.customNotes)}.` : "",
+    "",
+    "CONVERSATION RULES",
+    ...conversationalGuardrails,
+    ...responseQualityDirectives,
+    "",
+    "MEMORY RULES",
+    ...memoryDirectives,
+    ...(relationshipGuidance.memoryHooks.length > 0
+      ? ["Relationship memory hooks:", ...relationshipGuidance.memoryHooks]
+      : []),
     "",
     "FINAL PRIORITIES",
     "1. Stay in character.",
@@ -715,6 +809,17 @@ function buildMemorySeedPayload(
   scene: SceneProfile,
   speech: SpeechProfile,
 ): { identity: string[]; behavior: string[]; scenario: string[] } {
+  const notes = readStructuredNotes(form.customNotes);
+  const relationshipGuidance = buildRelationshipRoleGuidance({
+    name: form.name,
+    archetype: form.archetype,
+    relationshipToUser: form.relationshipToUser,
+    tone: form.tone,
+    setting: form.setting,
+    sceneGoal: form.sceneGoal,
+    coreVibes: form.coreVibes,
+    customNotes: form.customNotes,
+  });
   return {
     identity: [
       `Name: ${clean(form.name) || "Unnamed character"}`,
@@ -722,6 +827,8 @@ function buildMemorySeedPayload(
       `Region influence: ${clean(form.region) || "global / unspecified"}`,
       `Archetype: ${formatArchetypeLabel(form.archetype)}`,
       `Presentation: ${form.genderPresentation}`,
+      ...(notes["Profession"] ? [`Profession: ${notes["Profession"]}`] : []),
+      ...(notes["Trait stack"] ? [`Trait stack: ${notes["Trait stack"]}`] : []),
     ],
     behavior: [
       `Warmth: ${behavior.warmthStyle}`,
@@ -732,6 +839,7 @@ function buildMemorySeedPayload(
       `Speech: ${speech.directness}`,
       `Cadence: ${speech.cadence}`,
       `Vulnerability: ${speech.vulnerabilityStyle}`,
+      ...relationshipGuidance.memoryHooks,
     ],
     scenario: [
       `Setting: ${scene.setting}`,
@@ -739,12 +847,19 @@ function buildMemorySeedPayload(
       `Objective: ${scene.objective}`,
       `Tone: ${scene.tone}`,
       `Opening: ${scene.openingState}`,
+      ...(scene.customScenario ? [`Custom scenario: ${scene.customScenario}`] : []),
     ],
   };
 }
 
 function buildScenarioSummary(scene: SceneProfile): string {
-  return [scene.setting, scene.relationship, scene.objective, scene.tone]
+  return [
+    scene.setting,
+    scene.relationship,
+    scene.objective,
+    scene.tone,
+    scene.customScenario,
+  ]
     .filter(Boolean)
     .join(" • ");
 }
@@ -803,6 +918,32 @@ export function buildCharacterDraftFromStudio(
 ): CharacterDraftInput {
   const builderInput = buildBuilderInput(form);
   const adapted = adaptBuilderInputToCharacter(builderInput);
+  const notes = readStructuredNotes(form.customNotes);
+  const openingPack = buildOpeningPack({
+    name: form.name,
+    setting: form.setting,
+    relationshipToUser: form.relationshipToUser,
+    sceneGoal: form.sceneGoal,
+    tone: form.tone,
+    openingState: form.openingState,
+    customScenario: form.customScenario,
+    greetingStyle: notes["Greeting style"],
+    nickname: notes["Nickname for user"],
+    userRole: notes["User role"],
+    relationshipDynamic: notes["Relationship dynamic"],
+    sceneType: notes["Scene type"],
+    behaviorMode: notes["Behavior mode"],
+    arcStage: notes["Arc stage"],
+    currentEnergy: notes["Current energy"],
+    replyObjective: notes["Reply objective"],
+    attentionHook: notes["Attention hook"],
+    sensoryPalette: notes["Sensory palette"],
+    chemistryTemplate: notes["Chemistry template"],
+    visualAura: notes["Visual aura"],
+    eyes: notes["Eyes"],
+    hair: notes["Hair"],
+    signatureDetail: notes["Signature detail"],
+  });
   const publicShareId = existingPublicShareId || makePublicShareId();
   const scores = buildScores(form);
   const behaviorProfile = buildBehaviorProfile(form, scores);
@@ -844,8 +985,8 @@ export function buildCharacterDraftFromStudio(
     archetype: adapted.archetype,
     headline: adapted.headline,
     description: adapted.description,
-    greeting: adapted.greeting,
-    previewMessage: adapted.previewMessage,
+    greeting: openingPack.greeting,
+    previewMessage: openingPack.previewMessage,
     backstory: adapted.backstory,
     tags: compiledTags,
     traitBadges: adapted.traitBadges,
@@ -855,6 +996,7 @@ export function buildCharacterDraftFromStudio(
       source: "character-studio-v3",
       visibility: form.visibility,
       publicShareId,
+      customScenario: clean(form.customScenario),
       identity: {
         age: clean(form.age),
         region: clean(form.region),
@@ -883,6 +1025,7 @@ export function buildCharacterDraftFromStudio(
       },
       memorySeed: compiledMemorySeed,
       scenarioSummary: compiledScenarioSummary,
+      openingPack,
       builderInput,
       engine: {
         ...(adapted.engine ?? {}),
@@ -984,6 +1127,7 @@ export function defaultStudioForm(): StudioFormState {
     sceneGoal: "",
     tone: "",
     openingState: "",
+    customScenario: "",
     tags: "",
     customNotes: "",
   };

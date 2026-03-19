@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -23,7 +24,7 @@ import {
   getMyCustomCharacterBySlug,
   type DbCustomCharacter,
 } from "@/lib/account";
-import { CHARACTER_IMAGES_BUCKET } from "@/lib/character-images";
+import { CHARACTER_IMAGES_BUCKET } from "@/lib/image-storage";
 import { supabase } from "@/lib/supabase";
 import {
   getPublicCustomCharacterByShareId,
@@ -474,10 +475,13 @@ export default function PublicSharePage() {
               <div className="mt-8 overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04]">
                 <div className="relative h-[360px] w-full bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
                   {avatarUrl ? (
-                    <img
+                    <Image
                       src={avatarUrl}
                       alt={`${character.name} avatar`}
-                      className="h-full w-full object-cover"
+                      fill
+                      unoptimized
+                      sizes="100vw"
+                      className="object-cover"
                     />
                   ) : (
                     <div className="flex h-full w-full items-end p-6">
@@ -691,8 +695,8 @@ export default function PublicSharePage() {
                     Why import it
                   </div>
                   <p className="mt-2 text-sm leading-7 text-white/68">
-                    Importing creates your own private version, so you can refine tone, keep it in
-                    your library, and continue the character inside your personal workflow.
+                    Importing creates your own private version, so you can keep it in
+                    your library and continue the character inside your personal workflow.
                   </p>
                 </div>
 

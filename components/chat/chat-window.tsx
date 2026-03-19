@@ -20,19 +20,55 @@ type Message = {
   content: string;
 };
 
-type SessionState = "fresh" | "active";
+type RetentionState = "fresh-start" | "warming-up" | "settled-in" | "ongoing";
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function getSessionState(messages: Message[]): SessionState {
-  const nonGreetingMessages = messages.filter((message, index) => {
-    if (index === 0 && message.role === "assistant") return false;
-    return true;
-  });
+function getMeaningfulMessageCount(messages: Message[]) {
+  return messages.filter((message, index) => !(index === 0 && message.role === "assistant")).length;
+}
 
-  return nonGreetingMessages.length === 0 ? "fresh" : "active";
+function getRetentionState(messages: Message[]): RetentionState {
+  const meaningfulCount = getMeaningfulMessageCount(messages);
+
+  if (meaningfulCount === 0) return "fresh-start";
+  if (meaningfulCount <= 4) return "warming-up";
+  if (meaningfulCount <= 14) return "settled-in";
+  return "ongoing";
+}
+
+function getRetentionLabel(state: RetentionState) {
+  switch (state) {
+    case "fresh-start":
+      return "Fresh start";
+    case "warming-up":
+      return "Chemistry building";
+    case "settled-in":
+      return "Connection active";
+    case "ongoing":
+      return "Ongoing thread";
+  }
+}
+
+function getRetentionTone(state: RetentionState): "neutral" | "success" | "warm" {
+  if (state === "fresh-start") return "warm";
+  if (state === "warming-up") return "warm";
+  return "success";
+}
+
+function getRetentionHint(state: RetentionState, characterName: string) {
+  switch (state) {
+    case "fresh-start":
+      return `${characterName} already has the opening mood. A simple first line is enough.`;
+    case "warming-up":
+      return "This chat has started to take shape. Keep the momentum going with one clear move.";
+    case "settled-in":
+      return "You are already past the first exchange. Pick up from the mood that is there.";
+    case "ongoing":
+      return "This thread already has history. Referencing the moment usually feels strongest.";
+  }
 }
 
 function StatusBadge({
@@ -77,7 +113,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   );
   const [justReset, setJustReset] = useState(false);
 
-  const sessionState = useMemo(() => getSessionState(messages), [messages]);
+  const retentionState = useMemo(() => getRetentionState(messages), [messages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -157,7 +193,11 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         );
 
         setMessages(formattedMessages);
-        setChatStatus("");
+        setChatStatus(
+          formattedMessages.length <= 1
+            ? `${character.name} is ready. Start with one clear line.`
+            : `Back where you left it with ${character.name}.`,
+        );
       } catch (error) {
         console.error(error);
 
@@ -408,7 +448,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       if (updateConversationError) {
         setChatStatus("Reply received, but conversation title could not be updated.");
       } else {
-        setChatStatus("");
+        setChatStatus(getRetentionHint(getRetentionState([...nextMessages, assistantReply]), character.name));
       }
     } catch (error) {
       console.error(error);
@@ -467,8 +507,8 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge label="Private chat saved" />
             <StatusBadge
-              label={sessionState === "fresh" ? "Fresh chat" : "Memory active"}
-              tone={sessionState === "fresh" ? "warm" : "success"}
+              label={getRetentionLabel(retentionState)}
+              tone={getRetentionTone(retentionState)}
             />
             {justReset ? <StatusBadge label="Reset completed" tone="success" /> : null}
 
@@ -609,7 +649,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           </div>
 
           <p className="mt-3 px-2 text-xs text-white/35">
-            Private conversation • Messages are saved automatically
+            Private conversation • Messages are saved automatically • {getRetentionHint(retentionState, character.name)}
           </p>
         </div>
       </form>

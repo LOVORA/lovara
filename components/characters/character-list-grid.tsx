@@ -8,6 +8,7 @@ type CharacterListGridProps = {
   emptyTitle?: string;
   emptyDescription?: string;
   ctaLabel?: string;
+  hrefBase?: string;
 };
 
 export default function CharacterListGrid({
@@ -15,6 +16,7 @@ export default function CharacterListGrid({
   emptyTitle = "No characters yet",
   emptyDescription = "Characters you create will appear here.",
   ctaLabel = "Open",
+  hrefBase,
 }: CharacterListGridProps) {
   if (items.length === 0) {
     return (
@@ -34,6 +36,7 @@ export default function CharacterListGrid({
           key={item.id}
           item={item}
           ctaLabel={ctaLabel}
+          href={hrefBase ? `${hrefBase}/${item.slug}` : undefined}
         />
       ))}
     </div>

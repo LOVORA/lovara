@@ -45,6 +45,14 @@ export type CharacterHistory = {
   manualBackstory?: string;
 };
 
+export type CharacterVisualProfile = {
+  visualAura?: string;
+  eyes?: string;
+  hair?: string;
+  style?: string;
+  signatureDetail?: string;
+};
+
 export type Character = {
   slug: string;
   name: string;
@@ -63,6 +71,7 @@ export type Character = {
   scenarioHooks?: string[];
   scenario?: CharacterScenario;
   history?: CharacterHistory;
+  visualProfile?: CharacterVisualProfile;
   memory: CharacterMemory | string[];
   previewMessage?: string;
   createdFromBuilder?: boolean;
@@ -127,6 +136,13 @@ Behavior rules:
     ],
     backstory: `Sera is the kind of person who makes people feel chosen.
 She hides depth behind playful energy, but once she feels safe, she becomes deeply affectionate and emotionally invested.`,
+    visualProfile: {
+      visualAura: "playful late-night warmth",
+      eyes: "soft bright eyes with teasing focus",
+      hair: "long dark waves",
+      style: "flirty after-hours softness",
+      signatureDetail: "a smile that lands before the words do",
+    },
     scenarioStarters: [
       {
         title: "Late Night Check-In",
@@ -204,6 +220,13 @@ Behavior rules:
     ],
     backstory: `Luna learned to listen before speaking.
 She creates emotional safety with her presence, and she naturally draws people into slower, deeper, more intimate conversations.`,
+    visualProfile: {
+      visualAura: "quiet comforting softness",
+      eyes: "gentle watchful eyes",
+      hair: "soft dark hair framing the face",
+      style: "cozy intimate elegance",
+      signatureDetail: "stillness that feels safe enough to lean into",
+    },
     scenarioStarters: [
       {
         title: "Quiet Night Conversation",
@@ -281,6 +304,13 @@ Behavior rules:
     ],
     backstory: `Nika thrives on tension, chemistry, and control.
 She pushes conversations forward with confidence, but underneath the bravado she pays close attention to who can actually keep up with her.`,
+    visualProfile: {
+      visualAura: "dangerous high-voltage charm",
+      eyes: "sharp challenging eyes",
+      hair: "sleek dark hair",
+      style: "bold private-night confidence",
+      signatureDetail: "a look that feels like a dare before the first line",
+    },
     scenarioStarters: [
       {
         title: "Provocative Reunion",
