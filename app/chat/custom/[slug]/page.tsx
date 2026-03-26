@@ -5,21 +5,28 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
+import CharacterInfoPanel from "@/components/chat/character-info-panel";
+import ChatShellNav from "@/components/chat/chat-shell-nav";
+import ChatSidebarRail from "@/components/chat/chat-sidebar-rail";
+import MessageRichText from "@/components/chat/message-rich-text";
 import {
-  ensureGreetingMessage,
-  getMyCustomCharacterBySlug,
-  getOrCreateConversationForCharacter,
-  insertConversationMessage,
-  listConversationMessages,
-  resetConversation,
   type DbCustomCharacter,
   type DbCustomConversation,
   type DbCustomMessage,
 } from "@/lib/account";
 import {
+  createSupabaseStorageSigner,
+  resolveCharacterPrimaryImage,
+} from "@/lib/character-image-assets";
+import {
+  formatVisibleArchetypeLabel,
   getIdentitySummary,
-  getVisibilityFromPayload,
 } from "@/lib/custom-character-studio";
+import { normalizeVisibleHeadline } from "@/lib/custom-character-copy";
+import {
+  buildLegacyRebuildHref,
+  getLegacyCharacterState,
+} from "@/lib/legacy-character-state";
 import { supabase } from "@/lib/supabase";
 
 const AuthGuard = dynamic(() => import("@/components/auth/auth-guard"), {
@@ -40,24 +47,48 @@ type BannerState =
   | { type: "success"; message: string }
   | null;
 
-type InsightTab = "scene" | "identity" | "engine";
 type SessionState = "fresh" | "active";
 type RetentionState = "fresh-start" | "warming-up" | "settled-in" | "ongoing";
-type SidebarConversationItem = {
-  id: string;
-  slug: string;
-  name: string;
-  title: string;
-  lastMessage: string;
-  updatedAt: string;
-  imageUrl: string | null;
+
+const LIVE_TUNING_OPTIONS = [
+  "more jealous",
+  "softer",
+  "colder",
+  "slower burn",
+  "more protective",
+  "more teasing",
+  "more dominant",
+  "more emotionally open",
+] as const;
+
+const REPLY_FEEDBACK_OPTIONS = [
+  { key: "perfect", label: "Perfect" },
+  { key: "too_generic", label: "Too generic" },
+  { key: "too_fast", label: "Too fast" },
+  { key: "too_cold", label: "Too cold" },
+  { key: "too_weak", label: "Too weak" },
+  { key: "too_intense", label: "Too intense" },
+] as const;
+
+type LiveTuningState = {
+  adjustments: string[];
+  rejectLastReplyStyle: boolean;
+  rejectedReplyExcerpt?: string;
 };
-type PublicSampleItem = {
-  id: string;
-  slug: string;
-  name: string;
-  summary: string;
-  imageUrl: string | null;
+
+type ReplyFeedbackKey =
+  | "perfect"
+  | "too_generic"
+  | "too_fast"
+  | "too_cold"
+  | "too_weak"
+  | "too_intense";
+
+type ReplyCorrectionState = {
+  latestRating?: ReplyFeedbackKey;
+  recentRatings: ReplyFeedbackKey[];
+  activeCorrectionSummary: string[];
+  targetExcerpt?: string;
 };
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -66,7 +97,9 @@ function cn(...classes: Array<string | false | null | undefined>) {
 
 function clean(value?: string | null) {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
+  if (!trimmed) return undefined;
+  const lowered = trimmed.toLowerCase();
+  return lowered === "undefined" || lowered === "null" ? undefined : trimmed;
 }
 
 function mapDbMessage(message: DbCustomMessage): ChatMessage {
@@ -93,16 +126,6 @@ function formatRelativeTime(value: string) {
 
   const diffDays = Math.round(diffHours / 24);
   return `${diffDays}d ago`;
-}
-
-function truncate(value: string | undefined, max = 88) {
-  if (!value) return "";
-  return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
-}
-
-function getInitials(value: string) {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "AI";
 }
 
 function getSessionState(messages: ChatMessage[]): SessionState {
@@ -142,6 +165,12 @@ function getRetentionLabel(state: RetentionState) {
   }
 }
 
+function getRetentionTone(state: RetentionState): "neutral" | "success" | "warm" {
+  if (state === "fresh-start") return "warm";
+  if (state === "warming-up") return "warm";
+  return "success";
+}
+
 function getRetentionHint(state: RetentionState) {
   switch (state) {
     case "fresh-start":
@@ -161,6 +190,67 @@ function toRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function getStoredLiveTuning(value: unknown): LiveTuningState {
+  const record = toRecord(value);
+  const tone = toRecord(record.toneState ?? record.tone_state);
+
+  const adjustments = Array.isArray(tone.live_tuning_preferences)
+    ? tone.live_tuning_preferences
+        .map((item) => (typeof item === "string" ? clean(item) : ""))
+        .filter((item): item is string => Boolean(item))
+    : [];
+
+  return {
+    adjustments,
+    rejectLastReplyStyle: tone.live_tuning_reject_last_style === true,
+    rejectedReplyExcerpt:
+      typeof tone.live_tuning_rejected_excerpt === "string"
+        ? clean(tone.live_tuning_rejected_excerpt)
+        : undefined,
+  };
+}
+
+function getStoredReplyCorrection(value: unknown): ReplyCorrectionState {
+  const record = toRecord(value);
+  const tone = toRecord(record.toneState ?? record.tone_state);
+
+  const recentRatings = Array.isArray(tone.reply_feedback_history)
+    ? tone.reply_feedback_history.filter(
+        (item): item is ReplyFeedbackKey =>
+          item === "perfect" ||
+          item === "too_generic" ||
+          item === "too_fast" ||
+          item === "too_cold" ||
+          item === "too_weak" ||
+          item === "too_intense",
+      )
+    : [];
+
+  const latestRating =
+    tone.reply_feedback_latest === "perfect" ||
+    tone.reply_feedback_latest === "too_generic" ||
+    tone.reply_feedback_latest === "too_fast" ||
+    tone.reply_feedback_latest === "too_cold" ||
+    tone.reply_feedback_latest === "too_weak" ||
+    tone.reply_feedback_latest === "too_intense"
+      ? tone.reply_feedback_latest
+      : undefined;
+
+  return {
+    latestRating,
+    recentRatings,
+    activeCorrectionSummary: Array.isArray(tone.reply_feedback_active_summary)
+      ? tone.reply_feedback_active_summary
+          .map((item) => (typeof item === "string" ? clean(item) : ""))
+          .filter((item): item is string => Boolean(item))
+      : [],
+    targetExcerpt:
+      typeof tone.reply_feedback_target_excerpt === "string"
+        ? clean(tone.reply_feedback_target_excerpt)
+        : undefined,
+  };
+}
+
 function getOpeningData(character: DbCustomCharacter) {
   const payload = toRecord(character.payload);
   const openingPack = toRecord(payload.openingPack);
@@ -177,6 +267,18 @@ function getOpeningData(character: DbCustomCharacter) {
   };
 }
 
+function readIdentityField(payload: Record<string, unknown> | null, key: string) {
+  if (!payload || typeof payload !== "object") return "";
+
+  const identity =
+    typeof payload.identity === "object" && payload.identity
+      ? (payload.identity as Record<string, unknown>)
+      : null;
+
+  const value = identity?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function getCharacterSummary(character: DbCustomCharacter) {
   return (
     clean(character.preview_message) ||
@@ -186,164 +288,107 @@ function getCharacterSummary(character: DbCustomCharacter) {
   );
 }
 
-async function fetchPrimaryAvatarUrl(characterId: string): Promise<string | null> {
-  const { data: imageRow, error: imageError } = await supabase
+async function fetchPrimaryAvatarUrl(
+  characterId: string,
+  fallbackUrl?: string | null,
+): Promise<string | null> {
+  const { data: imageRows, error: imageError } = await supabase
     .from("character_images")
-    .select("public_url")
+    .select(
+      "id, character_id, storage_bucket, storage_path, public_url, is_primary, image_type, created_at",
+    )
     .eq("character_id", characterId)
-    .eq("is_primary", true)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(8);
 
-  const safeImageRow =
-    typeof imageRow === "object" && imageRow !== null
-      ? (imageRow as { public_url?: string | null })
-      : null;
-
-  if (imageError || !safeImageRow?.public_url) {
-    return null;
+  if (imageError || !Array.isArray(imageRows)) {
+    return fallbackUrl ?? null;
   }
 
-  return safeImageRow.public_url;
-}
-
-async function fetchPrimaryImageMap(characterIds: string[]): Promise<Map<string, string>> {
-  if (characterIds.length === 0) {
-    return new Map();
-  }
-
-  const { data, error } = await supabase
-    .from("character_images")
-    .select("character_id, public_url, created_at")
-    .in("character_id", characterIds)
-    .eq("is_primary", true)
-    .order("created_at", { ascending: false });
-
-  if (error || !Array.isArray(data)) {
-    return new Map();
-  }
-
-  const result = new Map<string, string>();
-
-  for (const row of data as Array<{ character_id?: string; public_url?: string | null }>) {
-    if (!row.character_id || !row.public_url || result.has(row.character_id)) continue;
-    result.set(row.character_id, row.public_url);
-  }
-
-  return result;
-}
-
-async function fetchSidebarConversations(): Promise<SidebarConversationItem[]> {
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
-    return [];
-  }
-
-  const { data: conversations, error: conversationsError } = await supabase
-    .from("custom_conversations")
-    .select("id, custom_character_id, title, updated_at")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false })
-    .limit(14);
-
-  if (conversationsError || !conversations?.length) {
-    return [];
-  }
-
-  const characterIds = conversations
-    .map((item) => item.custom_character_id)
-    .filter((value): value is string => typeof value === "string" && value.length > 0);
-
-  const conversationIds = conversations
-    .map((item) => item.id)
-    .filter((value): value is string => typeof value === "string" && value.length > 0);
-
-  const [{ data: characters }, { data: messages }, imageMap] = await Promise.all([
-    supabase
-      .from("custom_characters")
-      .select("id, slug, name")
-      .eq("user_id", user.id)
-      .in("id", characterIds),
-    supabase
-      .from("custom_messages")
-      .select("conversation_id, content, created_at")
-      .eq("user_id", user.id)
-      .in("conversation_id", conversationIds)
-      .order("created_at", { ascending: false }),
-    fetchPrimaryImageMap(characterIds),
-  ]);
-
-  const characterMap = new Map(
-    (characters ?? []).map((item) => [
-      item.id,
-      {
-        slug: typeof item.slug === "string" ? item.slug : "",
-        name: typeof item.name === "string" ? item.name : "Character",
-        imageUrl: imageMap.get(item.id) ?? null,
-      },
-    ]),
-  );
-
-  const lastMessageMap = new Map<string, { content: string; createdAt: string }>();
-  for (const item of messages ?? []) {
-    if (lastMessageMap.has(item.conversation_id)) continue;
-    lastMessageMap.set(item.conversation_id, {
-      content: typeof item.content === "string" ? item.content : "",
-      createdAt: typeof item.created_at === "string" ? item.created_at : "",
-    });
-  }
-
-  return conversations.map((item) => {
-    const match = characterMap.get(item.custom_character_id);
-    const lastMessage = lastMessageMap.get(item.id);
-
-    return {
-      id: item.id,
-      slug: match?.slug || "",
-      name: match?.name || (typeof item.title === "string" ? item.title : "Character"),
-      title: typeof item.title === "string" ? item.title : match?.name || "Character",
-      lastMessage: truncate(lastMessage?.content || "No messages yet.", 72),
-      updatedAt: lastMessage?.createdAt || (typeof item.updated_at === "string" ? item.updated_at : ""),
-      imageUrl: match?.imageUrl ?? null,
-    };
+  const resolved = await resolveCharacterPrimaryImage({
+    rows: imageRows as Array<{
+      id?: string | null;
+      character_id: string | null;
+      storage_bucket?: string | null;
+      storage_path?: string | null;
+      public_url: string | null;
+      is_primary?: boolean | null;
+      image_type?: string | null;
+      created_at?: string | null;
+    }>,
+    signUrl: createSupabaseStorageSigner(supabase as never),
+    fallbackUrl,
   });
+
+  return resolved?.resolvedUrl ?? fallbackUrl ?? null;
 }
 
-async function fetchPublicSamples(): Promise<PublicSampleItem[]> {
-  const { data, error } = await supabase
-    .from("custom_characters")
-    .select("id, slug, name, headline, description, payload")
-    .eq("payload->>visibility", "public")
-    .order("updated_at", { ascending: false })
-    .limit(4);
+async function fetchConversationMessages(
+  conversationId: string,
+): Promise<DbCustomMessage[]> {
+  const response = await fetch(
+    `/api/custom-chat/messages?conversationId=${encodeURIComponent(conversationId)}`,
+    {
+      credentials: "include",
+    },
+  );
+  const payload = (await response.json().catch(() => null)) as
+    | { ok?: boolean; error?: string; messages?: DbCustomMessage[] }
+    | null;
 
-  if (error || !data) {
-    return [];
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || "Could not load messages.");
   }
 
-  const imageMap = await fetchPrimaryImageMap(
-    data
-      .map((item) => item.id)
-      .filter((value): value is string => typeof value === "string" && value.length > 0),
-  );
+  return Array.isArray(payload.messages) ? payload.messages : [];
+}
 
-  return data.map((item) => ({
-    id: item.id,
-    slug: typeof item.slug === "string" ? item.slug : "",
-    name: typeof item.name === "string" ? item.name : "Character",
-    summary: truncate(
-      (typeof item.headline === "string" && item.headline) ||
-        (typeof item.description === "string" && item.description) ||
-        "Open the public card to see the full vibe.",
-      82,
-    ),
-    imageUrl: imageMap.get(item.id) ?? null,
-  }));
+async function createConversationMessage(args: {
+  conversationId: string;
+  role: "user" | "assistant";
+  content: string;
+}) {
+  const response = await fetch("/api/custom-chat/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify(args),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | { ok?: boolean; error?: string; message?: DbCustomMessage }
+    | null;
+
+  if (!response.ok || !payload?.ok || !payload.message) {
+    throw new Error(payload?.error || "Could not save message.");
+  }
+
+  return payload.message;
+}
+
+async function resetConversationWithServer(args: {
+  conversationId: string;
+}) {
+  const response = await fetch("/api/custom-chat/reset", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify(args),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | { ok?: boolean; error?: string; messages?: DbCustomMessage[] }
+    | null;
+
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || "Could not reset conversation.");
+  }
+
+  return Array.isArray(payload.messages) ? payload.messages : [];
 }
 
 function StatusBadge({
@@ -367,156 +412,6 @@ function StatusBadge({
   );
 }
 
-function MiniStat({ label, value }: { label: string; value?: string }) {
-  if (!value) return null;
-
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-        {label}
-      </div>
-      <div className="mt-2 text-sm leading-6 text-white/75">{value}</div>
-    </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full px-4 py-2 text-sm transition",
-        active
-          ? "bg-white text-black"
-          : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function InsightPanel({
-  activeTab,
-  setActiveTab,
-  character,
-}: {
-  activeTab: InsightTab;
-  setActiveTab: (tab: InsightTab) => void;
-  character: DbCustomCharacter;
-}) {
-  const payload =
-    typeof character.payload === "object" && character.payload
-      ? (character.payload as Record<string, unknown>)
-      : {};
-
-  const sceneItems = [
-    { label: "Setting", value: clean(character.scenario?.setting) },
-    {
-      label: "Relationship",
-      value: clean(character.scenario?.relationshipToUser),
-    },
-    { label: "Scene goal", value: clean(character.scenario?.sceneGoal) },
-    { label: "Tone", value: clean(character.scenario?.tone) },
-    { label: "Opening", value: clean(character.scenario?.openingState) },
-  ].filter((item) => item.value);
-
-  const identityItems = getIdentitySummary(payload);
-  const visibility = getVisibilityFromPayload(payload);
-  const openingData = getOpeningData(character);
-
-  const engine =
-    typeof payload.engine === "object" && payload.engine
-      ? (payload.engine as Record<string, unknown>)
-      : null;
-
-  const systemPromptPreview =
-    engine && typeof engine.systemPrompt === "string"
-      ? engine.systemPrompt.slice(0, 500).trim()
-      : "";
-
-  return (
-    <aside className="space-y-4 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-      <div className="flex flex-wrap gap-3">
-        <TabButton active={activeTab === "scene"} onClick={() => setActiveTab("scene")}>
-          Scene
-        </TabButton>
-        <TabButton
-          active={activeTab === "identity"}
-          onClick={() => setActiveTab("identity")}
-        >
-          Identity
-        </TabButton>
-        <TabButton active={activeTab === "engine"} onClick={() => setActiveTab("engine")}>
-          Engine
-        </TabButton>
-      </div>
-
-      {activeTab === "scene" ? (
-        sceneItems.length > 0 || openingData.openingSummary || openingData.openingBeat ? (
-          <div className="grid gap-3">
-            {openingData.openingSummary ? (
-              <MiniStat label="Opening summary" value={openingData.openingSummary} />
-            ) : null}
-            {openingData.openingBeat ? (
-              <MiniStat label="Opening beat" value={openingData.openingBeat} />
-            ) : null}
-            {sceneItems.map((item) => (
-              <MiniStat key={item.label} label={item.label} value={item.value} />
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
-            No scene details were added yet.
-          </div>
-        )
-      ) : null}
-
-      {activeTab === "identity" ? (
-        <div className="space-y-3">
-          <MiniStat label="Archetype" value={character.archetype} />
-          <MiniStat label="Visibility" value={visibility} />
-          <MiniStat
-            label="Identity anchors"
-            value={identityItems.length > 0 ? identityItems.join(" • ") : "None"}
-          />
-          <MiniStat label="Headline" value={character.headline} />
-        </div>
-      ) : null}
-
-      {activeTab === "engine" ? (
-        <div className="space-y-3">
-          <MiniStat
-            label="Generated engine prompt"
-            value={
-              systemPromptPreview
-                ? `${systemPromptPreview}${systemPromptPreview.length >= 500 ? "…" : ""}`
-                : "No saved prompt yet."
-            }
-          />
-          <MiniStat
-            label="Trait badges"
-            value={
-              character.trait_badges?.length
-                ? character.trait_badges.map((item) => item.label).join(" • ")
-                : "No saved traits"
-            }
-          />
-        </div>
-      ) : null}
-    </aside>
-  );
-}
-
 export default function CustomCharacterChatPage() {
   const params = useParams<{ slug?: string | string[] }>();
   const slug =
@@ -534,12 +429,18 @@ export default function CustomCharacterChatPage() {
   const [sending, setSending] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
-  const [activeTab, setActiveTab] = useState<InsightTab>("scene");
   const [justReset, setJustReset] = useState(false);
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
-  const [sidebarChats, setSidebarChats] = useState<SidebarConversationItem[]>([]);
-  const [publicSamples, setPublicSamples] = useState<PublicSampleItem[]>([]);
   const [sceneSetup, setSceneSetup] = useState("");
+  const [liveTuning, setLiveTuning] = useState<LiveTuningState>({
+    adjustments: [],
+    rejectLastReplyStyle: false,
+  });
+  const [replyCorrection, setReplyCorrection] = useState<ReplyCorrectionState>({
+    recentRatings: [],
+    activeCorrectionSummary: [],
+  });
+  const [showControls, setShowControls] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const identitySummary = useMemo(() => {
@@ -557,9 +458,78 @@ export default function CustomCharacterChatPage() {
     () => (character ? getOpeningData(character) : { openingSummary: undefined, openingBeat: undefined }),
     [character],
   );
+  const visibleHeadline = useMemo(
+    () =>
+      normalizeVisibleHeadline(
+        character?.headline,
+        clean(character?.archetype),
+        clean(character?.scenario?.setting),
+      ) || "",
+    [character],
+  );
   const characterSummary = useMemo(
     () => (character ? getCharacterSummary(character) : ""),
     [character],
+  );
+  const payloadRecord = useMemo(
+    () =>
+      character && typeof character.payload === "object" && character.payload
+        ? (character.payload as Record<string, unknown>)
+        : null,
+    [character],
+  );
+  const ageLabel = useMemo(() => readIdentityField(payloadRecord, "age"), [payloadRecord]);
+  const storySummary = useMemo(
+    () =>
+      character
+        ? clean(character.description) ||
+          visibleHeadline ||
+          clean(character.backstory) ||
+          characterSummary
+        : "",
+    [character, characterSummary, visibleHeadline],
+  );
+  const scenarioSummary = useMemo(() => {
+    if (!character) return "";
+
+    return [
+      clean(character.scenario?.relationshipToUser),
+      clean(character.scenario?.setting),
+      clean(character.scenario?.tone),
+      clean(character.scenario?.sceneGoal),
+      openingData.openingSummary,
+    ]
+      .filter(Boolean)
+      .join(" • ");
+  }, [character, openingData.openingSummary]);
+  const roleLabel = useMemo(
+    () =>
+      formatVisibleArchetypeLabel(clean(character?.archetype)) ||
+      visibleHeadline ||
+      "",
+    [character, visibleHeadline],
+  );
+  const panelIdentityChips = useMemo(() => identitySummary.slice(0, 4), [identitySummary]);
+  const lastAssistantReply = useMemo(
+    () => [...messages].reverse().find((message) => message.role === "assistant") ?? null,
+    [messages],
+  );
+  const legacyCharacterState = useMemo(
+    () =>
+      character
+        ? getLegacyCharacterState({
+            styleType: character.style_type,
+            payload: character.payload,
+          })
+        : null,
+    [character],
+  );
+  const legacyRebuildHref = useMemo(
+    () =>
+      character && legacyCharacterState?.rebuildEligible
+        ? buildLegacyRebuildHref(character.id)
+        : null,
+    [character, legacyCharacterState],
   );
 
   useEffect(() => {
@@ -584,25 +554,40 @@ export default function CustomCharacterChatPage() {
       setJustReset(false);
 
       try {
-        const loadedCharacter = await getMyCustomCharacterBySlug(slug);
-        if (!loadedCharacter) {
-          throw new Error("CHARACTER_NOT_FOUND");
+        const response = await fetch(
+          `/api/custom-chat/bootstrap?slug=${encodeURIComponent(slug)}`,
+          {
+            credentials: "include",
+          },
+        );
+        const payload = (await response.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              error?: string;
+              character?: DbCustomCharacter;
+              conversation?: DbCustomConversation;
+              messages?: DbCustomMessage[];
+              memoryState?: unknown;
+              liveTuning?: LiveTuningState;
+              replyCorrection?: ReplyCorrectionState;
+              avatarUrl?: string | null;
+            }
+          | null;
+
+        if (!response.ok || !payload?.ok || !payload.character || !payload.conversation) {
+          throw new Error(payload?.error || "Could not load chat.");
         }
-
-        const loadedConversation = await getOrCreateConversationForCharacter(
-          loadedCharacter,
-        );
-
-        const seededMessages = await ensureGreetingMessage(
-          loadedConversation.id,
-          loadedCharacter.greeting,
-        );
 
         if (cancelled) return;
 
-        setCharacter(loadedCharacter);
-        setConversation(loadedConversation);
-        setMessages(seededMessages.map(mapDbMessage));
+        setCharacter(payload.character);
+        setConversation(payload.conversation);
+        setMessages((payload.messages ?? []).map(mapDbMessage));
+        setCurrentAvatarUrl(payload.avatarUrl ?? payload.character.primary_image_url ?? null);
+        setLiveTuning(payload.liveTuning ?? getStoredLiveTuning(payload.memoryState));
+        setReplyCorrection(
+          payload.replyCorrection ?? getStoredReplyCorrection(payload.memoryState),
+        );
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Could not load chat.";
@@ -612,7 +597,7 @@ export default function CustomCharacterChatPage() {
           message:
             message === "CHARACTER_NOT_FOUND"
               ? "This character does not exist for the current account."
-              : message === "AUTH_REQUIRED"
+                : message === "AUTH_REQUIRED"
                 ? "You need to log in to open this chat."
                 : message,
         });
@@ -631,34 +616,6 @@ export default function CustomCharacterChatPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadSidebar() {
-      try {
-        const [nextChats, nextPublicSamples] = await Promise.all([
-          fetchSidebarConversations(),
-          fetchPublicSamples(),
-        ]);
-
-        if (cancelled) return;
-
-        setSidebarChats(nextChats);
-        setPublicSamples(nextPublicSamples);
-      } catch {
-        if (cancelled) return;
-        setSidebarChats([]);
-        setPublicSamples([]);
-      }
-    }
-
-    void loadSidebar();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
     async function loadAvatar() {
       if (!character?.id) {
         setCurrentAvatarUrl(null);
@@ -666,10 +623,13 @@ export default function CustomCharacterChatPage() {
       }
 
       try {
-        const nextUrl = await fetchPrimaryAvatarUrl(character.id);
+        const nextUrl = await fetchPrimaryAvatarUrl(
+          character.id,
+          character.primary_image_url ?? null,
+        );
         if (!cancelled) setCurrentAvatarUrl(nextUrl);
       } catch {
-        if (!cancelled) setCurrentAvatarUrl(null);
+        if (!cancelled) setCurrentAvatarUrl(character.primary_image_url ?? null);
       }
     }
 
@@ -678,10 +638,10 @@ export default function CustomCharacterChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [character?.id]);
+  }, [character?.id, character?.primary_image_url]);
 
   async function refreshMessages(conversationId: string) {
-    const latest = await listConversationMessages(conversationId);
+    const latest = await fetchConversationMessages(conversationId);
     setMessages(latest.map(mapDbMessage));
   }
 
@@ -706,19 +666,17 @@ export default function CustomCharacterChatPage() {
     setInput("");
 
     try {
-      await insertConversationMessage(conversation.id, "user", trimmed);
+      await createConversationMessage({
+        conversationId: conversation.id,
+        role: "user",
+        content: trimmed,
+      });
 
-      const latestBeforeReply = await listConversationMessages(conversation.id);
+      const latestBeforeReply = await fetchConversationMessages(conversation.id);
       const apiMessages = latestBeforeReply.map((message) => ({
         role: message.role,
         content: message.content,
       }));
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      const accessToken = session?.access_token ?? "";
 
       const response = await fetch("/api/chat/custom", {
         method: "POST",
@@ -727,8 +685,14 @@ export default function CustomCharacterChatPage() {
         },
         body: JSON.stringify({
           conversationId: conversation.id,
-          accessToken,
           liveScenario: sceneSetup,
+          liveTuning,
+          replyFeedback: replyCorrection.latestRating
+            ? {
+                rating: replyCorrection.latestRating,
+                targetExcerpt: replyCorrection.targetExcerpt,
+              }
+            : undefined,
           character: {
             id: character.id,
             slug: character.slug,
@@ -765,9 +729,17 @@ export default function CustomCharacterChatPage() {
         throw new Error(data?.error || "Could not generate reply.");
       }
 
+      setLiveTuning(
+        data.liveTuning ?? {
+          ...liveTuning,
+          ...getStoredLiveTuning(data.memoryState),
+        },
+      );
+      setReplyCorrection(
+        data.replyCorrection ?? getStoredReplyCorrection(data.memoryState),
+      );
+
       await refreshMessages(conversation.id);
-      const nextChats = await fetchSidebarConversations();
-      setSidebarChats(nextChats);
     } catch (error) {
       setMessages((current) =>
         current.filter((item) => item.id !== optimisticUserMessage.id),
@@ -782,6 +754,15 @@ export default function CustomCharacterChatPage() {
     }
   }
 
+  function handleComposerKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ) {
+    if (event.key !== "Enter" || event.shiftKey) return;
+
+    event.preventDefault();
+    void handleSend();
+  }
+
   async function handleReset() {
     if (!character || !conversation || resetting) return;
 
@@ -789,15 +770,20 @@ export default function CustomCharacterChatPage() {
     setBanner(null);
 
     try {
-      const nextMessages = await resetConversation(
-        conversation.id,
-        character.greeting,
-      );
+      const nextMessages = await resetConversationWithServer({
+        conversationId: conversation.id,
+      });
 
       setMessages(nextMessages.map(mapDbMessage));
+      setLiveTuning({
+        adjustments: [],
+        rejectLastReplyStyle: false,
+      });
+      setReplyCorrection({
+        recentRatings: [],
+        activeCorrectionSummary: [],
+      });
       setJustReset(true);
-      const nextChats = await fetchSidebarConversations();
-      setSidebarChats(nextChats);
       setBanner({
         type: "success",
         message: "Reset completed. This chat is fresh again.",
@@ -809,6 +795,61 @@ export default function CustomCharacterChatPage() {
     } finally {
       setResetting(false);
     }
+  }
+
+  function toggleLiveTuningAdjustment(adjustment: string) {
+    setLiveTuning((current) => {
+      const exists = current.adjustments.includes(adjustment);
+      return {
+        ...current,
+        adjustments: exists
+          ? current.adjustments.filter((item) => item !== adjustment)
+          : [...current.adjustments, adjustment],
+      };
+    });
+  }
+
+  function markLastReplyStyleRejected() {
+    if (!lastAssistantReply) return;
+
+    setLiveTuning((current) => ({
+      ...current,
+      rejectLastReplyStyle: true,
+      rejectedReplyExcerpt: lastAssistantReply.content.slice(0, 220),
+    }));
+    setBanner({
+      type: "success",
+      message:
+        "Reply style feedback saved. The next answer will avoid this tone and rhythm.",
+    });
+  }
+
+  function applyReplyFeedback(rating: ReplyFeedbackKey) {
+    if (!lastAssistantReply) return;
+
+    const nextRecentRatings = [...replyCorrection.recentRatings, rating].slice(-4);
+    setReplyCorrection({
+      latestRating: rating,
+      recentRatings: nextRecentRatings,
+      activeCorrectionSummary: [],
+      targetExcerpt: lastAssistantReply.content.slice(0, 220),
+    });
+    setBanner({
+      type: "success",
+      message: `Reply feedback saved: ${rating.replaceAll("_", " ")}.`,
+    });
+  }
+
+  function clearLiveTuning() {
+    setLiveTuning({
+      adjustments: [],
+      rejectLastReplyStyle: false,
+      rejectedReplyExcerpt: undefined,
+    });
+    setBanner({
+      type: "success",
+      message: "Live tuning cleared for this conversation.",
+    });
   }
 
   if (loading) {
@@ -847,221 +888,70 @@ export default function CustomCharacterChatPage() {
   return (
     <AuthGuard>
       <main className="min-h-screen bg-[#050816] text-white">
-        <div className="mx-auto max-w-[1600px] px-4 py-6 md:px-6 md:py-8">
-          <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)_360px]">
-            <aside className="space-y-5">
-              <div className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 shadow-[0_20px_70px_rgba(0,0,0,0.22)]">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-fuchsia-200/80">
-                  Workspace
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Link
-                    href="/"
-                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
-                  >
-                    Home
-                  </Link>
-                  <Link
-                    href="/my-profile"
-                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
-                  >
-                    My Profile
-                  </Link>
-                  <Link
-                    href="/my-characters"
-                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
-                  >
-                    Library
-                  </Link>
-                </div>
-              </div>
+        <div className="mx-auto max-w-7xl px-4 py-4 md:px-6 md:py-6">
+          <div className="mb-4">
+            <ChatShellNav activeHref="/my-characters" />
+          </div>
 
-              <div className="rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.22)]">
-                <div className="mb-4 flex items-center justify-between gap-3 px-2">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-white/35">
-                      Chats
-                    </div>
-                    <div className="mt-1 text-sm text-white/60">
-                      Last message and avatar stay visible here.
-                    </div>
-                  </div>
-                  <Link
-                    href="/my-characters"
-                    className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75 transition hover:border-white/20 hover:bg-white/10"
-                  >
-                    Library
-                  </Link>
-                </div>
+          <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
+            <ChatSidebarRail activeHref={`/chat/custom/${slug}`} />
 
-                <div className="space-y-2">
-                  {sidebarChats.length > 0 ? (
-                    sidebarChats.map((item) => {
-                      const active = item.slug === character.slug;
-
-                      return (
-                        <Link
-                          key={item.id}
-                          href={item.slug ? `/chat/custom/${item.slug}` : "/my-characters"}
-                          className={cn(
-                            "flex items-center gap-3 rounded-[24px] border p-3 transition",
-                            active
-                              ? "border-fuchsia-400/30 bg-fuchsia-400/10"
-                              : "border-white/8 bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.05]",
-                          )}
-                        >
-                          <div className="relative h-14 w-14 overflow-hidden rounded-[18px] border border-white/10 bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
-                            {item.imageUrl ? (
-                              <Image
-                                src={item.imageUrl}
-                                alt={item.name}
-                                fill
-                                unoptimized
-                                sizes="56px"
-                                className="object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white/80">
-                                {getInitials(item.name)}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="truncate text-sm font-medium text-white">
-                                {item.name}
-                              </div>
-                              <div className="shrink-0 text-[11px] text-white/35">
-                                {formatRelativeTime(item.updatedAt)}
-                              </div>
-                            </div>
-                            <div className="mt-1 line-clamp-2 text-xs leading-5 text-white/55">
-                              {item.lastMessage}
-                            </div>
-                          </div>
-                        </Link>
-                      );
-                    })
-                  ) : (
-                    <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.03] p-4 text-sm text-white/55">
-                      Your chats will appear here as soon as you open them.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
-                <div className="mb-4 px-2">
-                  <div className="text-xs uppercase tracking-[0.18em] text-cyan-200/70">
-                    Community picks
-                  </div>
-                  <div className="mt-1 text-sm text-white/60">
-                    Public characters shared by other users.
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  {publicSamples.map((item) => (
-                    <Link
-                      key={item.id}
-                      href={item.slug ? `/community/${item.slug}` : "/community"}
-                      className="flex items-center gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] p-3 transition hover:border-white/15 hover:bg-white/[0.05]"
-                    >
-                      <div className="relative h-16 w-16 overflow-hidden rounded-[18px] border border-white/10 bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
-                        {item.imageUrl ? (
-                          <Image
-                            src={item.imageUrl}
-                            alt={item.name}
-                            fill
-                            unoptimized
-                            sizes="64px"
-                            className="object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white/80">
-                            {getInitials(item.name)}
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-white">{item.name}</div>
-                        <div className="mt-1 line-clamp-2 text-xs leading-5 text-white/55">
-                          {item.summary}
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            </aside>
-
-            <section className="space-y-5">
-              <div className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.24)]">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(244,114,182,0.14),transparent_24%),radial-gradient(circle_at_bottom_left,rgba(34,211,238,0.12),transparent_24%)]" />
-                <div className="relative flex flex-wrap items-start justify-between gap-4">
+            <section className="space-y-4">
+              <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.2)]">
+                <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.22em] text-fuchsia-200/80">
-                      Chat room
+                      Private chat
                     </div>
-                    <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">
+                    <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white">
                       {character.name}
                     </h1>
-                    <p className="mt-2 max-w-2xl text-sm leading-7 text-white/60">
-                      {character.headline || character.description}
+                    <p className="mt-2 max-w-2xl text-sm leading-7 text-white/58">
+                      {visibleHeadline || character.description || characterSummary}
+                    </p>
+                    <p className="mt-3 text-xs text-white/42">
+                      {sessionState === "fresh"
+                        ? `${character.name} is ready with the opening scene. ${getRetentionHint(retentionState)}`
+                        : `You are back inside the same thread with ${character.name}. ${getRetentionHint(retentionState)}`}
                     </p>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <StatusBadge label="Private chat saved" />
                     <StatusBadge
                       label={getRetentionLabel(retentionState)}
-                      tone={
-                        retentionState === "fresh-start" ||
-                        retentionState === "warming-up"
-                          ? "warm"
-                          : "success"
-                      }
+                      tone={getRetentionTone(retentionState)}
                     />
+                    {legacyCharacterState?.isLegacyAnime ? (
+                      <StatusBadge label="Legacy style" tone="warm" />
+                    ) : null}
                     {justReset ? <StatusBadge label="Reset completed" tone="success" /> : null}
+                    <button
+                      type="button"
+                      onClick={handleReset}
+                      disabled={resetting}
+                      className="rounded-full border border-amber-400/20 bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-100 transition hover:border-amber-400/35 hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {resetting ? "Resetting..." : "Reset"}
+                    </button>
                   </div>
-                </div>
-
-                {identitySummary.length > 0 ? (
-                  <div className="relative mt-4 flex flex-wrap gap-2">
-                    {identitySummary.map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100"
-                      >
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="relative mt-5 flex flex-wrap gap-3">
-                  <Link
-                    href="/my-characters"
-                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
-                  >
-                    My characters
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={handleReset}
-                    disabled={resetting}
-                    className="rounded-full border border-amber-400/20 bg-amber-400/10 px-4 py-2.5 text-sm text-amber-100 transition hover:border-amber-400/35 hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {resetting ? "Resetting..." : "Reset chat"}
-                  </button>
-                </div>
-                <div className="relative mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4 text-sm leading-7 text-white/68">
-                  {sessionState === "fresh"
-                    ? `${character.name} is ready with the opening scene. ${getRetentionHint(retentionState)}`
-                    : `You are back inside the same thread with ${character.name}. ${getRetentionHint(retentionState)}`}
                 </div>
               </div>
+
+              {legacyCharacterState?.isLegacyAnime ? (
+                <div className="rounded-[24px] border border-rose-400/20 bg-rose-400/10 p-4 text-sm leading-7 text-rose-50/92">
+                  This character came from an older anime-based flow. The saved chat and archive stay available, but new photo generation is frozen until you rebuild it as a realistic original.
+                  {legacyRebuildHref ? (
+                    <div className="mt-4">
+                      <Link
+                        href={legacyRebuildHref}
+                        className="inline-flex rounded-full bg-white px-4 py-2 text-sm font-medium text-black transition hover:opacity-90"
+                      >
+                        Rebuild as realistic
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               {banner ? (
                 <div
@@ -1076,47 +966,158 @@ export default function CustomCharacterChatPage() {
                 </div>
               ) : null}
 
-              <div className="rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.03))] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.22)]">
+              <div className="rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.22)] md:p-6">
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <div className="text-xs uppercase tracking-[0.18em] text-white/35">
                       Conversation
                     </div>
                     <div className="mt-1 text-sm text-white/60">
-                      Messages stay linked to this character and continue as one thread.
+                      Stay inside the same thread without losing the scene.
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowControls((current) => !current)}
+                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/75 transition hover:border-white/20 hover:bg-white/10"
+                  >
+                    {showControls ? "Hide controls" : "Adjust tone"}
+                  </button>
                 </div>
 
-                <div className="max-h-[62vh] space-y-4 overflow-y-auto pr-1">
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={cn(
-                        "rounded-[26px] border px-4 py-4 shadow-[0_18px_40px_rgba(0,0,0,0.12)]",
-                        message.role === "assistant"
-                          ? "mr-8 border-fuchsia-400/15 bg-[linear-gradient(180deg,rgba(244,114,182,0.14),rgba(244,114,182,0.08))]"
-                          : "ml-8 border-white/10 bg-black/25",
-                      )}
-                    >
-                      <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-white/35">
-                        {message.role === "assistant" ? character.name : "You"}
-                      </div>
-                      <div className="whitespace-pre-wrap text-sm leading-7 text-white/85">
-                        {message.content}
-                      </div>
-                      <div className="mt-2 text-xs text-white/35">
+                <div className="max-h-[64vh] space-y-4 overflow-y-auto pr-1">
+                  {messages.map((message, index) => {
+                    const isLatestAssistant =
+                      message.role === "assistant" &&
+                      index ===
+                        messages.map((item) => item.role).lastIndexOf("assistant");
+
+                    return (
+                      <div
+                        key={message.id}
+                        className={cn(
+                          "rounded-[28px] border px-4 py-4 shadow-[0_18px_40px_rgba(0,0,0,0.12)] md:px-5 md:py-5",
+                          message.role === "assistant"
+                            ? "mr-6 border-fuchsia-400/15 bg-[linear-gradient(180deg,rgba(244,114,182,0.14),rgba(244,114,182,0.08))] md:mr-10"
+                            : "ml-6 border-white/10 bg-black/25 md:ml-10",
+                        )}
+                      >
+                        <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-white/35">
+                          {message.role === "assistant" ? character.name : "You"}
+                        </div>
+                        <div className="text-sm leading-7">
+                          <MessageRichText content={message.content} tone="light" />
+                        </div>
+                      <div className="mt-3 text-xs text-white/35">
                         {formatRelativeTime(message.createdAt)}
                       </div>
+                        {isLatestAssistant ? (
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {REPLY_FEEDBACK_OPTIONS.map((option) => {
+                              const active = replyCorrection.latestRating === option.key;
+                              return (
+                                <button
+                                  key={option.key}
+                                  type="button"
+                                  onClick={() => applyReplyFeedback(option.key)}
+                                  className={cn(
+                                    "rounded-full border px-3 py-1.5 text-[11px] transition",
+                                    active
+                                      ? "border-cyan-400/30 bg-cyan-400/12 text-cyan-100"
+                                      : "border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10",
+                                  )}
+                                >
+                                  {option.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                  {sending ? (
+                    <div className="flex justify-start">
+                      <div className="flex max-w-[88%] items-end gap-3 md:max-w-[75%]">
+                        <div className="relative mb-1 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-white/10">
+                          {currentAvatarUrl ? (
+                            <Image
+                              src={currentAvatarUrl}
+                              alt={character.name}
+                              fill
+                              unoptimized
+                              sizes="36px"
+                              className="object-contain object-center"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white/85">
+                              {character.name.charAt(0)}
+                            </div>
+                          )}
+                        </div>
+                        <div className="rounded-[24px] rounded-bl-md border border-white/10 bg-white/[0.05] px-4 py-3 text-white shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
+                          <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/75">
+                            {character.name}
+                          </p>
+                          <div className="flex items-center gap-2 text-sm text-white/82">
+                            <span className="h-2 w-2 animate-pulse rounded-full bg-white/90" />
+                            <span className="h-2 w-2 animate-pulse rounded-full bg-white/75 [animation-delay:120ms]" />
+                            <span className="h-2 w-2 animate-pulse rounded-full bg-white/60 [animation-delay:240ms]" />
+                            <span className="text-sm lowercase tracking-[0.02em] text-white/78">
+                              typing...
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  ))}
+                  ) : null}
                   <div ref={bottomRef} />
                 </div>
 
-                <div className="mt-5 rounded-[28px] border border-white/10 bg-black/25 p-3">
+                <div className="mt-5 rounded-[30px] border border-white/10 bg-black/25 p-3 md:p-4">
+                  {showControls ? (
+                    <div className="mb-4 rounded-[24px] border border-white/10 bg-white/[0.03] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                        Adjust tone
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {LIVE_TUNING_OPTIONS.map((option) => {
+                          const active = liveTuning.adjustments.includes(option);
+                          return (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() => toggleLiveTuningAdjustment(option)}
+                              className={cn(
+                                "rounded-full border px-3 py-1.5 text-xs transition",
+                                active
+                                  ? "border-fuchsia-400/30 bg-fuchsia-400/12 text-fuchsia-100"
+                                  : "border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10",
+                              )}
+                            >
+                              {option}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-4">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                          Scene note
+                        </div>
+                        <textarea
+                          value={sceneSetup}
+                          onChange={(event) => setSceneSetup(event.target.value)}
+                          rows={3}
+                          placeholder="A short note to steer the mood or moment."
+                          className="mt-2 w-full resize-none rounded-[18px] border border-white/10 bg-black/25 px-3 py-3 text-sm leading-6 text-white outline-none placeholder:text-white/25"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                   <textarea
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
+                    onKeyDown={handleComposerKeyDown}
                     placeholder={
                       sessionState === "fresh"
                         ? "Start with something simple. The character already knows the scene."
@@ -1131,118 +1132,51 @@ export default function CustomCharacterChatPage() {
                         ? "A direct first line usually works best."
                         : getRetentionHint(retentionState)}
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleSend}
-                      disabled={sending || !input.trim()}
-                      className="rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black shadow-[0_14px_40px_rgba(255,255,255,0.1)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {sending ? "Sending..." : "Send message"}
-                    </button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={markLastReplyStyleRejected}
+                        disabled={!lastAssistantReply || sending}
+                        className="rounded-full border border-rose-400/20 bg-rose-400/10 px-4 py-2.5 text-xs font-medium text-rose-100 transition hover:border-rose-400/35 hover:bg-rose-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Not this reply style
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearLiveTuning}
+                        disabled={
+                          sending ||
+                          (!liveTuning.adjustments.length &&
+                            !liveTuning.rejectLastReplyStyle)
+                        }
+                        className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-medium text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Clear tuning
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSend}
+                        disabled={sending || !input.trim()}
+                        className="rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black shadow-[0_14px_40px_rgba(255,255,255,0.1)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {sending ? "Sending..." : "Send message"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             </section>
 
-            <aside className="space-y-5">
-              <div className="overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
-                <div className="relative aspect-[4/5] w-full bg-gradient-to-br from-fuchsia-500/20 via-slate-900 to-cyan-500/20">
-                  {currentAvatarUrl ? (
-                    <Image
-                      src={currentAvatarUrl}
-                      alt={`${character.name} avatar`}
-                      fill
-                      unoptimized
-                      sizes="(min-width: 1280px) 360px, 100vw"
-                      className="object-cover object-center"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-end p-6">
-                      <div className="rounded-[28px] border border-white/10 bg-black/35 px-5 py-4 backdrop-blur">
-                        <div className="text-sm font-medium text-white">{character.name}</div>
-                        <div className="mt-1 text-xs text-white/55">
-                          Avatar will appear here after generation.
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,22,0.72),transparent_45%)]" />
-                  <div className="absolute inset-x-0 bottom-0 p-5">
-                    <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/70">
-                        Character snapshot
-                      </div>
-                      <div className="mt-2 text-lg font-semibold text-white">{character.name}</div>
-                      <div className="mt-2 text-sm leading-6 text-white/72">{characterSummary}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                    Relationship
-                  </div>
-                  <div className="mt-2 text-sm leading-6 text-white/78">
-                    {clean(character.scenario?.relationshipToUser) || "Open-ended dynamic"}
-                  </div>
-                </div>
-                <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                    Scene
-                  </div>
-                  <div className="mt-2 text-sm leading-6 text-white/78">
-                    {clean(character.scenario?.setting) || "Private scene ready"}
-                  </div>
-                </div>
-              </div>
-
-              {(openingData.openingSummary || openingData.openingBeat) ? (
-                <div className="grid gap-3">
-                  {openingData.openingSummary ? (
-                    <div className="rounded-[28px] border border-fuchsia-400/15 bg-fuchsia-400/8 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/70">
-                        Opening summary
-                      </div>
-                      <div className="mt-2 text-sm leading-7 text-white/80">
-                        {openingData.openingSummary}
-                      </div>
-                    </div>
-                  ) : null}
-                  {openingData.openingBeat ? (
-                    <div className="rounded-[28px] border border-cyan-400/15 bg-cyan-400/8 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-100/70">
-                        Scene pulse
-                      </div>
-                      <div className="mt-2 text-sm leading-7 text-white/80">
-                        {openingData.openingBeat}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                  Scene setup
-                </div>
-                <div className="mt-2 text-sm leading-6 text-white/65">
-                  Add a short scene note here. The character will stay closer to this role, mood, and moment while replying.
-                </div>
-                <textarea
-                  value={sceneSetup}
-                  onChange={(event) => setSceneSetup(event.target.value)}
-                  rows={5}
-                  placeholder="Example: We are alone after a tense argument. She wants control of the moment but is still emotionally affected."
-                  className="mt-3 w-full resize-none rounded-[22px] border border-white/10 bg-black/25 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-white/25"
-                />
-              </div>
-
-              <InsightPanel
-                activeTab={activeTab}
-                setActiveTab={setActiveTab}
-                character={character}
+            <aside className="space-y-4">
+              <CharacterInfoPanel
+                avatarUrl={currentAvatarUrl}
+                name={character.name}
+                ageLabel={ageLabel}
+                roleLabel={roleLabel}
+                identityChips={panelIdentityChips}
+                storySummary={storySummary}
+                scenarioSummary={scenarioSummary}
+                photoStudioHref={`/photo-studio/custom/${character.slug}`}
               />
             </aside>
           </div>

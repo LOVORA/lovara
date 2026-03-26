@@ -1,3 +1,6 @@
+import type { SelectionPromptContract } from "@/lib/create-character/selection-prompt-contract";
+import type { PosePromptContract } from "@/lib/create-character/pose-prompt-contract";
+
 export type CharacterStyleType = "realistic" | "anime";
 export type CharacterBuilderMode = "preset" | "custom_prompt";
 
@@ -15,8 +18,15 @@ export type CharacterBuilderStep =
   | "locks"
   | "review";
 
-export type CharacterAgeBand = "18-20" | "21-24" | "25-29" | "30-39" | "40+";
-export type CharacterOutputType = "portrait" | "selfie" | "full_body";
+export type CharacterAgeBand =
+  | "18-20"
+  | "21-24"
+  | "25-29"
+  | "30-39"
+  | "40-49"
+  | "50-59"
+  | "60-70";
+export type CharacterOutputType = "portrait" | "upper_body" | "selfie" | "full_body";
 export type CharacterConsistencyMode = "none" | "seed_only" | "reference_guided";
 export type CharacterConsistencyStrength = "strict" | "soft";
 
@@ -121,7 +131,7 @@ export type CharacterGenerationCandidate = {
 
 export type CharacterGenerationState = {
   status: CharacterGenerationStatus;
-  provider: "runware";
+  provider: "runware" | "runware_ideogram" | "xai";
   selectedModel: string | null;
   candidates: CharacterGenerationCandidate[];
   selectedCandidateId: string | null;
@@ -152,8 +162,13 @@ export type CharacterBuilderState = {
 };
 
 export type HiddenPromptEnginePresetSelections = {
+  ageValue?: number | null;
   ageBand?: CharacterAgeBand | "";
   region?: string;
+  profession?: string;
+  relationshipToUser?: string;
+  relationshipDynamic?: string;
+  behaviorMode?: string;
   skinTone?: string;
   genderPresentation?: string;
 
@@ -171,7 +186,9 @@ export type HiddenPromptEnginePresetSelections = {
 
   bodyType?: string;
   bustSize?: string;
+  breastType?: string;
   hipsType?: string;
+  buttSize?: string;
   heightImpression?: string;
   waistDefinition?: string;
 
@@ -184,13 +201,29 @@ export type HiddenPromptEnginePresetSelections = {
   exposureLevel?: string;
 
   sceneType?: string;
+  backgroundIntent?: string;
+  outfitIntent?: string;
+  nudityMode?: "covered" | "implied_nude" | "true_nude";
+  faceBias?: "neutral" | "soft_feminine";
+  bodyReadPriority?: "standard" | "high";
   cameraFraming?: string;
   lightingType?: string;
   poseEnergy?: string;
+  poseContract?: PosePromptContract;
   expression?: string;
   realismStrength?: string;
   detailLevel?: string;
   variationGoal?: string;
+  hobbies?: string;
+  fetishes?: string;
+  extraPersonalityDetails?: string;
+  extraPhysicalDetails?: string;
+  constitutionHints?: string[];
+  identityLockHints?: string[];
+  negativeConstitutionHints?: string[];
+  hiddenVisualSectionPrompts?: string[];
+  masterVisualPrompt?: string;
+  selectionPromptContract?: SelectionPromptContract;
 };
 
 export type HiddenPromptEngineCustomPrompt = {
@@ -210,12 +243,27 @@ export type HiddenPromptEngineInput = {
 export type PromptEngineModerationFlags = {
   needsBlock: boolean;
   reasons: string[];
+  matchedTerms?: string[];
+  blockedRequestReason?: string | null;
+  safetyDecision?: "allow" | "block";
+  suggestedOriginalAlternatives?: string[];
+  normalizedRequestProfile?: {
+    identityTokens: string[];
+    sceneTokens: string[];
+    styleTokens: string[];
+  };
 };
 
 export type PromptEngineGenerationHints = {
   outputType: CharacterOutputType;
   consistencyMode: CharacterConsistencyMode;
   safetyMode: "strict";
+  diversityMode?: "combinatorial_v2";
+  candidateStrategy?: "multi_prompt_spread";
+  choiceWeightVersion?: "life_stage_choice_weighting_v1";
+  lifeStageMode?: "adult_realism_v1";
+  behaviorDerivationMode?: "hidden_choice_weighting_v1";
+  selectionCompilerVersion?: "full_selection_compiler_v1";
 };
 
 export type PromptEngineIdentityLock = {

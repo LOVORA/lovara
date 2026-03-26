@@ -53,7 +53,7 @@ export function PublishSetupSection({
             </SegmentButton>
           </div>
           <p className="mt-3 text-sm leading-6 text-white/55">
-            Private characters stay in your vault only. Public characters keep
+            Private characters stay in your library only. Public characters keep
             the same internal structure but can be shared on a public page.
           </p>
         </div>
@@ -77,7 +77,7 @@ export function PublishSetupSection({
               label="Public tags"
               value={publicTags}
               onChange={onPublicTagsChange}
-              placeholder="slow burn, elegant, dangerous, luxury"
+              placeholder="slow burn, elegant, dangerous, magnetic"
             />
           </div>
         ) : (

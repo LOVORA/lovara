@@ -8,6 +8,32 @@ type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
+type CharacterRepositoryClient = {
+  from: (table: string) => {
+    select: (columns?: string) => {
+      eq: (column: string, value: unknown) => {
+        eq: (column: string, value: unknown) => {
+          maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+          select?: (columns?: string) => {
+            maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+          };
+        };
+        maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+      };
+      maybeSingle?: () => Promise<{ data: unknown; error: unknown }>;
+    };
+    update?: (values: unknown) => {
+      eq: (column: string, value: unknown) => {
+        eq: (column: string, value: unknown) => {
+          select: (columns?: string) => {
+            maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+          };
+        };
+      };
+    };
+  };
+};
+
 export type CustomCharacterVisibility = "private" | "public";
 export type CustomCharacterBuilderMode = "preset" | "custom_prompt" | null;
 export type CustomCharacterStyleType = "realistic" | "anime" | null;
@@ -118,6 +144,39 @@ function normalizeStringArray(value?: string[]): string[] {
 
 function asObjectJson(value: Json | undefined, fallback: Json): Json {
   return value ?? fallback;
+}
+
+function asError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === "string") return new Error(error);
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const message =
+      typeof record.message === "string" && record.message.trim().length > 0
+        ? record.message.trim()
+        : null;
+    const details =
+      typeof record.details === "string" && record.details.trim().length > 0
+        ? record.details.trim()
+        : null;
+    const hint =
+      typeof record.hint === "string" && record.hint.trim().length > 0
+        ? record.hint.trim()
+        : null;
+    const code =
+      typeof record.code === "string" && record.code.trim().length > 0
+        ? record.code.trim()
+        : null;
+
+    const parts = [message, details, hint, code ? `code: ${code}` : null].filter(
+      Boolean,
+    );
+
+    if (parts.length > 0) {
+      return new Error(parts.join(" | "));
+    }
+  }
+  return new Error("Unknown Supabase error");
 }
 
 function mapCustomCharacterRow(row: Record<string, unknown>): DbCustomCharacter {
@@ -255,7 +314,7 @@ export async function createCustomCharacter(
     .select("*")
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw asError(error);
   if (!data) throw new Error("Failed to create custom character.");
 
   return mapCustomCharacterRow(data as Record<string, unknown>);
@@ -272,7 +331,7 @@ export async function updateCustomCharacter(
     .select("*")
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw asError(error);
   if (!data) throw new Error("Failed to update custom character.");
 
   return mapCustomCharacterRow(data as Record<string, unknown>);
@@ -282,14 +341,26 @@ export async function getCustomCharacterById(
   characterId: string,
   userId: string,
 ): Promise<DbCustomCharacter | null> {
-  const { data, error } = await supabase
+  return getCustomCharacterByIdWithClient(
+    supabase as unknown as CharacterRepositoryClient,
+    characterId,
+    userId,
+  );
+}
+
+export async function getCustomCharacterByIdWithClient(
+  client: CharacterRepositoryClient,
+  characterId: string,
+  userId: string,
+): Promise<DbCustomCharacter | null> {
+  const { data, error } = await client
     .from("custom_characters")
     .select("*")
     .eq("id", characterId)
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw asError(error);
   if (!data) return null;
 
   return mapCustomCharacterRow(data as Record<string, unknown>);
@@ -299,14 +370,22 @@ export async function getCustomCharacterBySlug(
   slug: string,
   userId: string,
 ): Promise<DbCustomCharacter | null> {
-  const { data, error } = await supabase
+  return getCustomCharacterBySlugWithClient(supabase as unknown as CharacterRepositoryClient, slug, userId);
+}
+
+export async function getCustomCharacterBySlugWithClient(
+  client: CharacterRepositoryClient,
+  slug: string,
+  userId: string,
+): Promise<DbCustomCharacter | null> {
+  const { data, error } = await client
     .from("custom_characters")
     .select("*")
     .eq("slug", slug)
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw asError(error);
   if (!data) return null;
 
   return mapCustomCharacterRow(data as Record<string, unknown>);
@@ -322,7 +401,7 @@ export async function getPublicCustomCharacterByShareSlug(
     .eq("image_visibility", "public")
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw asError(error);
   if (!data) return null;
 
   return mapCustomCharacterRow(data as Record<string, unknown>);
@@ -337,13 +416,23 @@ export async function listUserCustomCharacters(
     .eq("user_id", userId)
     .order("updated_at", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw asError(error);
   if (!data) return [];
 
   return (data as Record<string, unknown>[]).map(mapCustomCharacterRow);
 }
 
 export async function setCustomCharacterImageLinks(
+  input: SetCharacterImageLinksInput,
+): Promise<DbCustomCharacter> {
+  return setCustomCharacterImageLinksWithClient(
+    supabase as unknown as CharacterRepositoryClient,
+    input,
+  );
+}
+
+export async function setCustomCharacterImageLinksWithClient(
+  client: CharacterRepositoryClient,
   input: SetCharacterImageLinksInput,
 ): Promise<DbCustomCharacter> {
   const updatePayload: Record<string, unknown> = {};
@@ -379,16 +468,32 @@ export async function setCustomCharacterImageLinks(
     updatePayload.consistency_status = input.consistencyStatus;
   }
 
-  const { data, error } = await supabase
-    .from("custom_characters")
+  const builder = client.from("custom_characters");
+  if (!builder.update) {
+    throw new Error("Character repository client does not support updates.");
+  }
+
+  const { data, error } = await builder
     .update(updatePayload)
     .eq("id", input.characterId)
     .eq("user_id", input.userId)
     .select("*")
     .maybeSingle();
 
-  if (error) throw error;
-  if (!data) throw new Error("Failed to update character image links.");
+  if (error) throw asError(error);
+  if (!data) {
+    const refreshed = await getCustomCharacterByIdWithClient(
+      client,
+      input.characterId,
+      input.userId,
+    );
+
+    if (!refreshed) {
+      throw new Error("Failed to update character image links.");
+    }
+
+    return refreshed;
+  }
 
   return mapCustomCharacterRow(data as Record<string, unknown>);
 }
@@ -420,7 +525,7 @@ export async function publishCustomCharacter(
     .select("*")
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw asError(error);
   if (!data) throw new Error("Failed to publish custom character.");
 
   return mapCustomCharacterRow(data as Record<string, unknown>);
@@ -436,5 +541,5 @@ export async function deleteCustomCharacter(
     .eq("id", characterId)
     .eq("user_id", userId);
 
-  if (error) throw error;
+  if (error) throw asError(error);
 }

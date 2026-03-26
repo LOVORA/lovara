@@ -17,12 +17,7 @@ export const CHARACTER_STYLE_OPTIONS: CharacterOption<CharacterStyleType>[] = [
   {
     value: "realistic",
     label: "Realistic",
-    description: "Photorealistic adult character generation with premium portrait styling.",
-  },
-  {
-    value: "anime",
-    label: "Anime",
-    description: "Stylized anime character generation with clean identity and expressive visuals.",
+    description: "Photorealistic adult character generation with natural body-readable styling.",
   },
 ];
 
@@ -66,7 +61,9 @@ export const CHARACTER_AGE_BAND_OPTIONS: CharacterOption<CharacterAgeBand>[] = [
   { value: "21-24", label: "21–24", description: "Prime young-adult range." },
   { value: "25-29", label: "25–29", description: "Mature young-adult range." },
   { value: "30-39", label: "30–39", description: "Confident adult presence." },
-  { value: "40+", label: "40+", description: "Mature, seasoned adult presence." },
+  { value: "40-49", label: "40–49", description: "Mature adult presence with visible life texture." },
+  { value: "50-59", label: "50–59", description: "Strong older-adult realism with settled presence." },
+  { value: "60-70", label: "60–70", description: "Clearly older adult with grounded mature features." },
 ];
 
 export const CHARACTER_REGION_OPTIONS: CharacterOption[] = [
@@ -390,7 +387,7 @@ export const CHARACTER_CUSTOM_PROMPT_HELPER_VIBE_OPTIONS: CharacterOption[] = [
 ];
 
 export const CHARACTER_OUTPUT_TYPE_OPTIONS: CharacterOption<CharacterOutputType>[] = [
-  { value: "portrait", label: "Portrait" },
+  { value: "upper_body", label: "Upper Body" },
   { value: "selfie", label: "Selfie" },
   { value: "full_body", label: "Full Body" },
 ];
@@ -398,7 +395,7 @@ export const CHARACTER_OUTPUT_TYPE_OPTIONS: CharacterOption<CharacterOutputType>
 export const CHARACTER_DEFAULTS = {
   styleType: "realistic" as CharacterStyleType,
   builderMode: "preset" as CharacterBuilderMode,
-  outputType: "portrait" as CharacterOutputType,
+  outputType: "upper_body" as CharacterOutputType,
   visibility: "private" as const,
   provider: "runware" as const,
   promptVersion: "v1",

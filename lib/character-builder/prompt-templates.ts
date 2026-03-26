@@ -3,6 +3,10 @@ import type {
   CharacterOutputType,
   CharacterStyleType,
 } from "./types";
+import {
+  REFERENCE_REALISM_NEGATIVE_ANCHORS,
+  REFERENCE_REALISM_POSITIVE_ANCHORS,
+} from "@/lib/create-character/reference-realism";
 
 export type PromptTemplateBlock = {
   identity: string[];
@@ -77,6 +81,34 @@ export const QUALITY_NEGATIVE_PROMPT_BLOCK: string[] = [
   "messy clothing edges",
   "floating accessories",
   "bad composition",
+  "static front-facing pose",
+  "centered passport pose",
+  "repeated body pose",
+  "rigid symmetrical stance",
+  "same expression every time",
+  "same hand placement",
+  "blank mannequin posture",
+  "stiff studio pose",
+  "same lens feel",
+  "same crop rhythm",
+  "same styling read",
+  "same location blocking",
+  "same mood every time",
+  "editorial clone shot",
+  "catalog pose repetition",
+  "stock photo energy",
+  "editorial fashion look",
+  "fashion shoot pose",
+  "editorial makeup",
+  "beauty campaign styling",
+  "overly cinematic lighting",
+  "surreal contrast",
+  "exaggerated glamour",
+  "stylized face symmetry",
+  "over-retouched face",
+  "wax skin",
+  "ai beauty filter look",
+  ...REFERENCE_REALISM_NEGATIVE_ANCHORS,
 ];
 
 export const SAFETY_NEGATIVE_PROMPT_BLOCK: string[] = [
@@ -93,6 +125,12 @@ export const SAFETY_NEGATIVE_PROMPT_BLOCK: string[] = [
   "celebrity",
   "public figure",
   "real person likeness",
+  "franchise character",
+  "copyrighted character",
+  "anime style mimic",
+  "manga style mimic",
+  "disney style mimic",
+  "pixar style mimic",
   "non-consensual",
   "coercion",
   "assault",
@@ -117,56 +155,101 @@ export const IDENTITY_NEGATIVE_PROMPT_BLOCK: string[] = [
   "facial feature drift",
   "different body type",
   "identity inconsistency",
+  "eye distance drift",
+  "jawline drift",
+  "nose shape drift",
+  "lip shape drift",
+  "silhouette drift",
+  "outfit overwhelms face identity",
 ];
 
 export const REALISTIC_QUALITY_BLOCK: string[] = [
-  "highly detailed realistic portrait",
+  ...REFERENCE_REALISM_POSITIVE_ANCHORS,
+  "natural realistic lifestyle photo",
   "clean anatomy",
   "natural skin texture",
   "sharp eyes",
   "detailed hair strands",
-  "premium lighting",
-  "elegant composition",
+  "bright natural realistic lighting",
+  "real-camera photo quality",
+  "practical light from believable windows or room fixtures",
+  "simple realistic composition",
   "photorealistic adult subject",
-];
-
-export const ANIME_QUALITY_BLOCK: string[] = [
-  "high-detail anime illustration",
-  "clean linework",
-  "polished anime shading",
-  "expressive eyes",
-  "clean anatomy",
-  "stylized adult character design",
-  "beautiful composition",
-  "premium anime render",
+  "coherent face structure",
+  "balanced facial proportions",
+  "consistent body proportions",
+  "real person proportions",
+  "clear subject separation",
+  "grounded facial realism",
+  "believable lens perspective",
+  "credible skin and body rendering",
+  "clean facial identity retention",
+  "non-stylized realistic photo finish",
+  "natural upper-body or full-body framing",
+  "daylight or practical indoor photo realism",
+  "high-clarity photo detail",
+  "lively natural color separation",
+  "healthy skin tone rendering",
+  "believable room and fabric detail",
+  "soft flattering but realistic facial light",
+  "simple lived-in background with believable depth",
+  "no heavy editorial grading or glossy glamour polish",
 ];
 
 export const REALISTIC_STYLE_BLOCK: string[] = [
   "photorealistic",
   "adult subject",
   "realistic skin detail",
-  "camera-aware composition",
-];
-
-export const ANIME_STYLE_BLOCK: string[] = [
-  "anime style",
-  "adult anime character",
-  "stylized beauty",
-  "clean illustration finish",
+  "natural photo realism",
+  "authentic lifestyle image",
+  "natural indoor lifestyle photography with real-camera warmth",
+  "soft flattering realism instead of glossy studio glamour",
+  "grounded everyday realism instead of editorial fashion styling",
 ];
 
 export const OUTPUT_TYPE_BLOCKS: Record<CharacterOutputType, string[]> = {
-  portrait: ["portrait framing", "focus on face and upper body"],
-  selfie: ["selfie composition", "natural handheld framing"],
-  full_body: ["full body composition", "head-to-toe framing"],
+  upper_body: [
+    "upper-body framing only",
+    "show stomach line, torso, waist, and upper hips clearly",
+    "face and body are both readable",
+    "clear chest, waist, and outfit visibility",
+    "avoid face-only crop",
+    "body-readable upper-body composition with natural pose clarity",
+  ],
+  portrait: [
+    "upper-body framing only",
+    "show stomach line, torso, waist, and upper hips clearly",
+    "face and body are both readable",
+    "clear chest, waist, and outfit visibility",
+    "avoid face-only crop",
+    "body-readable upper-body composition with natural pose clarity",
+  ],
+  selfie: [
+    "selfie composition",
+    "natural handheld framing",
+    "close camera perspective",
+    "personal candid energy",
+    "arm-length phone perspective",
+    "candid realism without face warp",
+  ],
+  full_body: [
+    "full body composition",
+    "head-to-toe framing",
+    "clean leg visibility",
+    "balanced standing proportions",
+    "full silhouette readability",
+    "full-body identity coherence from face to feet",
+  ],
 };
 
 export function getStyleBaseBlock(styleType: CharacterStyleType): string[] {
-  return styleType === "anime" ? ANIME_STYLE_BLOCK : REALISTIC_STYLE_BLOCK;
+  void styleType;
+  return REALISTIC_STYLE_BLOCK;
 }
 
 export function getQualityBlock(styleType: CharacterStyleType): string[] {
-  return styleType === "anime" ? ANIME_QUALITY_BLOCK : REALISTIC_QUALITY_BLOCK;
+  void styleType;
+  return REALISTIC_QUALITY_BLOCK;
 }
 
 export function getOutputTypeBlock(outputType: CharacterOutputType): string[] {

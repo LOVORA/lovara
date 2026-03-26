@@ -26,13 +26,13 @@ export default function CharactersPage() {
 
               <div className="mt-5 flex flex-wrap gap-3 text-xs uppercase tracking-[0.18em] text-white/45">
                 <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2">
-                  {characters.length} professional characters
+                  {characters.length} ready characters
                 </span>
                 <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-cyan-100">
                   site-controlled and locked
                 </span>
                 <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-100">
-                  premium collection
+                  main collection
                 </span>
               </div>
             </div>
@@ -75,7 +75,7 @@ export default function CharactersPage() {
                   alt={featured.name}
                   width={1600}
                   height={1200}
-                  className="h-[560px] w-full object-cover transition duration-500 group-hover:scale-[1.02]"
+                  className="h-[560px] w-full object-contain bg-black/30 object-center transition duration-500 group-hover:scale-[1.02]"
                 />
                 <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,22,0.82),transparent_50%)]" />
                 <div className="absolute left-6 top-6 flex flex-wrap gap-2">
@@ -89,7 +89,7 @@ export default function CharactersPage() {
                 <div className="absolute inset-x-0 bottom-0 p-6">
                   <div className="rounded-[30px] border border-white/10 bg-black/35 p-6 backdrop-blur-xl">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-white/42">
-                      Featured professional character
+                      Featured character
                     </div>
                     <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white md:text-4xl">
                       {featured.name}
@@ -182,12 +182,12 @@ export default function CharactersPage() {
                     alt={character.name}
                     width={1200}
                     height={900}
-                    className="h-72 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                    className="h-72 w-full object-contain bg-black/30 object-center transition duration-500 group-hover:scale-[1.03]"
                   />
                   <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,22,0.7),transparent_42%)]" />
                   <div className="absolute left-4 top-4 flex flex-wrap gap-2">
                     <span className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/80 backdrop-blur">
-                      Professional
+                      Ready-made
                     </span>
                     <span className="rounded-full border border-fuchsia-400/25 bg-fuchsia-400/15 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-fuchsia-100 backdrop-blur">
                       Locked
@@ -196,7 +196,7 @@ export default function CharactersPage() {
                   <div className="absolute inset-x-0 bottom-0 p-4">
                     <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                        Professional card
+                        Character card
                       </div>
                       <div className="mt-2 text-xl font-semibold tracking-tight text-white">
                         {character.name}

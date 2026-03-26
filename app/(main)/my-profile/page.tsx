@@ -175,7 +175,7 @@ export default function MyProfilePage() {
                             {monetization.currentPlan.label} level
                           </h2>
                           <p className="mt-2 max-w-xl text-sm leading-7 text-white/68">
-                            Your current usage, remaining room, and the plan preview for later.
+                            Your current usage, remaining room, and how your limits may grow later.
                           </p>
                         </div>
 
@@ -221,7 +221,7 @@ export default function MyProfilePage() {
                           href="/pricing"
                           className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
                         >
-                          Open plan preview
+                          View plans
                         </Link>
                         <Link
                           href="/create-character"
@@ -239,7 +239,7 @@ export default function MyProfilePage() {
                       <div className="mt-4 space-y-3">
                         {(monetization.upgradeReasons.length > 0
                           ? monetization.upgradeReasons
-                          : ["Your account still has room. The higher plan preview is only here so limits are visible ahead of time."]).map(
+                          : ["Your account still has room. Higher levels are shown here so the limits stay easy to understand."]).map(
                           (reason) => (
                             <div
                               key={reason}
@@ -253,11 +253,11 @@ export default function MyProfilePage() {
 
                       <div className="mt-6 rounded-[24px] border border-fuchsia-400/20 bg-fuchsia-400/10 p-4">
                         <div className="text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/80">
-                          Plan preview
+                          Plan details
                         </div>
                         <div className="mt-3 grid gap-2 text-sm text-white/72">
-                          <div>{monetization.currentPlan.premiumScenePacks} premium scene packs</div>
-                          <div>{monetization.currentPlan.premiumArchetypes} premium archetypes</div>
+                          <div>{monetization.currentPlan.premiumScenePacks} scene packs</div>
+                          <div>{monetization.currentPlan.premiumArchetypes} archetypes</div>
                           <div>{summary.publicCharacterCount} public characters live right now</div>
                         </div>
                       </div>

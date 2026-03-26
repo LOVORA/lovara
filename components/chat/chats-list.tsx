@@ -3,9 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import {
+  createSupabaseStorageSigner,
+  resolveCharacterImageMap,
+} from "@/lib/character-image-assets";
+import { normalizeVisibleHeadline } from "@/lib/custom-character-copy";
 import { supabase } from "@/lib/supabase";
 import { characters } from "@/lib/characters";
-import { getCustomCharacters } from "@/lib/custom-characters-storage";
 
 type ConversationItem = {
   id: string;
@@ -33,11 +37,12 @@ type BuiltInCharacter = {
 };
 
 type SavedCustomCharacter = {
+  id: string;
   slug: string;
-  name?: string;
-  role?: string;
+  name: string;
+  role: string;
   image?: string;
-  greeting?: string;
+  greeting: string;
 };
 
 type ChatCard = {
@@ -118,7 +123,7 @@ function getBuiltInGreeting(slug: string) {
     | BuiltInCharacter
     | undefined;
 
-  return builtInCharacter?.greeting?.trim() || "The conversation has been reset.";
+  return builtInCharacter?.greeting?.trim() || "The chat has been reset.";
 }
 
 function StatusPill({
@@ -191,7 +196,7 @@ function EmptyState({ hasChats }: { hasChats: boolean }) {
             href="/characters"
             className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black"
           >
-            Professional characters
+            Ready characters
           </Link>
           <Link
             href="/create-character"
@@ -220,15 +225,64 @@ export default function ChatsList() {
   const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
 
-  useEffect(() => {
-    try {
-      const saved = getCustomCharacters();
-      setCustomCharacters(Array.isArray(saved) ? (saved as SavedCustomCharacter[]) : []);
-    } catch (error) {
-      console.error(error);
+  async function loadCustomCharacterLibrary(currentUserId: string) {
+    const { data: customRows, error: customError } = await supabase
+      .from("custom_characters")
+      .select("id, slug, name, greeting, headline")
+      .eq("user_id", currentUserId);
+
+    if (customError || !Array.isArray(customRows)) {
       setCustomCharacters([]);
+      return;
     }
-  }, []);
+
+    const imageRows =
+      customRows.length === 0
+        ? []
+        : (((await supabase
+            .from("character_images")
+            .select(
+              "character_id, storage_bucket, storage_path, public_url, is_primary, image_type, created_at",
+            )
+            .in(
+              "character_id",
+              customRows.map((row) => row.id),
+            )
+            .order("created_at", { ascending: false })).data ?? []) as Array<{
+            character_id: string | null;
+            storage_bucket?: string | null;
+            storage_path?: string | null;
+            public_url: string | null;
+            is_primary?: boolean | null;
+            image_type?: string | null;
+            created_at?: string | null;
+          }>);
+
+    const imageMap =
+      customRows.length === 0
+        ? new Map<string, string>()
+        : await resolveCharacterImageMap({
+            rows: imageRows,
+            signUrl: createSupabaseStorageSigner(supabase as never),
+          });
+
+    setCustomCharacters(
+      customRows.map((row) => ({
+        id: row.id,
+        slug: typeof row.slug === "string" ? row.slug : "",
+        name: typeof row.name === "string" ? row.name : "Custom character",
+        role:
+          normalizeVisibleHeadline(
+            typeof row.headline === "string" ? row.headline : "",
+          ) || "Custom character chat",
+        image: imageMap.get(row.id) ?? undefined,
+        greeting:
+          typeof row.greeting === "string" && row.greeting.trim()
+            ? row.greeting
+            : "The conversation has been reset.",
+      })),
+    );
+  }
 
   async function loadMemoryState(currentUserId: string, conversationIds: string[]) {
     if (conversationIds.length === 0) {
@@ -325,6 +379,7 @@ export default function ChatsList() {
     }
 
     setUserId(user.id);
+    await loadCustomCharacterLibrary(user.id);
 
     const { data: conversationRows, error: conversationError } = await supabase
       .from("conversations")
@@ -364,7 +419,7 @@ export default function ChatsList() {
     if (messageError) {
       setPreviews({});
       await loadMemoryState(user.id, conversationIds);
-      setMessage("Chats loaded, but previews could not be loaded.");
+      setMessage("Chats loaded, but message snippets could not be loaded.");
       setLoading(false);
       setRefreshing(false);
       return;
@@ -416,13 +471,13 @@ export default function ChatsList() {
           (parsed.isCustom ? parsed.realSlug : chat.character_slug),
         characterRole:
           resolvedCharacter?.role ??
-          (parsed.isCustom ? "Custom character chat" : "Private character chat"),
+          (parsed.isCustom ? "Custom character chat" : "Character chat"),
         characterImage: resolvedCharacter?.image,
         updatedAt: chat.updated_at,
         createdAt: chat.created_at,
         preview:
           previews[chat.id] ||
-          "No messages yet. Open this chat to continue the conversation.",
+          "No messages yet. Open this chat to keep the conversation going.",
         href: parsed.href,
       };
     });
@@ -528,7 +583,7 @@ export default function ChatsList() {
         return next;
       });
 
-      setMessage("Chat deleted successfully.");
+      setMessage("Chat removed.");
     } catch (error) {
       console.error(error);
       setMessage("Something went wrong while deleting this chat.");
@@ -561,63 +616,47 @@ export default function ChatsList() {
         return;
       }
 
-      const { error: deleteMessagesError } = await supabase
-        .from("messages")
-        .delete()
-        .in("conversation_id", conversationIds)
-        .eq("user_id", userId);
-
-      if (deleteMessagesError) {
-        setMessage(`Could not reset chat messages: ${deleteMessagesError.message}`);
-        return;
-      }
-
-      const { error: deleteMemoryError } = await supabase
-        .from("conversation_memory_state")
-        .delete()
-        .in("conversation_id", conversationIds)
-        .eq("user_id", userId);
-
-      if (deleteMemoryError) {
-        setMessage(`Messages cleared, but memory reset failed: ${deleteMemoryError.message}`);
-        return;
-      }
-
-      const greeting = chat.isCustom
-        ? customCharacters.find((item) => item.slug === chat.realSlug)?.greeting?.trim() ||
-          "The conversation has been reset."
-        : getBuiltInGreeting(chat.realSlug);
-
       const firstConversationId = conversationIds[0];
+      const response = await fetch(
+        chat.isCustom ? "/api/custom-chat/reset" : "/api/chat/reset",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify(
+            chat.isCustom
+              ? { conversationId: firstConversationId }
+              : { conversationId: firstConversationId, slug: chat.realSlug },
+          ),
+        },
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            error?: string;
+            messages?: Array<{ role?: string; content?: string }>;
+          }
+        | null;
 
-      const { error: insertGreetingError } = await supabase.from("messages").insert({
-        conversation_id: firstConversationId,
-        user_id: userId,
-        role: "assistant",
-        content: greeting,
-      });
-
-      if (insertGreetingError) {
-        setMessage(`Chat reset, but greeting could not be restored: ${insertGreetingError.message}`);
+      if (!response.ok || !payload?.ok) {
+        setMessage(payload?.error || "Could not reset this chat.");
         return;
       }
+
+      const greeting =
+        Array.isArray(payload.messages) &&
+        typeof payload.messages[0]?.content === "string" &&
+        payload.messages[0].content.trim()
+          ? payload.messages[0].content.trim()
+          : chat.isCustom
+            ? customCharacters.find((item) => item.slug === chat.realSlug)?.greeting?.trim() ||
+              "The chat has been reset."
+            : getBuiltInGreeting(chat.realSlug);
 
       const nowIso = new Date().toISOString();
-
-      const { error: updateConversationError } = await supabase
-        .from("conversations")
-        .update({
-          title: `Chat with ${chat.characterName}`,
-          updated_at: nowIso,
-        })
-        .eq("id", firstConversationId)
-        .eq("user_id", userId);
-
-      if (updateConversationError) {
-        setMessage("Chat reset, but conversation metadata could not be updated.");
-      } else {
-        setMessage("Reset completed. This chat is fresh again.");
-      }
+      setMessage("Reset completed. This chat is fresh again.");
 
       setPreviews((prev) => ({
         ...prev,
@@ -703,7 +742,7 @@ export default function ChatsList() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by character, role, or preview..."
+              placeholder="Search by character, role, or message..."
               className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none placeholder:text-white/35"
             />
           </label>
@@ -716,7 +755,7 @@ export default function ChatsList() {
               className="h-12 w-full rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-white outline-none"
             >
               <option value="all">All chats</option>
-              <option value="built-in">Built-in only</option>
+              <option value="built-in">Ready-made only</option>
               <option value="custom">Custom only</option>
             </select>
           </label>
@@ -740,7 +779,7 @@ export default function ChatsList() {
               disabled={loading || refreshing || Boolean(resettingSlug)}
               className="h-12 rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {refreshing ? "Refreshing..." : "Refresh"}
+              {refreshing ? "Refreshing..." : "Refresh list"}
             </button>
           </div>
         </div>
@@ -775,7 +814,7 @@ export default function ChatsList() {
                             src={chat.characterImage}
                             alt={chat.characterName}
                             fill
-                            className="object-cover"
+                            className="object-contain bg-black/30 object-center"
                           />
                         </div>
                       ) : (
@@ -799,12 +838,12 @@ export default function ChatsList() {
                             memoryState.isFresh ? (
                               <StatusPill label="Fresh chat" tone="warm" />
                             ) : memoryState.hasMemory ? (
-                              <StatusPill label="Memory active" tone="success" />
+                              <StatusPill label="Ongoing chat" tone="success" />
                             ) : (
-                              <StatusPill label="Active chat" tone="success" />
+                              <StatusPill label="Open chat" tone="success" />
                             )
                           ) : (
-                            <StatusPill label="No active memory" />
+                            <StatusPill label="No saved history" />
                           )}
                         </div>
 
@@ -821,12 +860,12 @@ export default function ChatsList() {
                             </div>
                             <p className="mt-2 text-sm leading-6 text-white/68">
                               {!memoryState
-                                ? "Conversation exists, but no memory state is stored yet."
+                                ? "This chat exists, but it has not built much history yet."
                                 : memoryState.isFresh
-                                  ? "This chat is fresh and near its starting state."
+                                  ? "This chat is still close to its starting point."
                                   : memoryState.hasMemory
-                                    ? `Memory is active across ${memoryState.messageCount} messages.`
-                                    : "Conversation is active."}
+                                    ? `This thread is carrying ${memoryState.messageCount} saved messages.`
+                                    : "This chat is active."}
                             </p>
                           </div>
 

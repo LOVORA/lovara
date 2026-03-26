@@ -4,11 +4,8 @@ import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getCharacterBySlug } from "@/lib/characters";
-import {
-  getOrCreateConversationForCharacter,
-  loadConversationMessages,
-  type DbMessageRow,
-} from "@/lib/chat";
+import MessageRichText from "@/components/chat/message-rich-text";
+import type { DbMessageRow } from "@/lib/chat";
 
 type ChatWindowProps = {
   characterSlug: string;
@@ -154,29 +151,32 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           return;
         }
 
-        const conversation = await getOrCreateConversationForCharacter(
-          supabase,
-          user.id,
+        const response = await fetch(
+          `/api/chat/bootstrap?slug=${encodeURIComponent(character.slug)}`,
           {
-            slug: character.slug,
-            name: character.name,
-            greeting: character.greeting,
+            credentials: "include",
           },
         );
+        const payload = (await response.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              error?: string;
+              conversation?: { id: string };
+              messages?: DbMessageRow[];
+            }
+          | null;
+
+        if (!response.ok || !payload?.ok || !payload.conversation) {
+          throw new Error(payload?.error || "Could not load this conversation.");
+        }
 
         if (!isMounted || initIdRef.current !== currentInitId) return;
 
-        setActiveConversationId(conversation.id);
-
-        const dbMessages = await loadConversationMessages(
-          supabase,
-          conversation.id,
-          character.greeting,
-        );
+        setActiveConversationId(payload.conversation.id);
 
         if (!isMounted || initIdRef.current !== currentInitId) return;
 
-        const formattedMessages: Message[] = dbMessages.flatMap(
+        const formattedMessages: Message[] = (payload.messages ?? []).flatMap(
           (message: DbMessageRow) => {
             if (message.role !== "assistant" && message.role !== "user") {
               return [];
@@ -260,64 +260,44 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     setChatStatus("Resetting chat...");
 
     try {
-      const { error: deleteMessagesError } = await supabase
-        .from("messages")
-        .delete()
-        .eq("conversation_id", activeConversationId);
-
-      if (deleteMessagesError) {
-        setChatStatus(
-          `Could not clear chat messages: ${deleteMessagesError.message}`,
-        );
-        return;
-      }
-
-      const { error: deleteMemoryError } = await supabase
-        .from("conversation_memory_state")
-        .delete()
-        .eq("conversation_id", activeConversationId);
-
-      if (deleteMemoryError) {
-        setChatStatus(
-          `Messages were cleared, but memory could not be reset: ${deleteMemoryError.message}`,
-        );
-        return;
-      }
-
-      const { error: greetingInsertError } = await supabase.from("messages").insert({
-        conversation_id: activeConversationId,
-        role: "assistant",
-        content: character.greeting,
-      });
-
-      if (greetingInsertError) {
-        setChatStatus("Chat cleared, but greeting could not be restored.");
-        return;
-      }
-
-      const { error: updateConversationError } = await supabase
-        .from("conversations")
-        .update({
-          title: `Chat with ${character.name}`,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", activeConversationId);
-
-      setMessages([
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: character.greeting,
+      const response = await fetch("/api/chat/reset", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      ]);
+        credentials: "include",
+        body: JSON.stringify({
+          conversationId: activeConversationId,
+          slug: character.slug,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; messages?: DbMessageRow[] }
+        | null;
+
+      if (!response.ok || !payload?.ok) {
+        setChatStatus(payload?.error || "Could not reset this chat.");
+        return;
+      }
+
+      setMessages(
+        (payload.messages ?? []).flatMap((message) => {
+          if (message.role !== "assistant" && message.role !== "user") {
+            return [];
+          }
+
+          return [
+            {
+              id: message.id,
+              role: message.role,
+              content: message.content,
+            },
+          ];
+        }),
+      );
 
       setJustReset(true);
-
-      if (updateConversationError) {
-        setChatStatus("Chat reset, but conversation metadata could not be updated.");
-      } else {
-        setChatStatus("Reset completed. This chat is fresh again.");
-      }
+      setChatStatus("Reset completed. This chat is fresh again.");
     } catch (error) {
       console.error(error);
       setChatStatus("Something went wrong while resetting the chat.");
@@ -405,7 +385,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           typeof data.error === "string" &&
           data.error
             ? data.error
-            : "Failed to get a reply from the AI.";
+            : "Could not get a reply right now.";
 
         setChatStatus(errorMessage);
         return;
@@ -420,7 +400,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           : "";
 
       if (!reply) {
-        setChatStatus("The AI returned an empty reply.");
+        setChatStatus("The reply came back empty. Please try again.");
         return;
       }
 
@@ -446,7 +426,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         .eq("id", activeConversationId);
 
       if (updateConversationError) {
-        setChatStatus("Reply received, but conversation title could not be updated.");
+        setChatStatus("Reply received, but the chat title could not be updated.");
       } else {
         setChatStatus(getRetentionHint(getRetentionState([...nextMessages, assistantReply]), character.name));
       }
@@ -474,17 +454,17 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   }
 
   return (
-    <div className="flex h-[78vh] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0b0b12]/80 backdrop-blur-xl">
-      <div className="border-b border-white/10 bg-white/[0.03] px-4 py-4 md:px-6">
+    <div className="flex h-[78vh] flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] backdrop-blur-xl">
+      <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-4 py-4 md:px-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <div className="relative h-12 w-12 overflow-hidden rounded-full border border-white/15 bg-white/10">
+            <div className="relative h-14 w-14 overflow-hidden rounded-[20px] border border-white/15 bg-white/10 shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
               {character.image ? (
                 <Image
                   src={character.image}
                   alt={character.name}
                   fill
-                  className="object-cover"
+                  className="object-contain bg-black/30 object-center"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white/90">
@@ -495,17 +475,14 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
             <div>
               <p className="text-base font-semibold text-white">{character.name}</p>
-              <div className="mt-1 flex items-center gap-2">
+              <div className="mt-1 flex items-center gap-2 text-xs text-white/55">
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                <p className="text-xs uppercase tracking-[0.18em] text-emerald-200/75">
-                  {isInitializing ? "Loading..." : "Online now"}
-                </p>
+                <p>{isInitializing ? "Loading conversation..." : "Private session active"}</p>
               </div>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge label="Private chat saved" />
             <StatusBadge
               label={getRetentionLabel(retentionState)}
               tone={getRetentionTone(retentionState)}
@@ -525,12 +502,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       </div>
 
       {chatStatus && (
-        <div className="border-b border-white/10 bg-white/[0.02] px-4 py-3 text-xs text-white/55 md:px-6">
+        <div className="border-b border-white/10 bg-black/15 px-4 py-3 text-xs text-white/50 md:px-6">
           {chatStatus}
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.03),transparent_28%)] px-4 py-5 md:px-6">
+      <div className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.04),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.01),rgba(0,0,0,0.02))] px-4 py-5 md:px-6">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
           {messages.map((message) => {
             const isUser = message.role === "user";
@@ -552,7 +529,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                           src={character.image}
                           alt={character.name}
                           fill
-                          className="object-cover"
+                          className="object-contain bg-black/30 object-center"
                         />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white/85">
@@ -563,10 +540,10 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                   )}
 
                   <div
-                    className={`overflow-hidden rounded-[22px] px-4 py-3 text-sm leading-7 shadow-[0_10px_30px_rgba(0,0,0,0.18)] ${
+                    className={`overflow-hidden rounded-[24px] px-4 py-3 text-sm leading-7 shadow-[0_16px_40px_rgba(0,0,0,0.18)] ${
                       isUser
-                        ? "rounded-br-md border border-white/10 bg-white text-black"
-                        : "rounded-bl-md border border-pink-400/20 bg-gradient-to-br from-[#ff4fa3] via-[#d946ef] to-[#8b5cf6] text-white"
+                        ? "rounded-br-md border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,1),rgba(245,245,245,0.96))] text-black"
+                        : "rounded-bl-md border border-fuchsia-300/20 bg-[linear-gradient(135deg,rgba(255,79,163,0.96),rgba(217,70,239,0.92),rgba(99,102,241,0.9))] text-white"
                     }`}
                   >
                     {!isUser && (
@@ -575,7 +552,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                       </p>
                     )}
 
-                    <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                    <div className="text-sm leading-7">
+                      <MessageRichText
+                        content={message.content}
+                        tone={isUser ? "dark" : "light"}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -591,7 +573,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                       src={character.image}
                       alt={character.name}
                       fill
-                      className="object-cover"
+                      className="object-contain bg-black/30 object-center"
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white/85">
@@ -600,14 +582,17 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                   )}
                 </div>
 
-                <div className="rounded-[22px] rounded-bl-md border border-pink-400/20 bg-gradient-to-br from-[#ff4fa3] via-[#d946ef] to-[#8b5cf6] px-4 py-3 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
+                <div className="rounded-[24px] rounded-bl-md border border-white/10 bg-white/[0.05] px-4 py-3 text-white shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
                   <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-white/75">
                     {character.name}
                   </p>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2 text-sm text-white/82">
                     <span className="h-2 w-2 animate-pulse rounded-full bg-white/90" />
                     <span className="h-2 w-2 animate-pulse rounded-full bg-white/75 [animation-delay:120ms]" />
                     <span className="h-2 w-2 animate-pulse rounded-full bg-white/60 [animation-delay:240ms]" />
+                    <span className="text-sm lowercase tracking-[0.02em] text-white/78">
+                      typing...
+                    </span>
                   </div>
                 </div>
               </div>
@@ -620,10 +605,10 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
 
       <form
         onSubmit={handleSubmit}
-        className="border-t border-white/10 bg-white/[0.03] px-4 py-4 md:px-6"
+        className="border-t border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] px-4 py-4 md:px-6"
       >
         <div className="mx-auto max-w-4xl">
-          <div className="flex items-end gap-3 rounded-[24px] border border-white/10 bg-black/25 p-2 backdrop-blur-md">
+          <div className="flex items-end gap-3 rounded-[26px] border border-white/10 bg-black/25 p-2 shadow-[0_18px_50px_rgba(0,0,0,0.16)] backdrop-blur-md">
             <input
               type="text"
               placeholder={`Message ${character.name}...`}
@@ -642,14 +627,14 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                 !activeConversationId ||
                 !input.trim()
               }
-              className="inline-flex h-12 items-center justify-center rounded-[18px] bg-white px-5 text-sm font-semibold text-black transition hover:scale-[1.02] hover:opacity-95 disabled:opacity-60"
+              className="inline-flex h-12 items-center justify-center rounded-[18px] bg-white px-5 text-sm font-semibold text-black shadow-[0_18px_40px_rgba(255,255,255,0.1)] transition hover:scale-[1.02] hover:opacity-95 disabled:opacity-60"
             >
-              {isTyping ? "Waiting..." : "Send"}
+              {isTyping ? "Thinking..." : "Send"}
             </button>
           </div>
 
           <p className="mt-3 px-2 text-xs text-white/35">
-            Private conversation • Messages are saved automatically • {getRetentionHint(retentionState, character.name)}
+            Private conversation • Messages save automatically • {getRetentionHint(retentionState, character.name)}
           </p>
         </div>
       </form>

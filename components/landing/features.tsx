@@ -12,7 +12,7 @@ const features = [
       "Instead of generic prompts, create situations that influence how the character opens, responds, and keeps the interaction feeling grounded.",
   },
   {
-    badge: "Saved Vault",
+    badge: "Saved Library",
     title: "Keep your best characters ready",
     description:
       "Save your creations, revisit them later, and keep a cleaner library of custom personalities you actually want to return to.",
@@ -29,7 +29,7 @@ export default function Features() {
           </div>
 
           <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-            Built for a more premium character experience
+            Built for a more natural character experience
           </h2>
 
           <p className="mt-5 text-base leading-8 text-white/60 sm:text-lg">

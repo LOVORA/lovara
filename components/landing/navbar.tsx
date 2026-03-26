@@ -9,6 +9,7 @@ const navItems = [
   { href: "/community", label: "Community" },
   { href: "/create-character", label: "Create" },
   { href: "/my-characters", label: "My Characters" },
+  { href: "/collection", label: "Collection" },
   { href: "/my-profile", label: "My Profile" },
 ];
 
@@ -31,7 +32,7 @@ export default function Navbar() {
             <div className="text-base font-semibold tracking-wide text-white">
               Lovora
             </div>
-            <div className="text-xs text-white/45">Premium character studio</div>
+            <div className="text-xs text-white/45">Character studio</div>
           </div>
         </Link>
 
@@ -73,14 +74,14 @@ export default function Navbar() {
             href="/characters"
             className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/75 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
           >
-            Professional
+            Characters
           </Link>
 
           <Link
             href="/create-character"
             className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition hover:scale-[1.02] hover:bg-white/90"
           >
-            Create Character
+            Create
           </Link>
 
           <div className="ml-1">

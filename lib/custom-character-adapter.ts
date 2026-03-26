@@ -260,25 +260,50 @@ function buildHeadline(
   traits: InternalTraitState,
   scenario?: CharacterScenario
 ): string {
-  const archetypeLabel = titleCase(describeArchetype(input.archetype));
   const warmth = describeTraitLevel(
     traits.affectionWarmth,
     "guarded",
     "warm",
     "deeply affectionate"
   );
-  const style = describeTraitLevel(
+  const intensity = describeTraitLevel(
     traits.responseTemperature,
-    "subtle",
+    "quiet",
     "magnetic",
     "intense"
   );
+  const settingPart = clean(scenario?.setting);
 
-  const settingPart = scenario?.setting ? ` in ${scenario.setting}` : "";
+  const baseHeadline = (() => {
+    switch (input.archetype) {
+      case "sweetheart":
+        return "Warm chemistry with an easy, emotionally open presence.";
+      case "ice-queen":
+        return "Cool restraint, sharp composure, and hard-earned warmth.";
+      case "confident-seducer":
+        return "Direct, magnetic pressure with confident emotional control.";
+      case "chaotic-flirt":
+        return "Playful unpredictability with fast spark and restless chemistry.";
+      case "nurturing-lover":
+        return "Soft reassurance, attentive care, and grounded intimacy.";
+      case "possessive-lover":
+        return "Protective attachment, sharper tension, and intense chemistry.";
+      case "elegant-muse":
+        return "Quiet mystery, refined allure, and memorable emotional pull.";
+      case "best-friend-lover":
+        return "Comfort-first chemistry with a bond that already feels personal.";
+      default:
+        return `${titleCase(describeArchetype(input.archetype))} energy with a ${intensity}, ${warmth} presence.`;
+    }
+  })();
+
+  if (!settingPart) {
+    return clampText(baseHeadline, 110);
+  }
 
   return clampText(
-    `${archetypeLabel} energy with a ${style}, ${warmth} presence${settingPart}`,
-    110
+    `${baseHeadline.replace(/\.$/, "")} Built to feel natural in ${settingPart}.`,
+    120,
   );
 }
 

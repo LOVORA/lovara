@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/supabase";
+import {
+  buildRecognitionAwareGreeting,
+  buildUserRecognitionContract,
+  ensureUserRecognitionMemory,
+  getProfileDisplayName,
+} from "@/lib/user-recognition";
 
 type TypedSupabaseClient = SupabaseClient<Database>;
 
@@ -90,6 +96,40 @@ export async function getOrCreateConversationForCharacter(
   }
 
   return createConversation(supabase, userId, character, character.greeting);
+}
+
+export async function buildBuiltInRecognitionAwareGreeting(
+  supabase: TypedSupabaseClient,
+  userId: string,
+  character: CharacterChatConfig & {
+    relationshipToUser?: string;
+    openingState?: string;
+    userRole?: string;
+  }
+) {
+  const profileDisplayName = await getProfileDisplayName(supabase as never, userId);
+  const recognitionMemory = await ensureUserRecognitionMemory({
+    supabase: supabase as never,
+    userId,
+    scope: { builtInCharacterSlug: character.slug },
+    relationshipToUser: character.relationshipToUser,
+    openingState: character.openingState,
+    userRole: character.userRole,
+    profileDisplayName,
+  });
+
+  const contract = buildUserRecognitionContract({
+    memory: recognitionMemory,
+    profileDisplayName,
+    relationshipToUser: character.relationshipToUser,
+    openingState: character.openingState,
+    userRole: character.userRole,
+  });
+
+  return buildRecognitionAwareGreeting({
+    baseGreeting: character.greeting,
+    contract,
+  });
 }
 
 export async function createFreshConversationForCharacter(

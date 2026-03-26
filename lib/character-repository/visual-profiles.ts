@@ -5,7 +5,7 @@ export type DbCharacterVisualProfile = {
   id: string;
   character_id: string;
   style_type: "realistic" | "anime" | null;
-  age_band: "18-20" | "21-24" | "25-29" | "30-39" | "40+" | null;
+  age_band: "18-20" | "21-24" | "25-29" | "30-39" | "40-49" | "50-59" | "60-70" | null;
   region: string | null;
   skin_tone: string | null;
   gender_presentation: string | null;
@@ -69,7 +69,9 @@ function mapVisualProfileRow(
       row.age_band === "21-24" ||
       row.age_band === "25-29" ||
       row.age_band === "30-39" ||
-      row.age_band === "40+"
+      row.age_band === "40-49" ||
+      row.age_band === "50-59" ||
+      row.age_band === "60-70"
         ? row.age_band
         : null,
     region: typeof row.region === "string" ? row.region : null,

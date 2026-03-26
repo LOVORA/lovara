@@ -57,6 +57,12 @@ export type DbCharacterImage = {
   provider_used: string | null;
   prompt_snapshot: string | null;
   negative_prompt_snapshot: string | null;
+  feedback_type: "like_reference" | "reject_result" | "prefer_this_style" | null;
+  is_liked_reference: boolean;
+  reference_rank: number | null;
+  quality_score: number | null;
+  quality_flags: string[];
+  judge_version: string | null;
 
   created_at: string;
   updated_at: string;
@@ -83,6 +89,12 @@ export type UpdateCharacterImageInput = {
     provider_used: string | null;
     prompt_snapshot: string | null;
     negative_prompt_snapshot: string | null;
+    feedback_type: DbCharacterImage["feedback_type"];
+    is_liked_reference: boolean;
+    reference_rank: number | null;
+    quality_score: number | null;
+    quality_flags: string[];
+    judge_version: string | null;
   }>;
 };
 
@@ -122,6 +134,46 @@ type UntypedSupabase = {
 
 const db = supabase as unknown as UntypedSupabase;
 
+type CharacterImagesRepositoryClient = {
+  from: (table: string) => {
+    select: (columns?: string) => {
+      eq: (column: string, value: unknown) => {
+        order: (
+          column: string,
+          options?: { ascending?: boolean },
+        ) => Promise<{ data: unknown; error: unknown }>;
+      };
+    };
+  };
+};
+
+type CharacterImagesRepositoryMutationClient = {
+  from: (table: string) => {
+    insert: (values: unknown) => {
+      select: (columns?: string) => {
+        maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+      };
+    };
+    update: (values: unknown) => {
+      eq: (column: string, value: unknown) => {
+        select: (columns?: string) => {
+          maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+        };
+      };
+    };
+    select: (columns?: string) => {
+      eq: (column: string, value: unknown) => {
+        order: (
+          column: string,
+          options?: { ascending?: boolean },
+        ) => Promise<{ data: unknown; error: unknown }>;
+        maybeSingle?: () => Promise<{ data: unknown; error: unknown }>;
+      };
+      maybeSingle?: () => Promise<{ data: unknown; error: unknown }>;
+    };
+  };
+};
+
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -130,7 +182,35 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function asError(error: unknown): Error {
   if (error instanceof Error) return error;
-  return new Error(typeof error === "string" ? error : "Unknown Supabase error");
+  if (typeof error === "string") return new Error(error);
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const message =
+      typeof record.message === "string" && record.message.trim().length > 0
+        ? record.message.trim()
+        : null;
+    const details =
+      typeof record.details === "string" && record.details.trim().length > 0
+        ? record.details.trim()
+        : null;
+    const hint =
+      typeof record.hint === "string" && record.hint.trim().length > 0
+        ? record.hint.trim()
+        : null;
+    const code =
+      typeof record.code === "string" && record.code.trim().length > 0
+        ? record.code.trim()
+        : null;
+
+    const parts = [message, details, hint, code ? `code: ${code}` : null].filter(
+      Boolean,
+    );
+
+    if (parts.length > 0) {
+      return new Error(parts.join(" | "));
+    }
+  }
+  return new Error("Unknown Supabase error");
 }
 
 function asNullableString(value: unknown): string | null {
@@ -139,6 +219,12 @@ function asNullableString(value: unknown): string | null {
 
 function asNullableNumber(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)
+    : [];
 }
 
 function mapImageType(
@@ -231,6 +317,18 @@ function mapCharacterImageRow(row: Record<string, unknown>): DbCharacterImage {
     provider_used: asNullableString(row.provider_used),
     prompt_snapshot: asNullableString(row.prompt_snapshot),
     negative_prompt_snapshot: asNullableString(row.negative_prompt_snapshot),
+    feedback_type:
+      row.feedback_type === "like_reference" ||
+      row.feedback_type === "reject_result" ||
+      row.feedback_type === "prefer_this_style"
+        ? row.feedback_type
+        : null,
+    is_liked_reference:
+      typeof row.is_liked_reference === "boolean" ? row.is_liked_reference : false,
+    reference_rank: asNullableNumber(row.reference_rank),
+    quality_score: asNullableNumber(row.quality_score),
+    quality_flags: asStringArray(row.quality_flags),
+    judge_version: asNullableString(row.judge_version),
 
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
@@ -286,15 +384,31 @@ function buildCreatePayload(input: CreateCharacterImageInput) {
     provider_used: input.providerUsed ?? null,
     prompt_snapshot: input.promptSnapshot ?? null,
     negative_prompt_snapshot: input.negativePromptSnapshot ?? null,
+    feedback_type: input.feedbackType ?? null,
+    is_liked_reference: input.isLikedReference ?? false,
+    reference_rank: input.referenceRank ?? null,
+    quality_score: input.qualityScore ?? null,
+    quality_flags: input.qualityFlags ?? [],
+    judge_version: input.judgeVersion ?? null,
   };
 }
 
 export async function createCharacterImage(
   input: CreateCharacterImageInput,
 ): Promise<DbCharacterImage> {
+  return createCharacterImageWithClient(
+    db as unknown as CharacterImagesRepositoryMutationClient,
+    input,
+  );
+}
+
+export async function createCharacterImageWithClient(
+  client: CharacterImagesRepositoryMutationClient,
+  input: CreateCharacterImageInput,
+): Promise<DbCharacterImage> {
   const payload = buildCreatePayload(input);
 
-  const { data, error } = await db
+  const { data, error } = await client
     .from("character_images")
     .insert(payload)
     .select("*")
@@ -334,7 +448,17 @@ export async function getCharacterImageById(
 export async function listCharacterImages(
   characterId: string,
 ): Promise<DbCharacterImage[]> {
-  const query = db
+  return listCharacterImagesWithClient(
+    db as unknown as CharacterImagesRepositoryClient,
+    characterId,
+  );
+}
+
+export async function listCharacterImagesWithClient(
+  client: CharacterImagesRepositoryClient,
+  characterId: string,
+): Promise<DbCharacterImage[]> {
+  const query = client
     .from("character_images")
     .select("*")
     .eq("character_id", characterId);
@@ -376,7 +500,17 @@ export async function listJobImages(
 export async function updateCharacterImage(
   input: UpdateCharacterImageInput,
 ): Promise<DbCharacterImage> {
-  const { data, error } = await db
+  return updateCharacterImageWithClient(
+    db as unknown as CharacterImagesRepositoryMutationClient,
+    input,
+  );
+}
+
+export async function updateCharacterImageWithClient(
+  client: CharacterImagesRepositoryMutationClient,
+  input: UpdateCharacterImageInput,
+): Promise<DbCharacterImage> {
+  const { data, error } = await client
     .from("character_images")
     .update(input.patch)
     .eq("id", input.imageId)
@@ -398,12 +532,24 @@ export async function setPrimaryCharacterImage(
   characterId: string,
   imageId: string,
 ): Promise<void> {
-  const currentImages = await listCharacterImages(characterId);
+  return setPrimaryCharacterImageWithClient(
+    db as unknown as CharacterImagesRepositoryMutationClient,
+    characterId,
+    imageId,
+  );
+}
+
+export async function setPrimaryCharacterImageWithClient(
+  client: CharacterImagesRepositoryMutationClient,
+  characterId: string,
+  imageId: string,
+): Promise<void> {
+  const currentImages = await listCharacterImagesWithClient(client, characterId);
 
   const currentPrimary = currentImages.find((image) => image.is_primary);
 
   if (currentPrimary && currentPrimary.id !== imageId) {
-    await updateCharacterImage({
+    await updateCharacterImageWithClient(client, {
       imageId: currentPrimary.id,
       patch: {
         is_primary: false,
@@ -411,7 +557,7 @@ export async function setPrimaryCharacterImage(
     });
   }
 
-  await updateCharacterImage({
+  await updateCharacterImageWithClient(client, {
     imageId,
     patch: {
       is_primary: true,
@@ -423,7 +569,19 @@ export async function setReferenceCharacterImage(
   imageId: string,
   isReference = true,
 ): Promise<DbCharacterImage> {
-  return updateCharacterImage({
+  return setReferenceCharacterImageWithClient(
+    db as unknown as CharacterImagesRepositoryMutationClient,
+    imageId,
+    isReference,
+  );
+}
+
+export async function setReferenceCharacterImageWithClient(
+  client: CharacterImagesRepositoryMutationClient,
+  imageId: string,
+  isReference = true,
+): Promise<DbCharacterImage> {
+  return updateCharacterImageWithClient(client, {
     imageId,
     patch: {
       is_reference: isReference,

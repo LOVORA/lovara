@@ -21,6 +21,7 @@ import {
   getIdentitySummary,
   getVisibilityFromPayload,
 } from "@/lib/custom-character-studio";
+import { pickBestCharacterImageUrl } from "@/lib/image-storage";
 import {
   getPublicCustomCharacterByShareId,
   type PublicCustomCharacter,
@@ -37,6 +38,7 @@ type CharacterImageLookupRow = {
   storage_path: string | null;
   public_url: string | null;
   is_primary: boolean;
+  image_type: string | null;
   created_at: string;
 };
 
@@ -107,6 +109,7 @@ export default function PublicCharacterDetailPage() {
 
   const [character, setCharacter] = useState<PublicCustomCharacter | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [galleryUrls, setGalleryUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [duplicating, setDuplicating] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
@@ -118,6 +121,42 @@ export default function PublicCharacterDetailPage() {
 
       const { data: rowRaw, error } = await db
         .from("character_images")
+        .select("id, character_id, storage_path, public_url, is_primary, image_type, created_at")
+        .eq("character_id", characterId)
+        .order("created_at", { ascending: false })
+        .limit(12);
+
+      if (error || !Array.isArray(rowRaw) || rowRaw.length === 0) {
+        setAvatarUrl(null);
+        setGalleryUrls([]);
+        return;
+      }
+
+      const rows = rowRaw as CharacterImageLookupRow[];
+      const publicRows = rows.filter(
+        (row): row is CharacterImageLookupRow & { public_url: string } =>
+          typeof row.public_url === "string" && row.public_url.length > 0,
+      );
+
+      setGalleryUrls(publicRows.map((row) => row.public_url));
+
+      const bestPublicUrl = pickBestCharacterImageUrl(
+        publicRows.map((row) => ({
+          character_id: row.character_id,
+          public_url: row.public_url,
+          is_primary: row.is_primary,
+          image_type: row.image_type,
+          created_at: row.created_at,
+        })),
+      );
+
+      if (bestPublicUrl) {
+        setAvatarUrl(bestPublicUrl);
+        return;
+      }
+
+      const { data: rowSingle, error: singleError } = await db
+        .from("character_images")
         .select("id, character_id, storage_path, public_url, is_primary, created_at")
         .eq("character_id", characterId)
         .eq("is_primary", true)
@@ -125,17 +164,12 @@ export default function PublicCharacterDetailPage() {
         .limit(1)
         .maybeSingle();
 
-      if (error || !rowRaw) {
+      if (singleError || !rowSingle) {
         setAvatarUrl(null);
         return;
       }
 
-      const row = rowRaw as CharacterImageLookupRow;
-
-      if (row.public_url) {
-        setAvatarUrl(row.public_url);
-        return;
-      }
+      const row = rowSingle as CharacterImageLookupRow;
 
       if (!row.storage_path) {
         setAvatarUrl(null);
@@ -165,6 +199,7 @@ export default function PublicCharacterDetailPage() {
       setBanner(null);
       setDuplicateSuccess(false);
       setAvatarUrl(null);
+      setGalleryUrls([]);
 
       try {
         const found = await getPublicCustomCharacterByShareId(shareId);
@@ -387,7 +422,7 @@ export default function PublicCharacterDetailPage() {
                       fill
                       unoptimized
                       sizes="100vw"
-                      className="object-cover"
+                      className="object-contain bg-black/30"
                     />
                   ) : (
                     <div className="flex h-full w-full items-end p-6">
@@ -400,6 +435,31 @@ export default function PublicCharacterDetailPage() {
                   <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(5,5,10,0.55),transparent_45%)]" />
                 </div>
               </div>
+
+              {galleryUrls.length > 1 ? (
+                <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-4">
+                  <div className="text-sm font-medium text-white">Saved images</div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {galleryUrls.map((url, index) => (
+                      <div
+                        key={`${url}-${index}`}
+                        className="overflow-hidden rounded-[22px] border border-white/10 bg-black/20"
+                      >
+                        <div className="relative h-44 w-full">
+                          <Image
+                            src={url}
+                            alt={`${character.name} saved image ${index + 1}`}
+                            fill
+                            unoptimized
+                            sizes="(min-width: 1280px) 280px, 50vw"
+                            className="object-contain bg-black/30"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="rounded-3xl border border-white/10 bg-white/6 p-4 backdrop-blur">
@@ -508,7 +568,7 @@ export default function PublicCharacterDetailPage() {
 
             <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-6 md:p-8">
               <div className="text-sm uppercase tracking-[0.18em] text-white/45">
-                Community preview
+                Community card
               </div>
 
               <div className="mt-4 rounded-[28px] border border-white/10 bg-black/20 p-5">

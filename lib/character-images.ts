@@ -90,10 +90,27 @@ function sanitizeFileExtension(extension: string) {
 function buildPublicPromptSnapshot(
   input: CharacterImagePromptInput,
 ): Record<string, unknown> {
+  const variationLockSummary = [
+    input.outfit ? `Outfit lock: ${input.outfit}.` : "",
+    input.nudityMode ? `Nudity lock: ${input.nudityMode}.` : "",
+    input.bodyType ? `Body lock: ${input.bodyType}.` : "",
+    input.bustSize ? `Bust lock: ${input.bustSize}.` : "",
+    input.breastType ? `Breast shape lock: ${input.breastType}.` : "",
+    input.buttSize ? `Butt lock: ${input.buttSize}.` : "",
+    input.faceBias ? `Face bias lock: ${input.faceBias}.` : "",
+    input.poseContract?.poseFamily
+      ? `Pose family: ${input.poseContract.poseFamily}.`
+      : "",
+    input.poseContract?.framingBias
+      ? `Framing bias: ${input.poseContract.framingBias}.`
+      : "",
+  ].filter(Boolean);
+
   return {
     characterName: input.characterName,
     archetype: input.archetype ?? null,
     visualAura: input.visualAura ?? null,
+    ageValue: input.ageValue ?? null,
     ageBand: input.ageBand ?? null,
     genderPresentation: input.genderPresentation ?? null,
     region: input.region ?? null,
@@ -102,11 +119,20 @@ function buildPublicPromptSnapshot(
     outfit: input.outfit ?? null,
     palette: input.palette ?? null,
     camera: input.camera ?? null,
+    photoPack: input.photoPack ?? null,
     avatarStyle: input.avatarStyle ?? null,
     bodyType: input.bodyType ?? null,
     pose: input.pose ?? null,
+    poseContract: input.poseContract ?? null,
     expression: input.expression ?? null,
     environment: input.environment ?? null,
+    sceneNote: input.sceneNote ?? null,
+    visualConstitution: input.visualConstitution ?? null,
+    visualIdentityLock: input.visualIdentityLock ?? null,
+    selectionContractSummary: input.selectionContractSummary ?? null,
+    behaviorContractSummary: input.behaviorContractSummary ?? null,
+    imageMoodContractSummary: input.imageMoodContractSummary ?? null,
+    variationLockSummary,
     nsfwLevel: input.nsfwLevel ?? null,
   };
 }
@@ -135,6 +161,11 @@ function buildDefaultModeration() {
     consentConfirmed: true,
     depictsRealPerson: false,
     depictsPublicFigure: false,
+    depictsFranchiseCharacter: false,
+    depictsProtectedStyleRequest: false,
+    lookalikeRiskFlag: false,
+    namedCharacterReferenceFlag: false,
+    blockedRequestReason: null,
     nonConsensualFlag: false,
     underageRiskFlag: false,
     illegalContentFlag: false,

@@ -56,7 +56,7 @@ const studioSteps = [
 ];
 
 const trustSignals = [
-  "Premium private chat feel",
+  "Private chat feel",
   "Custom character studio",
   "Scenario-aware conversation",
   "Saved character library",
@@ -103,9 +103,9 @@ const onboardingSteps = [
   {
     id: "chat",
     title: "Open a ready-made character",
-    description: "Browse Lovora's professional characters and jump into chat right away.",
+    description: "Browse Lovora's ready-made characters and jump into chat right away.",
     href: "/characters",
-    cta: "Open professional",
+    cta: "Open characters",
     icon: MessageCircle,
   },
 ] as const;
@@ -250,7 +250,7 @@ function OnboardingCard() {
           <div className="mt-5 flex flex-wrap gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-100">
               <CheckCircle2 className="h-3.5 w-3.5" />
-              Premium onboarding flow active
+              Start flow ready
             </span>
           </div>
         </div>
@@ -273,7 +273,7 @@ function ProductStats() {
   const stats = useMemo(
     () => [
       {
-        label: "Built-in preview",
+        label: "Ready characters",
         value: "3",
         helper: "Landing page featured characters",
         icon: Sparkles,
@@ -281,7 +281,7 @@ function ProductStats() {
       {
         label: "Favorites saved",
         value: String(favoriteCount),
-        helper: "Stored in your browser vault",
+        helper: "Stored in your browser",
         icon: Heart,
       },
       {
@@ -293,7 +293,7 @@ function ProductStats() {
       {
         label: "Core product loop",
         value: "Create → Save → Chat",
-        helper: "Premium character workflow",
+        helper: "The main product flow",
         icon: BarChart3,
       },
     ],
@@ -358,7 +358,7 @@ export default function HomePage() {
                 LOVORA
               </div>
               <div className="text-xs text-white/45">
-                Premium AI character platform
+                Character chat that feels more real
               </div>
             </div>
           </Link>
@@ -476,7 +476,7 @@ export default function HomePage() {
             <div className="relative overflow-hidden rounded-[34px] border border-white/12 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-5 shadow-[0_24px_100px_rgba(0,0,0,0.45)] backdrop-blur-xl">
               <div className="flex items-center justify-between rounded-[24px] border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/75">
                 <div>
-                  <div className="font-medium text-white">Chat preview</div>
+                  <div className="font-medium text-white">Chat example</div>
                   <div className="mt-1 text-xs text-white/45">
                     Clear tone, better scene setup, easier roleplay flow.
                   </div>
@@ -525,7 +525,7 @@ export default function HomePage() {
                       Setting
                     </div>
                     <div className="mt-2 text-base font-medium text-white">
-                      Private lounge, late night, soft luxury mood
+                      Quiet lounge, late night, softer mood
                     </div>
                   </div>
                 </div>
@@ -567,7 +567,7 @@ export default function HomePage() {
                     width={1200}
                     height={900}
                     unoptimized
-                    className="h-64 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                    className="h-64 w-full object-contain bg-black/30 transition duration-500 group-hover:scale-[1.03]"
                   />
                 ) : (
                   <div className="flex h-64 w-full items-center justify-center p-5">
@@ -576,7 +576,7 @@ export default function HomePage() {
                         {character.name.slice(0, 1)}
                       </div>
                       <div className="mt-4 text-sm text-white/60">
-                        Avatar preview will appear here
+                        Character image will appear here
                       </div>
                     </div>
                   </div>
@@ -610,7 +610,7 @@ export default function HomePage() {
                   href={character.slug ? `/characters/${character.slug}` : "/characters"}
                   className="rounded-full border border-white/12 px-3 py-1 text-xs text-white/70 transition hover:border-white/20 hover:bg-white/5"
                 >
-                  Open
+                  View character
                 </Link>
               </div>
               <p className="mt-4 text-sm leading-7 text-white/60">
@@ -627,7 +627,7 @@ export default function HomePage() {
                 ))}
               </div>
               <div className="mt-5 border-t border-white/8 pt-4 text-xs uppercase tracking-[0.18em] text-white/42">
-                Open the card, then start chat from the professional collection.
+                Open the card, then start the chat from the main collection.
               </div>
             </div>
           ))}
@@ -638,7 +638,7 @@ export default function HomePage() {
             href="/characters"
             className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
           >
-            Open professional characters
+            Open characters
           </Link>
           <Link
             href="/community"
@@ -659,8 +659,8 @@ export default function HomePage() {
               A cleaner path from idea to believable conversation.
             </h2>
             <p className="mt-5 max-w-xl text-base leading-8 text-white/62">
-              The builder was reworked to feel less chaotic and more premium,
-              with a cleaner quick mode, stronger section hierarchy, and better
+              The builder was reworked to feel cleaner and easier to follow,
+              with a simpler quick mode, stronger section hierarchy, and better
               control over the details that actually matter.
             </p>
           </div>
@@ -696,7 +696,7 @@ export default function HomePage() {
             Why it feels better
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-5xl">
-            The premium feeling comes from structure, not just styling.
+            It feels better because the structure is clearer.
           </h2>
         </div>
 

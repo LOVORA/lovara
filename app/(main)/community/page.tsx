@@ -1,6 +1,7 @@
 import Link from "next/link";
 import CharacterListGrid from "@/components/characters/character-list-grid";
 import { mapCharacterListItemsToCardViews } from "@/lib/character-builder/list-item-mappers";
+import { buildCharacterImageMap } from "@/lib/image-storage";
 import { createClient } from "@/lib/supabase/server";
 
 type RawCommunityCharacterRow = {
@@ -22,23 +23,23 @@ async function loadPrimaryImageMap(
 
   const { data, error } = await supabase
     .from("character_images")
-    .select("character_id, public_url, created_at")
+    .select("character_id, public_url, is_primary, image_type, created_at")
     .in("character_id", characterIds)
-    .eq("is_primary", true)
     .order("created_at", { ascending: false });
 
   if (error || !data) {
     return new Map<string, string>();
   }
 
-  const imageMap = new Map<string, string>();
-
-  for (const row of data as Array<{ character_id: string; public_url: string | null }>) {
-    if (!row.character_id || !row.public_url || imageMap.has(row.character_id)) continue;
-    imageMap.set(row.character_id, row.public_url);
-  }
-
-  return imageMap;
+  return buildCharacterImageMap(
+    data as Array<{
+      character_id: string | null;
+      public_url: string | null;
+      is_primary?: boolean | null;
+      image_type?: string | null;
+      created_at?: string | null;
+    }>,
+  );
 }
 
 function isPublicCharacter(payload: Record<string, unknown> | null): boolean {
@@ -134,7 +135,7 @@ export default async function CommunityPage() {
               <div className="mt-4 space-y-3 text-sm leading-7 text-white/68">
                 <p>Characters appear here only when users make them public.</p>
                 <p>You can open the public card first, then decide which ones feel worth chatting with.</p>
-                <p>Professional site characters stay separate, so discovery stays clean.</p>
+                <p>Ready-made site characters stay separate, so discovery stays clean.</p>
               </div>
 
               <div className="mt-6 flex flex-wrap gap-3">
@@ -142,7 +143,7 @@ export default async function CommunityPage() {
                   href="/characters"
                   className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10"
                 >
-                  Professional Characters
+                  Characters
                 </Link>
                 <Link
                   href="/my-characters"

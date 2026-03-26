@@ -50,7 +50,7 @@ export default function AppTopbar({ focusMode = false }: TopbarProps) {
                 LOVORA
               </div>
               <div className="text-[11px] text-white/45">
-                Better character chat
+                Character chat that feels real
               </div>
             </div>
           </Link>
@@ -60,6 +60,8 @@ export default function AppTopbar({ focusMode = false }: TopbarProps) {
             <TopLink href="/characters" label="Professional" />
             <TopLink href="/community" label="Community" />
             <TopLink href="/my-characters" label="My Characters" />
+            <TopLink href="/photo-studio" label="Photo Studio" />
+            <TopLink href="/collection" label="Collection" />
             <TopLink href="/chats" label="Chats" />
           </div>
         </div>
@@ -67,16 +69,20 @@ export default function AppTopbar({ focusMode = false }: TopbarProps) {
         <div className="flex items-center gap-2">
           {!focusMode ? (
             <>
-              <TopLink href="/create-character" label="Create Character" />
-              <TopLink href="/my-profile" label="My Profile" />
-              <TopLink href="/characters" label="Professional" />
-              <TopLink href="/community" label="Community" />
+            <TopLink href="/create-character" label="Create" />
+            <TopLink href="/photo-studio" label="Photo Studio" />
+            <TopLink href="/my-profile" label="My Profile" />
+            <TopLink href="/collection" label="Collection" />
+            <TopLink href="/characters" label="Professional" />
+            <TopLink href="/community" label="Community" />
             </>
           ) : (
             <>
               <TopLink href="/" label="Home" />
               <TopLink href="/my-characters" label="My Characters" />
+              <TopLink href="/photo-studio" label="Photo Studio" />
               <TopLink href="/my-profile" label="My Profile" />
+              <TopLink href="/collection" label="Collection" />
               <TopLink href="/characters" label="Professional" />
             </>
           )}

@@ -70,10 +70,10 @@ export default async function PricingPage() {
           <div className="relative grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
             <div>
               <div className="inline-flex rounded-full border border-fuchsia-400/20 bg-fuchsia-400/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-fuchsia-200">
-                Plans preview
+                Plans
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight md:text-5xl">
-                A preview of how plans can grow later
+                How plans can grow later
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-7 text-white/65 md:text-base">
                 Payments are not the focus right now. This page only shows how limits
@@ -152,8 +152,8 @@ export default async function PricingPage() {
                 <div className="mt-6 rounded-[24px] border border-white/10 bg-black/20 p-4 text-sm leading-7 text-white/68">
                   <div>{plan.customCharacterSlots} locked character slots</div>
                   <div>{plan.monthlyRerolls} image rerolls each month</div>
-                  <div>{plan.premiumScenePacks} premium scene packs</div>
-                  <div>{plan.premiumArchetypes} premium archetypes</div>
+                  <div>{plan.premiumScenePacks} scene packs</div>
+                  <div>{plan.premiumArchetypes} archetypes</div>
                 </div>
 
                 <div className="mt-6">

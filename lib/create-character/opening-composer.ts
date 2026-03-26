@@ -22,6 +22,10 @@ type OpeningComposerInput = {
   eyes?: string;
   hair?: string;
   signatureDetail?: string;
+  initiativePattern?: string;
+  conflictBehavior?: string;
+  affectionStyle?: string;
+  paceOfWarmth?: string;
 };
 
 export type OpeningPack = {
@@ -48,6 +52,39 @@ function pickFirst(...values: Array<string | undefined | null>) {
   return values.map((value) => clean(value)).find(Boolean) ?? "";
 }
 
+function inferRoleFamily(input: OpeningComposerInput) {
+  const relationship = lower(input.relationshipToUser);
+  const dynamic = lower(input.relationshipDynamic);
+
+  if (relationship.includes("ex") || dynamic.includes("ex")) return "ex";
+  if (
+    relationship.includes("girlfriend") ||
+    relationship.includes("wife") ||
+    relationship.includes("partner") ||
+    relationship.includes("lover")
+  ) {
+    return "partner";
+  }
+  if (
+    relationship.includes("boss") ||
+    relationship.includes("teacher") ||
+    relationship.includes("co-worker") ||
+    relationship.includes("coworker")
+  ) {
+    return "authority";
+  }
+  if (relationship.includes("best friend") || dynamic.includes("best friend")) {
+    return "best-friend";
+  }
+  if (relationship.includes("rival") || dynamic.includes("rivals")) return "rival";
+  if (relationship.includes("neighbor")) return "neighbor";
+  if (relationship.includes("stranger") || lower(input.sceneType).includes("first meeting")) {
+    return "stranger";
+  }
+  if (relationship.includes("step")) return "step-role";
+  return "default";
+}
+
 function buildOpeningSummary(input: OpeningComposerInput) {
   const parts = [
     clean(input.setting) ? `In ${clean(input.setting)}` : "The scene opens close and immediate",
@@ -66,6 +103,7 @@ function buildOpeningSummary(input: OpeningComposerInput) {
 
 function buildOpeningBeat(input: OpeningComposerInput) {
   const name = clean(input.name) || "The character";
+  const relationship = lower(input.relationshipToUser);
   const dynamic = lower(input.relationshipDynamic);
   const sceneType = lower(input.sceneType);
   const behavior = lower(input.behaviorMode);
@@ -74,6 +112,24 @@ function buildOpeningBeat(input: OpeningComposerInput) {
     emotionalState
       ? `${name} is already carrying ${emotionalState}.`
       : `${name} is already tuned into the moment before the first word lands.`,
+    relationship.includes("girlfriend")
+      ? `${name} already acts like there is history here and expects emotional honesty, not distance.`
+      : "",
+    relationship.includes("wife")
+      ? `${name} moves like closeness is already earned, but not something to take for granted.`
+      : "",
+    relationship.includes("stepmother")
+      ? `${name} is balancing care, authority, and the dangerous fact that the emotional line between you is never simple.`
+      : "",
+    relationship.includes("teacher")
+      ? `${name} is trying to stay composed even though the power dynamic is part of what makes the air feel loaded.`
+      : "",
+    relationship.includes("boss")
+      ? `${name} carries authority naturally, but the scene keeps threatening to turn personal.`
+      : "",
+    relationship.includes("neighbor")
+      ? `${name} treats the ordinary setting like it could become intimate at any second.`
+      : "",
     sceneType.includes("jealousy")
       ? `${name} is holding back the part that wants to ask who else has been on your mind.`
       : "",
@@ -115,6 +171,9 @@ function buildOpeningBeat(input: OpeningComposerInput) {
       : clean(input.sceneGoal)
         ? `Underneath it, the moment is pulling toward ${clean(input.sceneGoal)}.`
         : "",
+    clean(input.initiativePattern)
+      ? `${name} leads with a ${clean(input.initiativePattern)} rhythm instead of waiting to be carried.`
+      : "",
   ].filter(Boolean);
 
   return clamp(beat.join(" "), 220);
@@ -123,15 +182,37 @@ function buildOpeningBeat(input: OpeningComposerInput) {
 function buildGreetingLead(input: OpeningComposerInput) {
   const style = lower(input.greetingStyle);
   const sceneType = lower(input.sceneType);
-  const dynamic = lower(input.relationshipDynamic);
+  const roleFamily = inferRoleFamily(input);
   const behavior = lower(input.behaviorMode);
   const nickname = clean(input.nickname) || "you";
 
   if (sceneType.includes("caught staring")) {
     return `You keep looking at me like that, ${nickname}, and we're going to stop pretending this is nothing.`;
   }
-  if (clean(input.eyes) && /green|grey|icy|hazel|dark/i.test(clean(input.eyes))) {
-    return `You looked up, I looked back, and now this room feels smaller than it did a second ago.`;
+
+  if (roleFamily === "partner") {
+    return `Come closer, ${nickname}. You're not getting away with a distant version of this.`;
+  }
+  if (roleFamily === "step-role") {
+    return `You came to me for a reason, ${nickname}. So don't linger at the edge of it.`;
+  }
+  if (roleFamily === "ex") {
+    return `If you're going to stand in front of me again, ${nickname}, don't act like we need introductions.`;
+  }
+  if (roleFamily === "best-friend") {
+    return `That face never works on me, ${nickname}. Start with the truth and save us both time.`;
+  }
+  if (roleFamily === "rival") {
+    return `If you came here to push at me again, ${nickname}, at least do it honestly.`;
+  }
+  if (roleFamily === "authority") {
+    return `Say it cleanly, ${nickname}. I can already tell this is not casual.`;
+  }
+  if (roleFamily === "neighbor") {
+    return `People don't end up at my door like this by accident, ${nickname}.`;
+  }
+  if (roleFamily === "stranger") {
+    return `You walked in and shifted the room a little. Now I want to know if that was deliberate.`;
   }
   if (sceneType.includes("after a fight")) {
     return `You're here. Good. Because I'm not letting this sit between us untouched.`;
@@ -140,7 +221,7 @@ function buildGreetingLead(input: OpeningComposerInput) {
     return `Come here. You don't need to hold yourself together so hard with me.`;
   }
   if (sceneType.includes("jealousy")) {
-    return `Tell me why that look in your eyes feels like trouble, ${nickname}.`;
+    return `That look in your eyes already feels like trouble, ${nickname}.`;
   }
   if (sceneType.includes("office tension")) {
     return `Careful. One more look like that and this stops feeling professional.`;
@@ -149,6 +230,7 @@ function buildGreetingLead(input: OpeningComposerInput) {
     return `You're standing in my space like you came here for a reason, ${nickname}.`;
   }
 
+  const dynamic = lower(input.relationshipDynamic);
   if (dynamic.includes("forbidden")) {
     return `You should know better than to look this comfortable around me.`;
   }
@@ -183,6 +265,7 @@ function buildGreetingLead(input: OpeningComposerInput) {
 
 function buildGreetingBody(input: OpeningComposerInput) {
   const nickname = clean(input.nickname) || "you";
+  const roleFamily = inferRoleFamily(input);
   const tone = lower(input.tone);
   const chemistryTemplate = clean(input.chemistryTemplate);
   const currentEnergy = clean(input.currentEnergy);
@@ -195,7 +278,39 @@ function buildGreetingBody(input: OpeningComposerInput) {
   const customScenario = clean(input.customScenario);
 
   if (sceneType.includes("first meeting")) {
-    return `First impressions matter, ${nickname}, and right now you feel like the kind that changes the rest of the night.`;
+    return `First impressions matter, ${nickname}, and right now you already feel like the kind that changes the rest of the night.`;
+  }
+
+  if (roleFamily === "partner") {
+    return `I know the difference between your easy face and the one that means you want something from me. So stop thinning this out and let me see the real version.`;
+  }
+
+  if (roleFamily === "step-role") {
+    return `You don't come to me with this kind of hesitation unless the real part matters. Start there instead of circling it.`;
+  }
+
+  if (roleFamily === "ex") {
+    return `We've already done enough damage pretending distance makes us unreadable. So don't hand me the polite cut of this now.`;
+  }
+
+  if (roleFamily === "best-friend") {
+    return `You've spent too much time around me to fake casual successfully. Give me the part you're actually trying to hold back.`;
+  }
+
+  if (roleFamily === "rival") {
+    return `If there's heat under this, own it. I have no interest in the cleaned-up version.`;
+  }
+
+  if (roleFamily === "authority") {
+    return `I can hear pressure before you dress it up. So decide whether you're bringing me the real problem or another controlled half-answer.`;
+  }
+
+  if (roleFamily === "neighbor") {
+    return `The timing is too exact and the air is too charged for this to be casual. So tell me what pushed you to my side of the wall tonight.`;
+  }
+
+  if (roleFamily === "stranger") {
+    return `You haven't earned familiarity with me yet, but you've definitely earned my attention. So don't waste that with something flat.`;
   }
 
   if (clean(input.signatureDetail)) {
@@ -204,6 +319,10 @@ function buildGreetingBody(input: OpeningComposerInput) {
 
   if (sceneType.includes("after a fight")) {
     return `I can still hear what was left unsaid between us, ${nickname}. Don't give me the careful version now.`;
+  }
+
+  if (clean(input.conflictBehavior) && lower(input.conflictBehavior).includes("repair")) {
+    return `We don't get to skip the bruise and jump to easy, ${nickname}. Stay here with me and do this properly.`;
   }
 
   if (sceneType.includes("late-night comfort") || sceneType.includes("soft landing")) {
@@ -220,6 +339,14 @@ function buildGreetingBody(input: OpeningComposerInput) {
 
   if (tone.includes("soft") || tone.includes("gentle")) {
     return `You don't have to explain everything at once, ${nickname}. Stay with me for a second.`;
+  }
+
+  if (clean(input.affectionStyle) && lower(input.affectionStyle).includes("protective")) {
+    return `You don't have to perform calm for me, ${nickname}. Come closer and let me read what's real.`;
+  }
+
+  if (clean(input.paceOfWarmth) && lower(input.paceOfWarmth).includes("slow")) {
+    return `Don't rush the moment, ${nickname}. If this matters, let it land properly.`;
   }
 
   if (relationshipDynamic.includes("obsessed")) {
@@ -247,15 +374,15 @@ function buildGreetingBody(input: OpeningComposerInput) {
   }
 
   if (tone.includes("playful") || chemistryTemplate.includes("playful")) {
-    return `You're giving me a look that usually means trouble, ${nickname}. I want to hear what started it.`;
+    return `You're giving me a look that usually means trouble, ${nickname}. So don't play innocent now.`;
   }
 
   if (tone.includes("intense") || currentEnergy.includes("composed but intense")) {
-    return `Don't waste this moment, ${nickname}. If you're here, say the thing you actually came to say.`;
+    return `Don't waste this moment, ${nickname}. If you're here, bring the part that actually matters.`;
   }
 
   if (userRole) {
-    return `The second you get close, it's obvious what you are to me: ${userRole}. So talk to me honestly.`;
+    return `The second you get close, it's obvious what you are to me: ${userRole}. So don't hide behind the polite version.`;
   }
 
   if (arcStage.includes("attachment") || arcStage.includes("devotion")) {
@@ -270,11 +397,12 @@ function buildGreetingBody(input: OpeningComposerInput) {
     return `This moment already feels loaded, ${nickname}. Don't flatten it now that you're finally here.`;
   }
 
-  return `Something about your timing feels deliberate, ${nickname}. Tell me what pushed you here.`;
+  return `Something about your timing feels deliberate, ${nickname}. So start where the pressure really is.`;
 }
 
 function buildPreviewMessage(input: OpeningComposerInput) {
   const name = clean(input.name) || "The character";
+  const roleFamily = inferRoleFamily(input);
   const tone = lower(input.tone);
   const setting = clean(input.setting);
   const sceneType = lower(input.sceneType);
@@ -292,6 +420,55 @@ function buildPreviewMessage(input: OpeningComposerInput) {
   if (sceneType.includes("office tension")) {
     return clamp(
       `${name} keeps their voice low and controlled. “If you keep looking at me like that in here, we're both going to lose the room.”`,
+      160,
+    );
+  }
+
+  if (roleFamily === "ex") {
+    return clamp(
+      `${name} doesn't bother pretending the history between you is quiet. “If you're back in front of me, say the part you still couldn't leave alone.”`,
+      160,
+    );
+  }
+
+  if (roleFamily === "partner") {
+    return clamp(
+      `${name} makes closeness feel assumed, not requested. “Come here and stop rationing the truth like I won't hear it anyway.”`,
+      160,
+    );
+  }
+
+  if (roleFamily === "authority") {
+    return clamp(
+      `${name} holds the room with practiced control. “Say it clearly. I'm not interested in the version you rehearsed to stay safe.”`,
+      160,
+    );
+  }
+
+  if (roleFamily === "best-friend") {
+    return clamp(
+      `${name} reads you with the ease of someone who's watched your masks fail before. “You can skip fake casual with me. I won't buy it.”`,
+      160,
+    );
+  }
+
+  if (roleFamily === "rival") {
+    return clamp(
+      `${name} treats the tension like a challenge worth enjoying. “If you're going to push at me, at least make it honest.”`,
+      160,
+    );
+  }
+
+  if (roleFamily === "neighbor") {
+    return clamp(
+      `${name} makes the ordinary setting feel more dangerous than it should. “People don't show up at my door with that look unless something already tipped.”`,
+      160,
+    );
+  }
+
+  if (roleFamily === "stranger") {
+    return clamp(
+      `${name} lets the unfamiliarity stay alive instead of pretending there is history. “Interesting. You walked in like you expected me to notice.”`,
       160,
     );
   }
@@ -375,5 +552,9 @@ export function buildOpeningPromptDirectives(pack: OpeningPack) {
     `Opening summary: ${pack.openingSummary}`,
     `Private opening beat: ${pack.openingBeat}`,
     `Greeting energy to preserve: ${pack.greeting}`,
+    "The very first live reply after the greeting must feel like a continuation of the same opening scene, not a reset.",
+    "Protect the opening's pressure, atmosphere, and emotional direction for the first few turns.",
+    "In the first exchange, prefer a charged observation, scene-specific read, or role-locked pull over a broad question.",
+    "Do not let the opening collapse into generic chat, generic friendliness, or assistant-like pacing.",
   ];
 }

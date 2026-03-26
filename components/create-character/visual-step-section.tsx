@@ -2,7 +2,9 @@ import {
   ACCESSORY_VIBE_OPTIONS,
   AVATAR_STYLE_OPTIONS,
   BODY_TYPE_OPTIONS,
+  BREAST_TYPE_OPTIONS,
   BUST_SIZE_OPTIONS,
+  BUTT_SIZE_OPTIONS,
   CAMERA_OPTIONS,
   EYE_SHAPE_OPTIONS,
   EYE_OPTIONS,
@@ -29,7 +31,9 @@ import type { RebuildCustomNotes } from "@/components/create-character/studio-st
 type VisualStepSectionProps = {
   avatarStyle: string;
   bodyType: string;
+  breastType: string;
   bustSize: string;
+  buttSize: string;
   camera: string;
   accessoryVibe: string;
   eyeShape: string;
@@ -54,7 +58,9 @@ type VisualStepSectionProps = {
 export function VisualStepSection({
   avatarStyle,
   bodyType,
+  breastType,
   bustSize,
+  buttSize,
   camera,
   accessoryVibe,
   eyeShape,
@@ -78,12 +84,12 @@ export function VisualStepSection({
   return (
     <Section
       title="Visual lab prep"
-      description="Prepares the character for future portraits, cards, and media generation."
+      description="Prepares an original realistic character for future portraits, cards, and media generation."
       accent="cyan"
     >
       <div className="grid gap-4 md:grid-cols-2">
         <SelectField
-          label="Avatar style"
+          label="Photo feel"
           value={avatarStyle || AVATAR_STYLE_OPTIONS[0]}
           onChange={(value) => onRebuildCustomNotes({ "Avatar style": value })}
           options={AVATAR_STYLE_OPTIONS.map((value) => ({ value, label: value }))}
@@ -163,10 +169,22 @@ export function VisualStepSection({
           options={BUST_SIZE_OPTIONS.map((value) => ({ value, label: value }))}
         />
         <SelectField
+          label="Breast type"
+          value={breastType || BREAST_TYPE_OPTIONS[0]}
+          onChange={(value) => onRebuildCustomNotes({ "Breast type": value })}
+          options={BREAST_TYPE_OPTIONS.map((value) => ({ value, label: value }))}
+        />
+        <SelectField
           label="Hip shape"
           value={hipsType || HIP_SHAPE_OPTIONS[0]}
           onChange={(value) => onRebuildCustomNotes({ "Hip shape": value })}
           options={HIP_SHAPE_OPTIONS.map((value) => ({ value, label: value }))}
+        />
+        <SelectField
+          label="Butt size"
+          value={buttSize || BUTT_SIZE_OPTIONS[0]}
+          onChange={(value) => onRebuildCustomNotes({ "Butt size": value })}
+          options={BUTT_SIZE_OPTIONS.map((value) => ({ value, label: value }))}
         />
         <SelectField
           label="Waist definition"
@@ -239,7 +257,7 @@ export function VisualStepSection({
           label="Image prompt prep"
           value={imagePrompt}
           onChange={(value) => onRebuildCustomNotes({ "Image prompt": value })}
-          placeholder="cinematic luxury portrait, warm skin glow, rich contrast, subtle eye contact, premium fashion editorial lighting..."
+          placeholder="cinematic portrait, warm skin glow, rich contrast, subtle eye contact, clean fashion lighting..."
           rows={4}
         />
       </div>

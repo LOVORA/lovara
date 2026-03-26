@@ -3,23 +3,18 @@
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  createMyCustomCharacter,
+  finalizeMyCustomCharacterCreation,
   type CharacterDraftInput,
 } from "@/lib/account";
-import type { CharacterImageSafetyInput, CharacterImagePromptInput, ImageProvider } from "@/lib/image-provider";
-import { requestImageGeneration } from "@/lib/image-provider";
+import type { CharacterImagePromptInput } from "@/lib/image-provider";
 import type { BannerState, StudioStep } from "@/lib/create-character/studio-editor";
 import type { StudioFormState } from "@/lib/custom-character-studio";
 
 type UseCreateCharacterSubmitArgs = {
-  avatarProvider: ImageProvider;
-  avatarSafetyInput: CharacterImageSafetyInput;
   draft: CharacterDraftInput;
   form: StudioFormState;
   generatedAvatarUrl: string | null;
-  lastAvatarNegativePrompt: string | null;
   lastAvatarPromptInput: CharacterImagePromptInput | null;
-  lastAvatarResolvedPrompt: string | null;
   saving: boolean;
   setActiveStep: (step: StudioStep) => void;
   setBanner: (banner: BannerState) => void;
@@ -54,14 +49,10 @@ function validateForm(form: StudioFormState) {
 }
 
 export function useCreateCharacterSubmit({
-  avatarProvider,
-  avatarSafetyInput,
   draft,
   form,
   generatedAvatarUrl,
-  lastAvatarNegativePrompt,
   lastAvatarPromptInput,
-  lastAvatarResolvedPrompt,
   saving,
   setActiveStep,
   setBanner,
@@ -85,25 +76,14 @@ export function useCreateCharacterSubmit({
       setBanner(null);
 
       try {
-        const created = await createMyCustomCharacter(draft);
-
-        if (generatedAvatarUrl && lastAvatarPromptInput) {
-          try {
-            await requestImageGeneration({
-              provider: avatarProvider,
-              kind: "avatar",
-              characterId: created.id,
-              userId: created.user_id,
-              promptInput: lastAvatarPromptInput,
-              safety: avatarSafetyInput,
-              previewImageUrl: generatedAvatarUrl,
-              previewResolvedPrompt: lastAvatarResolvedPrompt,
-              previewNegativePrompt: lastAvatarNegativePrompt,
-            });
-          } catch (avatarError) {
-            console.error("Avatar persistence failed:", avatarError);
-          }
+        if (!generatedAvatarUrl || !lastAvatarPromptInput) {
+          throw new Error("Generate the avatar first before creating this character.");
         }
+
+        const created = await finalizeMyCustomCharacterCreation({
+          draft,
+          imageUrl: generatedAvatarUrl,
+        });
 
         setBanner({
           type: "success",
@@ -127,14 +107,10 @@ export function useCreateCharacterSubmit({
       }
     },
     [
-      avatarProvider,
-      avatarSafetyInput,
       draft,
       form,
       generatedAvatarUrl,
-      lastAvatarNegativePrompt,
       lastAvatarPromptInput,
-      lastAvatarResolvedPrompt,
       router,
       saving,
       setActiveStep,

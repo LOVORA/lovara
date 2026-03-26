@@ -147,7 +147,7 @@ export function PersonalityStepSection({
             label="Custom visual aura (optional)"
             value={visualNote}
             onChange={(value) => onRebuildCustomNotes({ "Visual aura": value })}
-            placeholder="sharp cheekbones, understated luxury, dangerous sleepy eyes, etc."
+            placeholder="sharp cheekbones, understated style, dangerous sleepy eyes, etc."
           />
         </div>
       </Section>

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
-import { getOrCreateConversationForCharacter } from "../../lib/chat";
 
 type StartChatButtonProps = {
   characterSlug: string;
@@ -14,7 +13,6 @@ type StartChatButtonProps = {
 export default function StartChatButton({
   characterSlug,
   characterName,
-  characterGreeting,
 }: StartChatButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -35,11 +33,19 @@ export default function StartChatButton({
         return;
       }
 
-      await getOrCreateConversationForCharacter(supabase, user.id, {
-        slug: characterSlug,
-        name: characterName,
-        greeting: characterGreeting,
-      });
+      const response = await fetch(
+        `/api/chat/bootstrap?slug=${encodeURIComponent(characterSlug)}`,
+        {
+          credentials: "include",
+        },
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; error?: string }
+        | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || `Could not open chat with ${characterName}.`);
+      }
 
       router.push(`/chat/${characterSlug}`);
     } catch (error) {

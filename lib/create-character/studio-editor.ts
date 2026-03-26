@@ -107,7 +107,7 @@ export const VISUAL_AURA_OPTIONS = [
   "old-money elegance",
   "dangerous charm",
   "girl-next-door warmth",
-  "high-fashion edge",
+  "sharp polished edge",
   "dark feminine aura",
   "quiet intellectual",
   "sporty confidence",
@@ -341,7 +341,7 @@ export const SCENE_FOCUS_OPTIONS = [
   "small domestic realism",
   "emotional intimacy",
   "banter and momentum",
-  "cinematic atmosphere",
+  "natural lifestyle realism",
 ] as const;
 
 export const ATTENTION_HOOK_OPTIONS = [
@@ -383,14 +383,13 @@ export const CURRENT_ENERGY_OPTIONS = [
 ] as const;
 
 export const AVATAR_STYLE_OPTIONS = [
-  "cinematic realism",
-  "luxury portrait",
-  "soft natural",
-  "editorial fashion",
-  "dark moody",
-  "romantic glow",
-  "anime-inspired realism",
-  "minimal clean studio",
+  "reference-style natural realism",
+  "soft natural realism",
+  "warm natural realism",
+  "clean indoor realism",
+  "natural low-light realism",
+  "everyday lifestyle realism",
+  "soft flattering natural realism",
 ] as const;
 
 export const SKIN_TONE_OPTIONS = [
@@ -443,10 +442,10 @@ export const EYE_SHAPE_OPTIONS = [
 export const MAKEUP_STYLE_OPTIONS = [
   "barely there",
   "soft glam",
-  "clean editorial",
+  "clean natural",
   "smoky sultry",
   "romantic flush",
-  "sharp high-fashion",
+  "polished evening",
 ] as const;
 
 export const ACCESSORY_VIBE_OPTIONS = [
@@ -496,11 +495,28 @@ export const BUST_SIZE_OPTIONS = [
   "very full",
 ] as const;
 
+export const BREAST_TYPE_OPTIONS = [
+  "natural",
+  "perky",
+  "soft lower-set",
+  "round full",
+  "augmented",
+] as const;
+
 export const HIP_SHAPE_OPTIONS = [
   "narrow",
   "balanced",
   "wide",
   "very curvy",
+] as const;
+
+export const BUTT_SIZE_OPTIONS = [
+  "small",
+  "perky",
+  "athletic",
+  "medium",
+  "full",
+  "very full",
 ] as const;
 
 export const WAIST_DEFINITION_OPTIONS = [
@@ -525,30 +541,26 @@ export const EXPOSURE_LEVEL_OPTIONS = [
 ] as const;
 
 export const CAMERA_OPTIONS = [
-  "close-up portrait",
-  "waist-up portrait",
-  "full body pose",
-  "over-the-shoulder glance",
-  "soft candid angle",
-  "editorial front-facing shot",
+  "body-readable upper-body framing with visible stomach line, waist, and upper hips",
+  "full body lifestyle framing",
 ] as const;
 
 export const LIGHTING_MOOD_OPTIONS = [
-  "soft window light",
-  "golden-hour warmth",
-  "editorial studio flash",
-  "dim moody lamp light",
-  "neon nightlife glow",
-  "clean luxury ambient light",
+  "soft window daylight",
+  "warm natural daylight",
+  "soft daylight or clean practical indoor light",
+  "warm practical indoor light",
+  "natural evening interior light",
+  "bright practical indoor ambient light",
 ] as const;
 
 export const PHOTO_PACK_OPTIONS = [
-  "luxury portraits",
-  "mirror selfies",
-  "daily lifestyle set",
-  "romantic candid set",
-  "night-out set",
-  "soft home set",
+  "natural lifestyle portraits",
+  "casual mirror lifestyle portraits",
+  "everyday lifestyle portraits",
+  "warm candid lifestyle portraits",
+  "realistic indoor lifestyle portraits",
+  "soft home lifestyle portraits",
 ] as const;
 
 export const SCENE_PRESETS = [
@@ -655,13 +667,13 @@ export const CHARACTER_TEMPLATES: CharacterTemplate[] = [
         "intensify emotional tension without collapsing into blunt confession",
       visualAura: "clean luxury",
       interests: ["jazz bars", "fashion", "late-night drives"],
-      avatarStyle: "luxury portrait",
+      avatarStyle: "reference-style natural realism",
       hair: "long dark hair",
       eyes: "hazel eyes",
       outfit: "black dress elegance",
       palette: "wine red / black",
-      camera: "close-up portrait",
-      photoPack: "luxury portraits",
+      camera: "upper-body framing with visible torso and stomach line",
+      photoPack: "natural lifestyle portraits",
       publicTagline: "Warmth, luxury, and dangerous intimacy in one character.",
       publicTeaser:
         "A polished romantic character with softness, tension, and upscale emotional pull.",
@@ -693,13 +705,13 @@ export const CHARACTER_TEMPLATES: CharacterTemplate[] = [
       sceneGoal: "keep flirting alive while pretending it means nothing",
       visualAura: "girl-next-door warmth",
       interests: ["coffee rituals", "gaming", "beach nights"],
-      avatarStyle: "soft natural",
+      avatarStyle: "soft natural realism",
       hair: "soft brown waves",
       eyes: "soft brown eyes",
       outfit: "oversized hoodie comfort",
       palette: "white / beige",
-      camera: "soft candid angle",
-      photoPack: "daily lifestyle set",
+      camera: "upper-body candid lifestyle framing with visible torso",
+      photoPack: "everyday lifestyle portraits",
       publicTagline: "Banter, comfort, and chemistry that feels instant.",
       publicTeaser:
         "A playful best-friend energy template built for teasing, comfort, and emotional closeness.",
@@ -731,13 +743,13 @@ export const CHARACTER_TEMPLATES: CharacterTemplate[] = [
       sceneGoal: "make tension feel expensive, earned, and hard to read",
       visualAura: "old-money elegance",
       interests: ["art museums", "vinyl records", "travel"],
-      avatarStyle: "editorial fashion",
+      avatarStyle: "reference-style natural realism",
       hair: "blonde sleek look",
       eyes: "grey eyes",
       outfit: "old-money chic",
       palette: "cream / gold",
-      camera: "editorial front-facing shot",
-      photoPack: "night-out set",
+      camera: "upper-body natural framing with visible torso",
+      photoPack: "realistic indoor lifestyle portraits",
       publicTagline: "Elegant, unreadable, and impossible to forget.",
       publicTeaser:
         "Luxury-coded emotional tension with cold restraint, selective warmth, and slow-burn dominance.",
@@ -769,13 +781,13 @@ export const CHARACTER_TEMPLATES: CharacterTemplate[] = [
       sceneGoal: "build dark attachment without losing elegance",
       visualAura: "dangerous charm",
       interests: ["boxing", "late-night drives", "poetry"],
-      avatarStyle: "dark moody",
+      avatarStyle: "natural low-light realism",
       hair: "black silky hair",
       eyes: "dark eyes",
       outfit: "street-luxury fit",
       palette: "black / silver",
-      camera: "over-the-shoulder glance",
-      photoPack: "night-out set",
+      camera: "upper-body over-shoulder framing with visible torso",
+      photoPack: "realistic indoor lifestyle portraits",
       publicTagline: "Obsessive protection with premium dark chemistry.",
       publicTeaser:
         "A dark, possessive, emotionally intense character with controlled danger and private loyalty.",
@@ -807,13 +819,13 @@ export const CHARACTER_TEMPLATES: CharacterTemplate[] = [
       sceneGoal: "create comfort and trust quickly",
       visualAura: "soft natural beauty",
       interests: ["books", "coffee rituals", "cooking"],
-      avatarStyle: "romantic glow",
+      avatarStyle: "warm natural realism",
       hair: "auburn romantic hair",
       eyes: "soft brown eyes",
       outfit: "soft knitwear intimacy",
       palette: "rose / ivory",
-      camera: "soft candid angle",
-      photoPack: "soft home set",
+      camera: "upper-body candid lifestyle framing with visible torso",
+      photoPack: "soft home lifestyle portraits",
       publicTagline: "A gentle emotional presence built for comfort and trust.",
       publicTeaser:
         "Warm, loyal, and emotionally steady companion energy for softer chats and slower closeness.",
@@ -843,15 +855,15 @@ export const CHARACTER_TEMPLATES: CharacterTemplate[] = [
       setting: "exclusive event where both of you are pretending not to care",
       relationshipToUser: "rival they watch too closely",
       sceneGoal: "turn rivalry into addictive attraction",
-      visualAura: "high-fashion edge",
+      visualAura: "sharp polished edge",
       interests: ["fashion", "travel", "art museums"],
-      avatarStyle: "editorial fashion",
+      avatarStyle: "reference-style natural realism",
       hair: "short sharp cut",
       eyes: "green eyes",
       outfit: "tailored office look",
       palette: "navy / gold",
-      camera: "waist-up portrait",
-      photoPack: "luxury portraits",
+      camera: "upper-body framing with visible torso and stomach line",
+      photoPack: "natural lifestyle portraits",
       publicTagline:
         "Luxury rivalry with controlled flirtation and elite tension.",
       publicTeaser:

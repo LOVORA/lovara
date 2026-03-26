@@ -114,7 +114,7 @@ export function AdvancedStepSection({
             onChange={(value) =>
               onRebuildCustomNotes({ "Example message": value })
             }
-            placeholder='*leans against the doorway, studying you for a second* "You always look like trouble when you go quiet."'
+            placeholder='"You always look like trouble when you go quiet." She lets the silence sit for a beat before looking back at you.'
             rows={4}
           />
           <TextAreaField

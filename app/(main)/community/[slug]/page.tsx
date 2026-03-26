@@ -6,6 +6,7 @@ import {
   presentCharacterDebug,
   presentCharacterVisualBadges,
 } from "@/lib/character-builder/presenters";
+import { pickBestCharacterImageUrl } from "@/lib/image-storage";
 import { createClient } from "@/lib/supabase/server";
 
 type RawCharacterDetailRow = {
@@ -75,19 +76,52 @@ export default async function CommunityCharacterDetailPage({ params }: PageProps
 
   const { data: imageRows } = await supabase
     .from("character_images")
-    .select("public_url, created_at")
+    .select("public_url, is_primary, image_type, created_at, prompt_input, provider_used")
     .eq("character_id", row.id)
-    .eq("is_primary", true)
     .order("created_at", { ascending: false })
-    .limit(1);
+    .limit(12);
 
-  const primaryImageUrl =
-    Array.isArray(imageRows) &&
-    imageRows[0] &&
-    typeof imageRows[0].public_url === "string" &&
-    imageRows[0].public_url
-      ? imageRows[0].public_url
-      : null;
+  const galleryImages = Array.isArray(imageRows)
+    ? imageRows.reduce<
+        Array<{
+          public_url: string;
+          is_primary: boolean | null;
+          image_type: string | null;
+          created_at: string | null;
+          prompt_input?: Record<string, unknown> | null;
+          provider_used?: string | null;
+        }>
+      >((result, image) => {
+        if (typeof image.public_url !== "string" || image.public_url.length === 0) {
+          return result;
+        }
+
+        result.push({
+          public_url: image.public_url,
+          is_primary: image.is_primary ?? null,
+          image_type: image.image_type ?? null,
+          created_at: image.created_at ?? null,
+          prompt_input:
+            image.prompt_input && typeof image.prompt_input === "object"
+              ? (image.prompt_input as Record<string, unknown>)
+              : null,
+          provider_used:
+            typeof image.provider_used === "string" ? image.provider_used : null,
+        });
+
+        return result;
+      }, [])
+    : [];
+
+  const primaryImageUrl = pickBestCharacterImageUrl(
+    galleryImages.map((image) => ({
+      character_id: row.id,
+      public_url: image.public_url,
+      is_primary: image.is_primary ?? false,
+      image_type: image.image_type ?? null,
+      created_at: image.created_at ?? null,
+    })),
+  );
 
   const payload =
     typeof row.payload === "object" && row.payload ? row.payload : {};
@@ -164,10 +198,10 @@ export default async function CommunityCharacterDetailPage({ params }: PageProps
           <div className="relative flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-cyan-100">
-                <span>Community Character</span>
+                <span>Community character</span>
                 {presented.isBuilderV2 ? (
                   <span className="rounded-full border border-fuchsia-400/20 bg-fuchsia-400/10 px-2 py-0.5 text-[10px] tracking-[0.18em] text-fuchsia-100">
-                    Studio build
+                    New builder
                   </span>
                 ) : null}
               </div>
@@ -180,6 +214,53 @@ export default async function CommunityCharacterDetailPage({ params }: PageProps
                 </p>
               ) : null}
             </div>
+
+            {galleryImages.length > 1 ? (
+              <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.18)]">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-white">Saved images</h2>
+                    <p className="mt-3 text-sm leading-7 text-white/60">
+                      Extra images saved with this character so the profile feels fuller.
+                    </p>
+                  </div>
+                  <Link
+                    href="/community"
+                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10"
+                  >
+                    Browse community
+                  </Link>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {galleryImages.map((image) => (
+                    <div
+                      key={`${image.public_url}-${image.created_at ?? ""}`}
+                      className="overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))]"
+                    >
+                      <div className="relative h-56 w-full">
+                        <Image
+                          src={image.public_url}
+                          alt={presented.title}
+                          fill
+                          unoptimized
+                          className="object-contain bg-black/30 object-center"
+                        />
+                        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,22,0.84),transparent_50%)]" />
+                        <div className="absolute inset-x-0 bottom-0 p-4">
+                          <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/78 backdrop-blur">
+                            {image.is_primary
+                              ? "Hero image"
+                              : image.provider_used === "runware_ideogram"
+                                ? "Max realism"
+                                : "Saved frame"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="flex flex-wrap gap-3">
               <Link
@@ -223,7 +304,7 @@ export default async function CommunityCharacterDetailPage({ params }: PageProps
                     alt={presented.title}
                     fill
                     unoptimized
-                    className="object-cover object-center"
+                    className="object-contain bg-black/30 object-center"
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-500/20 via-slate-900 to-emerald-500/20">
@@ -287,7 +368,7 @@ export default async function CommunityCharacterDetailPage({ params }: PageProps
                   Chat hook
                 </div>
                 <div className="mt-2 text-sm leading-7 text-white/78">
-                  {row.greeting || row.preview_message || "No hook saved."}
+                  {row.greeting || row.preview_message || "No opening line saved."}
                 </div>
               </div>
             </div>

@@ -98,18 +98,18 @@ export function useAvatarGeneration({
         if (!response.ok) {
           throw new Error(
             payload?.errorMessage ||
-              "Could not refresh avatar generation status.",
+              "Could not refresh avatar image status.",
           );
         }
 
         if (!payload) {
-          throw new Error("Invalid status response from image provider.");
+          throw new Error("Invalid response from the image provider.");
         }
 
         if (cancelled) return;
 
         if (!payload.ok) {
-          throw new Error(payload.errorMessage || "Avatar polling failed.");
+          throw new Error(payload.errorMessage || "Avatar refresh failed.");
         }
 
         if (payload.revisedPrompt) {
@@ -131,7 +131,7 @@ export function useAvatarGeneration({
         if (payload.status === "processing") {
           setAvatarJobStatus("processing");
           setAvatarResultMessage(
-            "Avatar is being generated. Preview will appear automatically.",
+            "Avatar is being generated. The image will appear automatically.",
           );
           return;
         }
@@ -143,11 +143,11 @@ export function useAvatarGeneration({
             setGeneratedAvatarUrl(payload.imageUrl);
             setAvatarQueuedExternalJobId(null);
             setQueuedJobProvider(null);
-            setAvatarResultMessage("Avatar preview generated successfully.");
+            setAvatarResultMessage("Avatar image is ready.");
             setBanner({
               type: "success",
               message:
-                "Avatar preview is ready. It will be attached when you create the character.",
+                "Avatar image is ready. It will attach when you create the character.",
             });
             return;
           }
@@ -155,12 +155,12 @@ export function useAvatarGeneration({
           setAvatarQueuedExternalJobId(null);
           setQueuedJobProvider(null);
           setAvatarResultMessage(
-            "Generation completed, but no preview image URL was returned.",
+            "Generation completed, but no image URL was returned.",
           );
           setBanner({
             type: "error",
             message:
-              "The provider completed the job without returning a preview image.",
+              "The provider completed the job without returning an image.",
           });
           return;
         }
@@ -262,10 +262,19 @@ export function useAvatarGeneration({
           .replace(/^-+|-+$/g, "")}`,
         promptInput,
         safety,
+        generationProfile: "identity_locked_avatar",
+        qualityTier: "max",
+        referenceStrategy: "single_avatar_lock",
       });
 
       if (!result.ok) {
-        throw new Error(result.errorMessage || "Avatar generation failed.");
+        const alternativeHint =
+          result.safeAlternatives && result.safeAlternatives.length > 0
+            ? ` Try: ${result.safeAlternatives[0]}`
+            : "";
+        throw new Error(
+          `${result.errorMessage || "Avatar generation failed."}${alternativeHint}`,
+        );
       }
 
       setLastAvatarPromptInput(promptInput);
@@ -283,11 +292,11 @@ export function useAvatarGeneration({
       if (result.imageUrl) {
         setGeneratedAvatarUrl(result.imageUrl);
         setAvatarJobStatus("completed");
-        setAvatarResultMessage("Avatar preview generated successfully.");
+        setAvatarResultMessage("Avatar image is ready.");
         setBanner({
           type: "success",
           message:
-            "Avatar preview generated. It will be attached when you create the character.",
+            "Avatar image is ready. It will attach when you create the character.",
         });
         return;
       }
@@ -303,18 +312,18 @@ export function useAvatarGeneration({
         setBanner({
           type: "success",
           message:
-            "Avatar request queued successfully. The preview will refresh automatically when it is ready.",
+            "Avatar request queued successfully. The image will refresh automatically when it is ready.",
         });
         return;
       }
 
       setAvatarResultMessage(
-        "Generation completed without a preview URL from the provider.",
+        "Generation completed without an image URL from the provider.",
       );
       setAvatarJobStatus("failed");
       setBanner({
         type: "error",
-        message: "Runware did not return a preview image. Try again.",
+        message: "Runware did not return an image. Try again.",
       });
     } catch (error) {
       const message =

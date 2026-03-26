@@ -1,5 +1,6 @@
 export const STRUCTURED_NOTE_KEYS = [
   "Region note",
+  "Origin",
   "Visual aura",
   "Interest anchors",
   "Response directive",
@@ -22,7 +23,11 @@ export const STRUCTURED_NOTE_KEYS = [
   "Trait stack",
   "Avatar style",
   "Skin tone",
+  "Eye color",
   "Hair",
+  "Hair color",
+  "Hair style",
+  "Custom hairstyle",
   "Hair texture",
   "Eyes",
   "Eye shape",
@@ -32,7 +37,9 @@ export const STRUCTURED_NOTE_KEYS = [
   "Palette",
   "Body type",
   "Bust size",
+  "Breast type",
   "Hip shape",
+  "Butt size",
   "Waist definition",
   "Height impression",
   "Exposure level",
@@ -54,6 +61,10 @@ export const STRUCTURED_NOTE_KEYS = [
   "Linguistic flavor",
   "Chemistry template",
   "Current energy",
+  "Hobbies",
+  "Fetishes",
+  "Extra personality details",
+  "Extra physical details",
   "Public tagline",
   "Public teaser",
   "Public tags",
@@ -62,10 +73,18 @@ export const STRUCTURED_NOTE_KEYS = [
 export type StudioStructuredNoteKey = (typeof STRUCTURED_NOTE_KEYS)[number];
 export type StudioStructuredNoteMap = Record<StudioStructuredNoteKey, string>;
 
+function encodeStructuredValue(value: string) {
+  return value.replace(/\n/g, "\\n");
+}
+
+function decodeStructuredValue(value: string) {
+  return value.replace(/\\n/g, "\n");
+}
+
 export function extractStructuredLine(source: string, prefix: string) {
   const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = source.match(new RegExp(`^${escaped}:\\s*(.+)$`, "m"));
-  return match?.[1]?.trim() ?? "";
+  return match?.[1] ? decodeStructuredValue(match[1]) : "";
 }
 
 export function removeStructuredLine(source: string, prefix: string) {
@@ -109,7 +128,9 @@ export function composeStructuredNotes(
 ): string {
   return [
     ...STRUCTURED_NOTE_KEYS.map((key) =>
-      values[key]?.trim() ? `${key}: ${values[key].trim()}` : "",
+      typeof values[key] === "string" && values[key]!.trim().length > 0
+        ? `${key}: ${encodeStructuredValue(values[key] as string)}`
+        : "",
     ),
     bodyNotes.trim(),
   ]

@@ -112,6 +112,8 @@ type UntypedSupabase = {
 
 const db = supabase as unknown as UntypedSupabase;
 
+type CharacterImageJobsRepositoryClient = UntypedSupabase;
+
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -120,7 +122,35 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function asError(error: unknown): Error {
   if (error instanceof Error) return error;
-  return new Error(typeof error === "string" ? error : "Unknown Supabase error");
+  if (typeof error === "string") return new Error(error);
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const message =
+      typeof record.message === "string" && record.message.trim().length > 0
+        ? record.message.trim()
+        : null;
+    const details =
+      typeof record.details === "string" && record.details.trim().length > 0
+        ? record.details.trim()
+        : null;
+    const hint =
+      typeof record.hint === "string" && record.hint.trim().length > 0
+        ? record.hint.trim()
+        : null;
+    const code =
+      typeof record.code === "string" && record.code.trim().length > 0
+        ? record.code.trim()
+        : null;
+
+    const parts = [message, details, hint, code ? `code: ${code}` : null].filter(
+      Boolean,
+    );
+
+    if (parts.length > 0) {
+      return new Error(parts.join(" | "));
+    }
+  }
+  return new Error("Unknown Supabase error");
 }
 
 function mapImageJobRow(row: Record<string, unknown>): DbCharacterImageJob {
@@ -272,9 +302,19 @@ function buildCreatePayload(input: CreateCharacterImageJobInput) {
 export async function createCharacterImageJob(
   input: CreateCharacterImageJobInput,
 ): Promise<DbCharacterImageJob> {
+  return createCharacterImageJobWithClient(
+    db as unknown as CharacterImageJobsRepositoryClient,
+    input,
+  );
+}
+
+export async function createCharacterImageJobWithClient(
+  client: CharacterImageJobsRepositoryClient,
+  input: CreateCharacterImageJobInput,
+): Promise<DbCharacterImageJob> {
   const payload = buildCreatePayload(input);
 
-  const { data, error } = await db
+  const { data, error } = await client
     .from("character_image_jobs")
     .insert(payload)
     .select("*")
@@ -335,6 +375,16 @@ export async function listCharacterImageJobs(
 export async function updateCharacterImageJobStatus(
   input: UpdateCharacterImageJobStatusInput,
 ): Promise<DbCharacterImageJob> {
+  return updateCharacterImageJobStatusWithClient(
+    db as unknown as CharacterImageJobsRepositoryClient,
+    input,
+  );
+}
+
+export async function updateCharacterImageJobStatusWithClient(
+  client: CharacterImageJobsRepositoryClient,
+  input: UpdateCharacterImageJobStatusInput,
+): Promise<DbCharacterImageJob> {
   const payload: Record<string, unknown> = {
     status: input.status,
   };
@@ -359,7 +409,7 @@ export async function updateCharacterImageJobStatus(
     payload.completed_at = input.completedAt;
   }
 
-  const { data, error } = await db
+  const { data, error } = await client
     .from("character_image_jobs")
     .update(payload)
     .eq("id", input.jobId)
@@ -381,7 +431,19 @@ export async function markCharacterImageJobProcessing(
   jobId: string,
   externalJobId?: string | null,
 ): Promise<DbCharacterImageJob> {
-  return updateCharacterImageJobStatus({
+  return markCharacterImageJobProcessingWithClient(
+    db as unknown as CharacterImageJobsRepositoryClient,
+    jobId,
+    externalJobId,
+  );
+}
+
+export async function markCharacterImageJobProcessingWithClient(
+  client: CharacterImageJobsRepositoryClient,
+  jobId: string,
+  externalJobId?: string | null,
+): Promise<DbCharacterImageJob> {
+  return updateCharacterImageJobStatusWithClient(client, {
     jobId,
     status: "processing",
     externalJobId: externalJobId ?? null,
@@ -392,7 +454,17 @@ export async function markCharacterImageJobProcessing(
 export async function markCharacterImageJobCompleted(
   input: MarkCharacterImageJobCompletedInput,
 ): Promise<DbCharacterImageJob> {
-  return updateCharacterImageJobStatus({
+  return markCharacterImageJobCompletedWithClient(
+    db as unknown as CharacterImageJobsRepositoryClient,
+    input,
+  );
+}
+
+export async function markCharacterImageJobCompletedWithClient(
+  client: CharacterImageJobsRepositoryClient,
+  input: MarkCharacterImageJobCompletedInput,
+): Promise<DbCharacterImageJob> {
+  return updateCharacterImageJobStatusWithClient(client, {
     jobId: input.jobId,
     status: "completed",
     externalJobId: input.externalJobId ?? null,
@@ -403,7 +475,17 @@ export async function markCharacterImageJobCompleted(
 export async function markCharacterImageJobFailed(
   input: MarkCharacterImageJobFailedInput,
 ): Promise<DbCharacterImageJob> {
-  return updateCharacterImageJobStatus({
+  return markCharacterImageJobFailedWithClient(
+    db as unknown as CharacterImageJobsRepositoryClient,
+    input,
+  );
+}
+
+export async function markCharacterImageJobFailedWithClient(
+  client: CharacterImageJobsRepositoryClient,
+  input: MarkCharacterImageJobFailedInput,
+): Promise<DbCharacterImageJob> {
+  return updateCharacterImageJobStatusWithClient(client, {
     jobId: input.jobId,
     status: "failed",
     externalJobId: input.externalJobId ?? null,

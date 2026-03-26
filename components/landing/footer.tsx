@@ -2,9 +2,9 @@ import Link from "next/link";
 
 const productLinks = [
   { href: "/", label: "Home" },
-  { href: "/characters", label: "Professional Characters" },
-  { href: "/community", label: "Community Characters" },
-  { href: "/create-character", label: "Create Character" },
+  { href: "/characters", label: "Characters" },
+  { href: "/community", label: "Community" },
+  { href: "/create-character", label: "Create" },
   { href: "/my-characters", label: "My Characters" },
 ];
 
@@ -22,14 +22,14 @@ export default function Footer() {
               <div>
                 <div className="text-base font-semibold text-white">Lovora</div>
                 <div className="text-xs text-white/45">
-                  Premium AI character experiences
+                  Character chat that feels more real
                 </div>
               </div>
             </div>
 
             <p className="text-sm leading-7 text-white/60 sm:text-base">
-              A more immersive AI character product built around better
-              conversations, stronger scenario design, and a cleaner premium
+              A more immersive character product built around better
+              conversations, stronger scenario design, and a cleaner
               experience from discovery to chat.
             </p>
 
@@ -81,7 +81,7 @@ export default function Footer() {
                   href="/characters"
                   className="text-sm text-white/65 transition hover:text-white"
                 >
-                  Browse professional characters
+                  Browse characters
                 </Link>
                 <Link
                   href="/community"
@@ -93,7 +93,7 @@ export default function Footer() {
                   href="/my-characters"
                   className="text-sm text-white/65 transition hover:text-white"
                 >
-                  Open your vault
+                  Open your library
                 </Link>
               </div>
             </div>

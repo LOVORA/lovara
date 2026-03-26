@@ -34,6 +34,7 @@ import {
   getIdentitySummary,
   getVisibilityFromPayload,
 } from "@/lib/custom-character-studio";
+import { pickBestCharacterImageUrl } from "@/lib/image-storage";
 
 type BannerState =
   | { type: "success"; message: string }
@@ -46,6 +47,7 @@ type CharacterImageLookupRow = {
   storage_path: string | null;
   public_url: string | null;
   is_primary: boolean;
+  image_type: string | null;
   created_at: string;
 };
 
@@ -194,6 +196,7 @@ export default function PublicSharePage() {
 
   const [character, setCharacter] = useState<PublicCustomCharacter | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [galleryUrls, setGalleryUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState<BannerState>(null);
   const [isOwner, setIsOwner] = useState(false);
@@ -207,24 +210,41 @@ export default function PublicSharePage() {
 
       const { data: rowRaw, error } = await db
         .from("character_images")
-        .select("id, character_id, storage_path, public_url, is_primary, created_at")
+        .select("id, character_id, storage_path, public_url, is_primary, image_type, created_at")
         .eq("character_id", characterId)
-        .eq("is_primary", true)
         .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(12);
 
-      if (error || !rowRaw) {
+      if (error || !Array.isArray(rowRaw) || rowRaw.length === 0) {
         setAvatarUrl(null);
+        setGalleryUrls([]);
         return;
       }
 
-      const row = rowRaw as CharacterImageLookupRow;
+      const rows = rowRaw as CharacterImageLookupRow[];
+      const publicRows = rows.filter(
+        (row): row is CharacterImageLookupRow & { public_url: string } =>
+          typeof row.public_url === "string" && row.public_url.length > 0,
+      );
 
-      if (row.public_url) {
-        setAvatarUrl(row.public_url);
+      setGalleryUrls(publicRows.map((row) => row.public_url));
+
+      const bestPublicUrl = pickBestCharacterImageUrl(
+        publicRows.map((row) => ({
+          character_id: row.character_id,
+          public_url: row.public_url,
+          is_primary: row.is_primary,
+          image_type: row.image_type,
+          created_at: row.created_at,
+        })),
+      );
+
+      if (bestPublicUrl) {
+        setAvatarUrl(bestPublicUrl);
         return;
       }
+
+      const row = rows[0];
 
       if (!row.storage_path) {
         setAvatarUrl(null);
@@ -253,6 +273,7 @@ export default function PublicSharePage() {
       setLoading(true);
       setBanner(null);
       setAvatarUrl(null);
+      setGalleryUrls([]);
 
       try {
         const publicCharacter = await getPublicCustomCharacterByShareId(shareId);
@@ -481,7 +502,7 @@ export default function PublicSharePage() {
                       fill
                       unoptimized
                       sizes="100vw"
-                      className="object-cover"
+                      className="object-contain bg-black/30"
                     />
                   ) : (
                     <div className="flex h-full w-full items-end p-6">
@@ -494,6 +515,31 @@ export default function PublicSharePage() {
                   <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,22,0.55),transparent_45%)]" />
                 </div>
               </div>
+
+              {galleryUrls.length > 1 ? (
+                <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-4">
+                  <div className="text-sm font-medium text-white">Saved images</div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {galleryUrls.map((url, index) => (
+                      <div
+                        key={`${url}-${index}`}
+                        className="overflow-hidden rounded-[22px] border border-white/10 bg-black/20"
+                      >
+                        <div className="relative h-44 w-full">
+                          <Image
+                            src={url}
+                            alt={`${character.name} saved image ${index + 1}`}
+                            fill
+                            unoptimized
+                            sizes="(min-width: 1280px) 280px, 50vw"
+                            className="object-contain bg-black/30"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="mt-8 flex flex-wrap gap-3">
                 <button
@@ -559,7 +605,7 @@ export default function PublicSharePage() {
                   helper={
                     isOwner
                       ? "You can keep using your private copy while this page stays public."
-                      : "Save this character into your vault and continue privately."
+                      : "Save this character into your library and continue privately."
                   }
                 />
                 <HeroStat
@@ -680,12 +726,12 @@ export default function PublicSharePage() {
                     ) : (
                       <UserPlus className="h-4 w-4 text-cyan-300" />
                     )}
-                    {isOwner ? "Owner controls" : "Import into your vault"}
+                    {isOwner ? "Owner controls" : "Import into your library"}
                   </div>
                   <p className="mt-2 text-sm leading-7 text-white/68">
                     {isOwner
                       ? "You own this character. Keep using your private chat flow while this public page stays visible for discovery."
-                      : "Add this character to your account to create a private copy and start chatting with it from your own vault."}
+                      : "Add this character to your account to create a private copy and start chatting with it from your own library."}
                   </p>
                 </div>
 

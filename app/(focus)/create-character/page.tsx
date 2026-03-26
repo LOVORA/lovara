@@ -6,10 +6,11 @@ import {
   useMemo,
   useState,
 } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
-  createMyCustomCharacter,
+  finalizeMyCustomCharacterCreation,
   getProfileSummary,
   type DbCustomCharacter,
   type CharacterDraftInput,
@@ -25,6 +26,7 @@ import {
   type CoreVibeId,
   type StudioFormState,
 } from "@/lib/custom-character-studio";
+import { buildSelectionCompilerOutputFromStudioSource } from "@/lib/create-character/full-selection-compiler";
 import { buildOpeningPack } from "@/lib/create-character/opening-composer";
 import { buildStudioBuilderSummary } from "@/lib/create-character/studio-builder";
 import {
@@ -78,6 +80,7 @@ import {
   toggleListItem,
   USER_ROLE_OPTIONS_EXTENDED,
 } from "@/lib/create-character/studio-editor";
+import type { LegacyRebuildSourcePayload } from "@/lib/create-character/legacy-rebuild";
 
 const AuthGuard = dynamic(() => import("@/components/auth/auth-guard"), {
   ssr: false,
@@ -90,21 +93,24 @@ type VisualWizardStep =
   | "track"
   | "prompt"
   | "identity"
-  | "traits"
+  | "general"
   | "face"
-  | "hair"
   | "body"
-  | "style"
-  | "scenario"
+  | "details"
+  | "image"
   | "review"
   | "generating"
   | "result";
+
+type DetailTab = "personality" | "voice" | "clothes" | "relationship" | "hobby" | "fetishes";
+type SelectionTone = "fuchsia" | "cyan" | "amber" | "rose" | "slate";
 
 type VisualChoice = {
   value: string;
   title: string;
   caption: string;
   gradient: string;
+  imageSrc?: string;
 };
 
 type ProfileSummary = Awaited<ReturnType<typeof getProfileSummary>>;
@@ -112,7 +118,7 @@ type ProfileSummary = Awaited<ReturnType<typeof getProfileSummary>>;
 const READY_STEP_COPY: Record<
   Exclude<
     VisualWizardStep,
-    "entry" | "track" | "prompt" | "generating" | "result"
+    "entry" | "track" | "prompt" | "review" | "generating" | "result"
   >,
   {
     eyebrow: string;
@@ -125,211 +131,254 @@ const READY_STEP_COPY: Record<
     eyebrow: "Step 1",
     title: "Start with who she is",
     description:
-      "Name, age, and region create the base identity the rest of the build follows.",
+      "Name, age, and origin build the identity the rest of the character follows.",
     continueLabel: "Save identity and continue",
   },
-  traits: {
+  general: {
     eyebrow: "Step 2",
-    title: "Pick how she feels in chat",
+    title: "Set the general look",
     description:
-      "Profession and traits shape tone, confidence, and the way she reacts to the user.",
-    continueLabel: "Lock traits and continue",
+      "Lock the complexion and broad visual base before you refine the face.",
+    continueLabel: "Save general look",
   },
   face: {
     eyebrow: "Step 3",
-    title: "Define the face people remember",
+    title: "Build the face",
     description:
-      "Skin tone and eyes give the strongest first impression and help identity stay stable.",
-    continueLabel: "Save face details",
-  },
-  hair: {
-    eyebrow: "Step 4",
-    title: "Choose the hair silhouette",
-    description:
-      "Hair is one of the biggest anchors for the final avatar and later rerolls.",
-    continueLabel: "Save hair and continue",
+      "Eye color, hair color, and hairstyle lock the strongest face anchors.",
+    continueLabel: "Save face and continue",
   },
   body: {
-    eyebrow: "Step 5",
+    eyebrow: "Step 4",
     title: "Set the body shape",
     description:
-      "These choices guide silhouette, proportions, and how the image model frames the character.",
+      "Body type and proportions define how the image model frames the character.",
     continueLabel: "Save body details",
   },
-  style: {
+  details: {
+    eyebrow: "Step 5",
+    title: "Choose the character details",
+    description:
+      "Personality, clothes, relationship, hobbies, and kinks shape the character without extra clutter.",
+    continueLabel: "Save details and continue",
+  },
+  image: {
     eyebrow: "Step 6",
-    title: "Dress the final look",
+    title: "Generate the final image",
     description:
-      "Outfit, palette, and lighting push the image from generic to premium-looking.",
-    continueLabel: "Save style and continue",
-  },
-  scenario: {
-    eyebrow: "Step 7",
-    title: "Give chat a real starting scene",
-    description:
-      "This is where the roleplay starts to feel specific instead of random or AI-made.",
-    continueLabel: "Save scenario and review",
-  },
-  review: {
-    eyebrow: "Final step",
-    title: "Check the full build before you lock it",
-    description:
-      "You are about to save a locked character with this image setup, opening mood, and roleplay frame.",
-    continueLabel: "Create locked character",
+      "Review the final build, generate the avatar preview, and lock the character when it feels right.",
+    continueLabel: "Open final image step",
   },
 };
-
-const ROLEPLAY_DYNAMIC_CHOICES: VisualChoice[] = [
-  { value: "soft lover", title: "Soft Lover", caption: "warm, close, reassuring, emotionally easy to stay with", gradient: "from-rose-400/25 via-fuchsia-500/15 to-white/10" },
-  { value: "intense lover", title: "Intense Lover", caption: "strong pull, high chemistry, harder to ignore", gradient: "from-red-500/25 via-fuchsia-500/15 to-black/10" },
-  { value: "rivals", title: "Rivals", caption: "challenge, pride, banter, attraction under pressure", gradient: "from-cyan-500/20 via-slate-900/30 to-rose-500/15" },
-  { value: "forbidden", title: "Forbidden", caption: "hidden tension, risk, low voice, dangerous timing", gradient: "from-amber-500/20 via-zinc-900/35 to-fuchsia-500/15" },
-  { value: "dominant", title: "Dominant", caption: "leads the moment with controlled confidence", gradient: "from-zinc-900/55 via-fuchsia-500/15 to-white/5" },
-  { value: "soft owner", title: "Soft Owner", caption: "protective, possessive, quietly in control", gradient: "from-amber-400/20 via-rose-500/15 to-black/10" },
-  { value: "emotionally unavailable", title: "Unavailable", caption: "guarded, slower to open, harder to read", gradient: "from-slate-500/25 via-zinc-900/30 to-cyan-500/10" },
-  { value: "obsessed", title: "Obsessed", caption: "focused attention, fixation, emotionally loaded memory", gradient: "from-fuchsia-600/25 via-rose-500/15 to-black/15" },
-  { value: "best friend tension", title: "Best Friend Tension", caption: "comfort first, chemistry underneath, easy closeness", gradient: "from-cyan-400/20 via-white/5 to-fuchsia-400/10" },
-  { value: "ex with history", title: "Ex With History", caption: "unfinished feelings, residue, old shortcuts, sharp edges", gradient: "from-indigo-500/20 via-rose-500/10 to-black/15" },
-];
-
-const ROLEPLAY_SCENE_CHOICES: VisualChoice[] = [
-  { value: "first meeting", title: "First Meeting", caption: "fresh tension, strong first impression, curiosity first", gradient: "from-cyan-500/20 via-white/5 to-slate-500/10" },
-  { value: "caught staring", title: "Caught Staring", caption: "charged eye contact, instant pressure, fast chemistry", gradient: "from-fuchsia-500/20 via-black/10 to-cyan-500/10" },
-  { value: "late-night comfort", title: "Late-Night Comfort", caption: "quiet closeness, honesty, soft emotional pull", gradient: "from-blue-500/20 via-indigo-500/15 to-white/5" },
-  { value: "aftercare / soft landing", title: "Soft Landing", caption: "gentle calm, safety, staying close after intensity", gradient: "from-rose-400/20 via-stone-300/10 to-white/5" },
-  { value: "after a fight", title: "After A Fight", caption: "hurt, pressure, honesty, unresolved charge", gradient: "from-red-500/20 via-zinc-900/25 to-fuchsia-400/10" },
-  { value: "jealousy scene", title: "Jealousy", caption: "possession, challenge, testing, unstable heat", gradient: "from-emerald-500/20 via-black/20 to-amber-400/10" },
-  { value: "roommate night", title: "Roommate Night", caption: "shared space, domestic tension, private routine", gradient: "from-amber-300/15 via-stone-400/10 to-black/10" },
-  { value: "office tension", title: "Office Tension", caption: "restraint, status, implication, polished friction", gradient: "from-slate-400/20 via-zinc-900/25 to-cyan-500/10" },
-  { value: "rain scene", title: "Rain Scene", caption: "cinematic mood, wet silence, heavy atmosphere", gradient: "from-blue-600/20 via-slate-900/35 to-white/5" },
-  { value: "last train ride", title: "Last Train Ride", caption: "late-night isolation, honesty, drifting closeness", gradient: "from-indigo-500/20 via-slate-900/30 to-cyan-400/10" },
-];
-
-const ROLEPLAY_BEHAVIOR_CHOICES: VisualChoice[] = [
-  { value: "teasing", title: "Teasing", caption: "playful pressure, verbal spark, chemistry through banter", gradient: "from-fuchsia-500/20 via-rose-500/10 to-white/5" },
-  { value: "emotionally raw", title: "Emotionally Raw", caption: "more open, more exposed, less filtered", gradient: "from-rose-500/20 via-red-500/10 to-black/10" },
-  { value: "slow burn", title: "Slow Burn", caption: "lets tension breathe before giving payoff", gradient: "from-amber-500/20 via-black/15 to-fuchsia-500/10" },
-  { value: "calm dominant", title: "Calm Dominant", caption: "steady leadership, low voice, no wasted movement", gradient: "from-zinc-900/60 via-amber-400/10 to-white/5" },
-  { value: "soft guiding", title: "Soft Guiding", caption: "gentle control, emotional steering, reassuring authority", gradient: "from-cyan-400/20 via-rose-300/10 to-white/5" },
-  { value: "guarded", title: "Guarded", caption: "reveals selectively, keeps some distance alive", gradient: "from-slate-500/20 via-black/20 to-cyan-500/10" },
-];
-
-const ROLEPLAY_USER_ROLE_CHOICES: VisualChoice[] = [
-  { value: "the one they protect", title: "Protected One", caption: "she notices your comfort and guards it closely", gradient: "from-cyan-400/20 via-white/5 to-emerald-400/10" },
-  { value: "the one they test", title: "Tested One", caption: "she pushes, reads, and checks how far you will go", gradient: "from-amber-400/20 via-fuchsia-500/10 to-black/10" },
-  { value: "the one they can't stay away from", title: "Can't Stay Away", caption: "constant pull, repeated returns, magnetic focus", gradient: "from-fuchsia-500/20 via-rose-500/15 to-black/10" },
-  { value: "the one who makes them weak", title: "Makes Her Weak", caption: "you disrupt her control and get under the surface fast", gradient: "from-rose-500/20 via-red-500/10 to-black/10" },
-  { value: "my favorite problem", title: "Favorite Problem", caption: "you create trouble she secretly wants more of", gradient: "from-cyan-500/20 via-fuchsia-500/10 to-black/10" },
-  { value: "the only one who sees through them", title: "Sees Through Her", caption: "you notice what she hides from everyone else", gradient: "from-indigo-500/20 via-white/5 to-fuchsia-500/10" },
-];
-
-const ROLEPLAY_ARC_CHOICES: VisualChoice[] = [
-  { value: "guarded distance", title: "Guarded Distance", caption: "watchful, controlled, not fully open yet", gradient: "from-slate-500/20 via-black/20 to-white/5" },
-  { value: "visible tension", title: "Visible Tension", caption: "interest is obvious, but not resolved", gradient: "from-fuchsia-500/20 via-amber-400/10 to-black/10" },
-  { value: "emotional opening", title: "Emotional Opening", caption: "more honesty, more softness, more reveal", gradient: "from-rose-400/20 via-cyan-400/10 to-white/5" },
-  { value: "attachment", title: "Attachment", caption: "the bond matters now, and it shows", gradient: "from-emerald-400/20 via-cyan-400/10 to-white/5" },
-  { value: "obsession / devotion / comfort", title: "Devotion", caption: "high closeness, fixation, or deeply settled comfort", gradient: "from-fuchsia-600/20 via-rose-400/10 to-amber-300/10" },
-];
 
 const REGION_VISUAL_CHOICES: VisualChoice[] = [
-  { value: "Latin", title: "Latin", caption: "sun warmth, bold beauty, nightlife energy", gradient: "from-rose-500/60 via-orange-400/30 to-amber-200/20" },
-  { value: "East Asian", title: "East Asian", caption: "clean elegance, balanced softness, refined style", gradient: "from-slate-200/25 via-pink-300/20 to-rose-500/20" },
-  { value: "South Asian", title: "South Asian", caption: "rich color, gold accents, magnetic eyes", gradient: "from-amber-400/35 via-fuchsia-500/20 to-rose-600/20" },
-  { value: "Middle Eastern", title: "Middle Eastern", caption: "dark eyes, luxury detail, strong silhouette", gradient: "from-amber-500/30 via-zinc-900/40 to-orange-500/20" },
-  { value: "Slavic", title: "Slavic", caption: "cool elegance, sharp presence, winter beauty", gradient: "from-blue-200/25 via-cyan-400/20 to-white/10" },
-  { value: "Mixed", title: "Mixed", caption: "layered features, versatile beauty, modern edge", gradient: "from-fuchsia-500/30 via-cyan-500/20 to-amber-300/15" },
+  { value: "Asian", title: "Asian", caption: "almond eyes, softer lines, East Asian read", gradient: "from-slate-200/25 via-pink-300/20 to-rose-500/20", imageSrc: "/create-character/origin/asian.jpg" },
+  { value: "Black", title: "Black", caption: "dark skin depth, strong facial contrast", gradient: "from-amber-900/35 via-rose-700/20 to-zinc-900/20", imageSrc: "/create-character/origin/black.jpg%20%20.jpeg" },
+  { value: "White", title: "White", caption: "lighter skin, European-coded features", gradient: "from-zinc-100/35 via-slate-200/20 to-white/10", imageSrc: "/create-character/origin/white.jpg" },
+  { value: "Latina", title: "Latina", caption: "warmer complexion, Latin beauty read", gradient: "from-rose-500/60 via-orange-400/30 to-amber-200/20", imageSrc: "/create-character/origin/latina.jpg" },
+  { value: "Arab", title: "Arab", caption: "deeper olive warmth, rich dark features", gradient: "from-amber-500/30 via-zinc-900/40 to-orange-500/20", imageSrc: "/create-character/origin/arab.jpg" },
+  { value: "Indian", title: "Indian", caption: "South Asian beauty with warmer skin depth", gradient: "from-amber-400/35 via-fuchsia-500/20 to-rose-600/20", imageSrc: "/create-character/origin/indian.jpg" },
+  { value: "Slavic", title: "Slavic", caption: "cool elegance, sharper European read", gradient: "from-blue-200/25 via-cyan-400/20 to-white/10", imageSrc: "/create-character/origin/slavic.jpg" },
 ];
 
-const FACE_CHOICES = {
-  skinTone: [
-    { value: "porcelain", title: "Porcelain", caption: "pale, polished, cool light catch", gradient: "from-zinc-100/40 via-rose-200/15 to-white/10" },
-    { value: "warm beige", title: "Warm Beige", caption: "soft warmth, balanced glow", gradient: "from-amber-200/30 via-orange-300/20 to-rose-400/15" },
-    { value: "olive", title: "Olive", caption: "mediterranean depth, luxe contrast", gradient: "from-emerald-300/20 via-amber-500/20 to-zinc-900/20" },
-    { value: "golden tan", title: "Golden Tan", caption: "sun-kissed, vivid, camera-friendly", gradient: "from-amber-400/35 via-orange-500/20 to-rose-500/10" },
-    { value: "deep rich brown", title: "Deep Rich Brown", caption: "depth, glow, striking highlights", gradient: "from-amber-700/30 via-rose-600/20 to-zinc-900/20" },
-  ],
-  eyes: [
-    { value: "soft brown eyes", title: "Soft Brown", caption: "warm, easy intimacy", gradient: "from-amber-700/40 via-stone-600/25 to-black/20" },
-    { value: "green eyes", title: "Green", caption: "rare, sharp, magnetic", gradient: "from-emerald-400/30 via-lime-300/20 to-black/15" },
-    { value: "hazel eyes", title: "Hazel", caption: "golden shift, lively chemistry", gradient: "from-amber-500/30 via-lime-300/15 to-black/15" },
-    { value: "grey eyes", title: "Grey", caption: "cool restraint, dangerous calm", gradient: "from-slate-300/35 via-zinc-500/20 to-black/15" },
-    { value: "icy blue eyes", title: "Icy Blue", caption: "cold spark, high contrast", gradient: "from-cyan-300/30 via-blue-500/20 to-black/20" },
-  ],
-};
+const SKIN_TONE_CHOICES = [
+  { value: "very fair", color: "#f3e6dc" },
+  { value: "fair", color: "#e7c8b0" },
+  { value: "light tan", color: "#cf9a73" },
+  { value: "brown", color: "#8a5638" },
+  { value: "deep brown", color: "#4a2a1d" },
+] as const;
+
+const EYE_COLOR_CHOICES: VisualChoice[] = [
+  { value: "blue", title: "Blue", caption: "cool, bright, striking", gradient: "from-cyan-300/30 via-blue-500/20 to-black/20", imageSrc: "/create-character/eyes/blue.jpg" },
+  { value: "green", title: "Green", caption: "rare, sharp, magnetic", gradient: "from-emerald-400/30 via-lime-300/20 to-black/15", imageSrc: "/create-character/eyes/green.jpg" },
+  { value: "hazel", title: "Hazel", caption: "golden shift, lively chemistry", gradient: "from-amber-500/30 via-lime-300/15 to-black/15", imageSrc: "/create-character/eyes/hazel.jpg" },
+  { value: "grey", title: "Grey", caption: "cool restraint, dangerous calm", gradient: "from-slate-300/35 via-zinc-500/20 to-black/15", imageSrc: "/create-character/eyes/grey.jpg" },
+  { value: "brown", title: "Brown", caption: "warm, direct, familiar", gradient: "from-amber-700/40 via-stone-600/25 to-black/20", imageSrc: "/create-character/eyes/brown.jpg" },
+];
 
 const HAIR_COLOR_CHOICES: VisualChoice[] = [
-  { value: "black", title: "Black", caption: "dark contrast, premium drama", gradient: "from-zinc-900/70 via-zinc-700/40 to-slate-500/20" },
-  { value: "dark brown", title: "Dark Brown", caption: "warm richness, natural glamour", gradient: "from-stone-800/60 via-amber-700/30 to-zinc-500/15" },
-  { value: "blonde", title: "Blonde", caption: "bright, polished, high visibility", gradient: "from-amber-200/50 via-yellow-300/30 to-white/15" },
-  { value: "auburn", title: "Auburn", caption: "romantic red warmth, standout frame", gradient: "from-orange-700/45 via-rose-500/25 to-amber-300/10" },
-  { value: "silver ash", title: "Silver Ash", caption: "cool editorial edge", gradient: "from-slate-200/40 via-zinc-400/20 to-black/15" },
+  { value: "blonde", title: "Blonde", caption: "classic warm blonde", gradient: "from-amber-200/25 via-yellow-300/20 to-black/20", imageSrc: "/create-character/hair-colors/blonde.jpg" },
+  { value: "light blonde", title: "Light blonde", caption: "paler bright blonde", gradient: "from-yellow-100/30 via-amber-200/20 to-black/20", imageSrc: "/create-character/hair-colors/light-blonde.jpg" },
+  { value: "grey", title: "Grey", caption: "cool silver tone", gradient: "from-slate-200/25 via-zinc-400/20 to-black/20", imageSrc: "/create-character/hair-colors/grey.jpg" },
+  { value: "black", title: "Black", caption: "deep dark contrast", gradient: "from-slate-900/30 via-zinc-700/20 to-black/30", imageSrc: "/create-character/hair-colors/black.jpg" },
+  { value: "white", title: "White", caption: "bright white tone", gradient: "from-zinc-100/25 via-slate-200/20 to-black/20", imageSrc: "/create-character/hair-colors/white.jpg" },
+  { value: "pink", title: "Pink", caption: "soft vivid pink", gradient: "from-pink-300/30 via-rose-400/20 to-black/20", imageSrc: "/create-character/hair-colors/pink.jpg" },
+  { value: "purple", title: "Purple", caption: "deep purple color", gradient: "from-violet-400/30 via-fuchsia-500/20 to-black/20", imageSrc: "/create-character/hair-colors/purple.jpg" },
+  { value: "green", title: "Green", caption: "bold green dye", gradient: "from-emerald-400/30 via-lime-400/20 to-black/20", imageSrc: "/create-character/hair-colors/green.jpg" },
+  { value: "blue", title: "Blue", caption: "electric blue dye", gradient: "from-cyan-300/30 via-blue-500/20 to-black/20", imageSrc: "/create-character/hair-colors/blue.jpg" },
+  { value: "lilac", title: "Lilac", caption: "soft pastel violet", gradient: "from-violet-200/30 via-fuchsia-300/20 to-black/20", imageSrc: "/create-character/hair-colors/lilac.jpg" },
+  { value: "orange", title: "Orange", caption: "warm copper orange", gradient: "from-orange-300/30 via-amber-400/20 to-black/20", imageSrc: "/create-character/hair-colors/orange.jpg" },
+  { value: "brown", title: "Brown", caption: "natural brunette tone", gradient: "from-amber-800/30 via-stone-600/20 to-black/20", imageSrc: "/create-character/hair-colors/brown.jpg" },
 ];
 
 const HAIR_STYLE_CHOICES: VisualChoice[] = [
-  { value: "long flowing hair", title: "Long Flowing", caption: "soft motion and classic allure", gradient: "from-fuchsia-500/20 via-white/5 to-cyan-500/10" },
-  { value: "soft shoulder-length layers", title: "Layered", caption: "modern softness and movement", gradient: "from-cyan-500/20 via-white/5 to-fuchsia-500/10" },
-  { value: "sleek straight cut", title: "Sleek Straight", caption: "clean, sharp, controlled", gradient: "from-slate-500/20 via-white/5 to-blue-500/10" },
-  { value: "messy textured bob", title: "Textured Bob", caption: "playful but fashion-forward", gradient: "from-amber-500/15 via-rose-500/10 to-black/10" },
-  { value: "high ponytail", title: "High Ponytail", caption: "lifted, sporty, confident", gradient: "from-cyan-400/15 via-slate-200/10 to-black/10" },
+  { value: "braids", title: "Braids", caption: "woven and defined", gradient: "from-fuchsia-500/20 via-white/5 to-cyan-500/10", imageSrc: "/create-character/hair-styles/braids.jpg" },
+  { value: "long", title: "Long", caption: "classic long hair", gradient: "from-cyan-500/20 via-white/5 to-fuchsia-500/10", imageSrc: "/create-character/hair-styles/long.jpg" },
+  { value: "bangs", title: "Bangs", caption: "framed forehead cut", gradient: "from-slate-500/20 via-white/5 to-blue-500/10", imageSrc: "/create-character/hair-styles/bangs.jpg" },
+  { value: "ponytail", title: "Ponytail", caption: "lifted and tied back", gradient: "from-cyan-400/15 via-slate-200/10 to-black/10", imageSrc: "/create-character/hair-styles/ponytail.jpg" },
+  { value: "short", title: "Short", caption: "short crop or bob", gradient: "from-amber-500/15 via-rose-500/10 to-black/10", imageSrc: "/create-character/hair-styles/short.jpg" },
+  { value: "bun", title: "Bun", caption: "gathered and tied up", gradient: "from-emerald-500/15 via-white/5 to-black/10", imageSrc: "/create-character/hair-styles/bun.jpg" },
+  { value: "wavy", title: "Wavy", caption: "soft loose waves", gradient: "from-rose-500/15 via-white/5 to-black/10", imageSrc: "/create-character/hair-styles/wavy.jpg" },
+  { value: "custom", title: "Custom", caption: "describe the hairstyle yourself", gradient: "from-white/10 via-slate-500/10 to-black/10", imageSrc: "/create-character/hair-styles/custom.jpg" },
 ];
 
 const BODY_CHOICES = {
   bodyType: [
-    { value: "slim toned", title: "Slim Toned", caption: "lean lines, fitted silhouette", gradient: "from-cyan-500/20 via-white/5 to-slate-500/10" },
-    { value: "soft curvy", title: "Soft Curvy", caption: "plush lines, warm softness", gradient: "from-rose-500/20 via-amber-400/10 to-white/5" },
-    { value: "athletic", title: "Athletic", caption: "fit frame, grounded confidence", gradient: "from-emerald-500/20 via-cyan-400/10 to-black/10" },
-    { value: "tall elegant", title: "Tall Elegant", caption: "long frame, poised presence", gradient: "from-fuchsia-400/15 via-blue-500/10 to-white/5" },
+    { value: "slim", title: "Slim", caption: "lean and narrow frame", gradient: "from-cyan-500/20 via-white/5 to-slate-500/10", imageSrc: "/create-character/body/body-slim.jpg" },
+    { value: "athletic", title: "Athletic", caption: "fit, toned, sporty", gradient: "from-emerald-500/20 via-cyan-400/10 to-black/10", imageSrc: "/create-character/body/body-athletic.jpg" },
+    { value: "voluptuous", title: "Voluptuous", caption: "fuller and softer", gradient: "from-rose-500/20 via-amber-400/10 to-white/5", imageSrc: "/create-character/body/body-voluptuous.jpg" },
+    { value: "curvy", title: "Curvy", caption: "heavier and rounder", gradient: "from-fuchsia-400/15 via-blue-500/10 to-white/5", imageSrc: "/create-character/body/body-curvy.jpg" },
+    { value: "pregnant", title: "Pregnant", caption: "pregnant body shape", gradient: "from-amber-500/20 via-rose-300/10 to-white/5", imageSrc: "/create-character/body/body-pregnant.jpg" },
   ],
-  bust: [
-    { value: "small", title: "Small", caption: "lighter upper silhouette", gradient: "from-slate-400/15 via-white/5 to-black/10" },
-    { value: "medium", title: "Medium", caption: "balanced proportions", gradient: "from-cyan-400/15 via-white/5 to-black/10" },
-    { value: "full", title: "Full", caption: "fuller chest line", gradient: "from-rose-500/15 via-white/5 to-black/10" },
-    { value: "very full", title: "Very Full", caption: "highly pronounced upper shape", gradient: "from-fuchsia-500/20 via-rose-400/10 to-black/10" },
+  breastSize: [
+    { value: "flat", title: "Flat", caption: "very small chest", gradient: "from-slate-400/15 via-white/5 to-black/10" },
+    { value: "small", title: "Small", caption: "small chest", gradient: "from-cyan-400/15 via-white/5 to-black/10" },
+    { value: "medium", title: "Medium", caption: "balanced chest", gradient: "from-rose-500/15 via-white/5 to-black/10" },
+    { value: "large", title: "Large", caption: "visibly large chest", gradient: "from-fuchsia-500/20 via-rose-400/10 to-black/10" },
+    { value: "xl", title: "XL", caption: "very large chest", gradient: "from-red-500/20 via-fuchsia-400/10 to-black/10" },
   ],
-  hips: [
-    { value: "narrow", title: "Narrow", caption: "straighter lower line", gradient: "from-slate-500/15 via-white/5 to-black/10" },
-    { value: "balanced", title: "Balanced", caption: "clean and proportional", gradient: "from-cyan-500/15 via-white/5 to-black/10" },
-    { value: "wide", title: "Wide", caption: "more visible curve", gradient: "from-rose-500/15 via-white/5 to-black/10" },
-    { value: "very curvy", title: "Very Curvy", caption: "strong hourglass pull", gradient: "from-fuchsia-500/20 via-rose-400/10 to-black/10" },
+  breastType: [
+    { value: "regular", title: "Regular", caption: "natural regular shape", gradient: "from-slate-500/15 via-white/5 to-black/10" },
+    { value: "perky", title: "Perky", caption: "lifted and firmer", gradient: "from-cyan-500/15 via-white/5 to-black/10" },
+    { value: "saggy", title: "Saggy", caption: "lower hanging shape", gradient: "from-rose-500/15 via-white/5 to-black/10" },
+    { value: "torpedo", title: "Torpedo", caption: "narrow forward shape", gradient: "from-fuchsia-500/20 via-rose-400/10 to-black/10" },
+    { value: "fake", title: "Fake", caption: "augmented look", gradient: "from-amber-500/20 via-white/5 to-black/10" },
   ],
-};
-
-const STYLE_CHOICES = {
-  outfit: [
-    { value: "old-money chic", title: "Old Money", caption: "quiet luxury, clean elegance", gradient: "from-stone-200/20 via-amber-300/10 to-black/10" },
-    { value: "black dress elegance", title: "Black Dress", caption: "night-ready, timeless, sharp", gradient: "from-zinc-900/60 via-fuchsia-500/15 to-white/5" },
-    { value: "street-luxury fit", title: "Street Luxury", caption: "modern, expensive, bold", gradient: "from-cyan-500/15 via-zinc-900/30 to-white/5" },
-    { value: "soft knitwear intimacy", title: "Soft Knitwear", caption: "close, warm, private", gradient: "from-rose-400/15 via-stone-300/10 to-white/5" },
-  ],
-  lighting: [
-    { value: "soft window light", title: "Soft Window", caption: "clean skin, gentle shadow", gradient: "from-white/20 via-cyan-200/10 to-black/10" },
-    { value: "golden-hour warmth", title: "Golden Hour", caption: "warm glow and softness", gradient: "from-amber-400/30 via-orange-300/10 to-black/10" },
-    { value: "clean luxury ambient light", title: "Luxury Ambient", caption: "premium mood and depth", gradient: "from-stone-200/15 via-fuchsia-400/10 to-black/10" },
-    { value: "dim moody lamp light", title: "Moody Lamp", caption: "private, dark, intimate", gradient: "from-zinc-900/50 via-amber-500/10 to-black/15" },
+  buttSize: [
+    { value: "small", title: "Small", caption: "small butt", gradient: "from-slate-500/15 via-white/5 to-black/10" },
+    { value: "perky", title: "Perky", caption: "lifted round butt", gradient: "from-cyan-500/15 via-white/5 to-black/10" },
+    { value: "athletic", title: "Athletic", caption: "firm athletic lower body", gradient: "from-emerald-500/20 via-white/5 to-black/10" },
+    { value: "medium", title: "Medium", caption: "balanced size", gradient: "from-rose-500/15 via-white/5 to-black/10" },
+    { value: "big", title: "Big", caption: "very full butt", gradient: "from-fuchsia-500/20 via-rose-400/10 to-black/10" },
   ],
 };
 
-const PROFESSION_OPTIONS = [
-  "Architect",
-  "Attorney",
-  "Bartender",
-  "Chef",
-  "Content Creator",
-  "Creative Director",
-  "Dancer",
-  "Doctor",
-  "Entrepreneur",
-  "Fashion Stylist",
-  "Fitness Coach",
-  "Journalist",
-  "Musician",
-  "Nightclub Owner",
-  "Nurse",
-  "Photographer",
-  "Professor",
-  "Real Estate Agent",
-  "Therapist",
-  "Travel Consultant",
+const CLOTHES_CHOICES = [
+  "Lingerie",
+  "Lace set",
+  "Silk robe",
+  "Oversized shirt",
+  "Bodysuit",
+  "Mini dress",
+  "Club dress",
+  "Corset",
+  "Leather set",
+  "Latex set",
+  "Fantasy set",
+  "School uniform",
+  "Office outfit",
+  "Teacher outfit",
+  "Boss suit",
+  "Babydoll",
+  "Stockings",
+  "High heels",
+  "Swimwear",
+  "Bikini",
+  "Crop top",
+  "Crop top and skirt",
+  "Jeans look",
+  "Sleepwear",
+  "Hoodie",
+  "Gymwear",
+  "Towel look",
+  "Maid outfit",
+] as const;
+
+const RELATIONSHIP_CHOICES = [
+  "Wife",
+  "Stepmom",
+  "Step Sister",
+  "College Roommate",
+  "Your Friend's Girlfriend",
+  "First Date",
+  "Neighbor",
+  "Your Teacher",
+  "Your Boss",
+  "Crush",
+  "Ex",
+  "Babysitter",
+  "College Bully",
+  "Custom",
+] as const;
+
+const HOBBY_CHOICES = [
+  { value: "baking", emoji: "🧁", caption: "sweet kitchen time" },
+  { value: "football", emoji: "⚽", caption: "plays or watches" },
+  { value: "dart", emoji: "🎯", caption: "precision game nights" },
+  { value: "gaming", emoji: "🎮", caption: "late night gaming" },
+  { value: "reading", emoji: "📚", caption: "books and quiet" },
+  { value: "cooking", emoji: "🍳", caption: "loves cooking" },
+  { value: "travel", emoji: "✈️", caption: "wants new places" },
+  { value: "gym", emoji: "🏋️", caption: "fitness routine" },
+  { value: "yoga", emoji: "🧘", caption: "soft movement" },
+  { value: "dancing", emoji: "💃", caption: "club or studio" },
+  { value: "singing", emoji: "🎤", caption: "likes to sing" },
+  { value: "photography", emoji: "📸", caption: "camera hobby" },
+  { value: "painting", emoji: "🎨", caption: "visual art" },
+  { value: "fashion", emoji: "👠", caption: "style obsessed" },
+  { value: "shopping", emoji: "🛍️", caption: "retail therapy" },
+  { value: "anime", emoji: "🌸", caption: "likes anime" },
+  { value: "movies", emoji: "🎬", caption: "film lover" },
+  { value: "coffee", emoji: "☕", caption: "cafe person" },
+  { value: "wine", emoji: "🍷", caption: "wine nights" },
+  { value: "hiking", emoji: "🥾", caption: "nature walks" },
+  { value: "swimming", emoji: "🏊", caption: "water time" },
+  { value: "tennis", emoji: "🎾", caption: "court energy" },
+  { value: "music", emoji: "🎵", caption: "always listening" },
+  { value: "cars", emoji: "🚗", caption: "car obsessed" },
+  { value: "pets", emoji: "🐾", caption: "animal lover" },
+  { value: "gardening", emoji: "🪴", caption: "plants and care" },
+  { value: "astrology", emoji: "✨", caption: "sign talk" },
+  { value: "nightlife", emoji: "🌙", caption: "late night vibe" },
+  { value: "beach", emoji: "🏖️", caption: "sun and ocean" },
+  { value: "podcasts", emoji: "🎧", caption: "always listening" },
+] as const;
+
+const FETISH_CHOICES = [
+  { value: "Vanilla", emoji: "🤍", caption: "soft and simple" },
+  { value: "Roleplay", emoji: "🎭", caption: "acting out scenes" },
+  { value: "Lingerie", emoji: "🎀", caption: "sexy underwear" },
+  { value: "High Heels", emoji: "👠", caption: "heels and posture" },
+  { value: "Stockings", emoji: "🧦", caption: "thigh-high appeal" },
+  { value: "Uniform", emoji: "🧥", caption: "costume authority" },
+  { value: "Leather", emoji: "🖤", caption: "dark material kink" },
+  { value: "Latex", emoji: "✨", caption: "shiny tight look" },
+  { value: "Corset", emoji: "🎗️", caption: "tight waist wear" },
+  { value: "Feet", emoji: "🦶", caption: "foot focused" },
+  { value: "Hair", emoji: "💇", caption: "hair play" },
+  { value: "FemDom", emoji: "👑", caption: "female control" },
+  { value: "Dom", emoji: "🪢", caption: "leading energy" },
+  { value: "Sub", emoji: "🔗", caption: "submissive energy" },
+  { value: "Collar", emoji: "📿", caption: "ownership symbol" },
+  { value: "Blindfold", emoji: "🙈", caption: "blocked vision" },
+  { value: "Gag", emoji: "🫦", caption: "mouth restraint" },
+  { value: "Bondage", emoji: "🪢", caption: "restraint play" },
+  { value: "Shibari", emoji: "🎀", caption: "rope art" },
+  { value: "Spanking", emoji: "✋", caption: "impact on skin" },
+  { value: "Impact Play", emoji: "⚡", caption: "striking play" },
+  { value: "Sensory Play", emoji: "🫧", caption: "touch and tease" },
+  { value: "Temperature Play", emoji: "🧊", caption: "hot and cold" },
+  { value: "Wax Play", emoji: "🕯️", caption: "dripping wax" },
+  { value: "Praise", emoji: "🌟", caption: "approval kink" },
+  { value: "Degradation", emoji: "😈", caption: "humiliation play" },
+  { value: "Tease and Denial", emoji: "⏳", caption: "almost but wait" },
+  { value: "Edging", emoji: "📈", caption: "holding the peak" },
+  { value: "Chastity", emoji: "🔒", caption: "locked control" },
+  { value: "Service", emoji: "🧎", caption: "doing for partner" },
+  { value: "Obedience", emoji: "✅", caption: "following commands" },
+  { value: "Possession", emoji: "🫶", caption: "belonging feeling" },
+  { value: "Submission", emoji: "⬇️", caption: "yielding control" },
+  { value: "Romantic Control", emoji: "💞", caption: "soft dominance" },
+  { value: "Polyamory", emoji: "💗", caption: "multiple lovers" },
+  { value: "Compersion", emoji: "🫂", caption: "joy in sharing" },
+  { value: "Tickling", emoji: "🤭", caption: "laughing touch" },
+  { value: "Food Play", emoji: "🍓", caption: "food involvement" },
+  { value: "Wet and Messy", emoji: "💦", caption: "messy texture" },
+  { value: "Body Paint", emoji: "🎨", caption: "painting skin" },
+  { value: "Masks", emoji: "🎭", caption: "hidden face" },
+  { value: "Smoking", emoji: "🚬", caption: "smoke aesthetic" },
+  { value: "Toy Play", emoji: "🧸", caption: "toy use" },
 ] as const;
 
 const TRAIT_OPTIONS = [
@@ -492,6 +541,7 @@ function VisualHeroCard({
   soon = false,
   gradient,
   onClick,
+  imageSrc,
 }: {
   title: string;
   subtitle: string;
@@ -499,6 +549,7 @@ function VisualHeroCard({
   soon?: boolean;
   gradient: string;
   onClick?: () => void;
+  imageSrc?: string;
 }) {
   return (
     <button
@@ -513,6 +564,16 @@ function VisualHeroCard({
         !onClick && "cursor-default",
       )}
     >
+      {imageSrc ? (
+        <Image
+          src={imageSrc}
+          alt={title}
+          fill
+          unoptimized
+          sizes="(max-width: 1024px) 100vw, 50vw"
+          className="object-cover object-center"
+        />
+      ) : null}
       <div className={cn("absolute inset-0 bg-gradient-to-br", gradient)} />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.22),transparent_30%),linear-gradient(180deg,transparent,rgba(0,0,0,0.7))]" />
       <div className="absolute inset-0 opacity-70 [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:32px_32px] [mask-image:linear-gradient(180deg,rgba(0,0,0,0.2),transparent_65%)]" />
@@ -554,6 +615,16 @@ function VisualChoiceCard({
           : "border-white/10 hover:-translate-y-1 hover:border-white/20 hover:shadow-[0_18px_60px_rgba(0,0,0,0.24)]",
       )}
     >
+      {option.imageSrc ? (
+        <Image
+          src={option.imageSrc}
+          alt={option.title}
+          fill
+          unoptimized
+          sizes="(max-width: 1280px) 50vw, 33vw"
+          className="object-cover object-center"
+        />
+      ) : null}
       <div className={cn("absolute inset-0 bg-gradient-to-br", option.gradient)} />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),transparent_35%,rgba(0,0,0,0.55))]" />
       <div className="absolute inset-0 opacity-70 [background-image:radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_26%)]" />
@@ -574,6 +645,196 @@ function VisualChoiceCard({
           <div className="text-xl font-semibold text-white">{option.title}</div>
           <div className="mt-2 text-sm leading-6 text-white/75">{option.caption}</div>
         </div>
+      </div>
+    </button>
+  );
+}
+
+function getSelectionToneClasses(tone: SelectionTone) {
+  switch (tone) {
+    case "cyan":
+      return {
+        active:
+          "border-cyan-400/30 bg-[linear-gradient(180deg,rgba(34,211,238,0.14),rgba(255,255,255,0.04))] text-cyan-50 shadow-[0_24px_80px_rgba(34,211,238,0.10)]",
+        badge: "border-cyan-300/25 bg-cyan-400/15 text-cyan-100",
+        accent: "bg-cyan-300",
+        softText: "text-cyan-100/80",
+      };
+    case "amber":
+      return {
+        active:
+          "border-amber-400/30 bg-[linear-gradient(180deg,rgba(251,191,36,0.14),rgba(255,255,255,0.04))] text-amber-50 shadow-[0_24px_80px_rgba(251,191,36,0.10)]",
+        badge: "border-amber-300/25 bg-amber-400/15 text-amber-100",
+        accent: "bg-amber-300",
+        softText: "text-amber-100/80",
+      };
+    case "rose":
+      return {
+        active:
+          "border-rose-400/30 bg-[linear-gradient(180deg,rgba(251,113,133,0.14),rgba(255,255,255,0.04))] text-rose-50 shadow-[0_24px_80px_rgba(251,113,133,0.10)]",
+        badge: "border-rose-300/25 bg-rose-400/15 text-rose-100",
+        accent: "bg-rose-300",
+        softText: "text-rose-100/80",
+      };
+    case "slate":
+      return {
+        active:
+          "border-slate-300/20 bg-[linear-gradient(180deg,rgba(148,163,184,0.16),rgba(255,255,255,0.04))] text-slate-50 shadow-[0_24px_80px_rgba(15,23,42,0.22)]",
+        badge: "border-slate-300/20 bg-slate-400/10 text-slate-100",
+        accent: "bg-slate-300",
+        softText: "text-slate-100/80",
+      };
+    case "fuchsia":
+    default:
+      return {
+        active:
+          "border-fuchsia-400/30 bg-[linear-gradient(180deg,rgba(217,70,239,0.14),rgba(255,255,255,0.04))] text-fuchsia-50 shadow-[0_24px_80px_rgba(217,70,239,0.10)]",
+        badge: "border-fuchsia-300/25 bg-fuchsia-400/15 text-fuchsia-100",
+        accent: "bg-fuchsia-300",
+        softText: "text-fuchsia-100/80",
+      };
+  }
+}
+
+function DetailDeckCard({
+  label,
+  eyebrow,
+  description,
+  summary,
+  countLabel,
+  active,
+  tone,
+  onClick,
+}: {
+  label: string;
+  eyebrow: string;
+  description: string;
+  summary: string;
+  countLabel: string;
+  active: boolean;
+  tone: SelectionTone;
+  onClick: () => void;
+}) {
+  const toneClasses = getSelectionToneClasses(tone);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group relative overflow-hidden rounded-[26px] border p-5 text-left transition duration-300",
+        active
+          ? toneClasses.active
+          : "border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] text-white/85 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.06] hover:shadow-[0_20px_80px_rgba(0,0,0,0.22)]",
+      )}
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.12),transparent_26%)]" />
+      <div className="relative">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.24em] text-white/48">
+              {eyebrow}
+            </div>
+            <div className="mt-3 text-lg font-semibold text-white">{label}</div>
+          </div>
+          <div
+            className={cn(
+              "rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.18em]",
+              active
+                ? toneClasses.badge
+                : "border-white/10 bg-black/20 text-white/60",
+            )}
+          >
+            {countLabel}
+          </div>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-white/62">{description}</p>
+        <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-white/42">
+            Current direction
+          </div>
+          <div className="mt-2 text-sm leading-6 text-white/82">{summary}</div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function SelectionPill({
+  label,
+  tone = "fuchsia",
+}: {
+  label: string;
+  tone?: SelectionTone;
+}) {
+  const toneClasses = getSelectionToneClasses(tone);
+
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-full border px-3 py-1 text-xs",
+        toneClasses.badge,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function PremiumSelectionTile({
+  title,
+  subtitle,
+  emoji,
+  tone,
+  active,
+  metaLabel,
+  disabled = false,
+  onClick,
+}: {
+  title: string;
+  subtitle: string;
+  emoji?: string;
+  tone: SelectionTone;
+  active: boolean;
+  metaLabel: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const toneClasses = getSelectionToneClasses(tone);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "group relative overflow-hidden rounded-[24px] border p-4 text-left transition duration-300",
+        active
+          ? toneClasses.active
+          : disabled
+            ? "cursor-not-allowed border-white/5 bg-white/[0.02] text-white/25"
+            : "border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] text-white/82 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.06] hover:shadow-[0_20px_80px_rgba(0,0,0,0.22)]",
+      )}
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.12),transparent_28%)]" />
+      <div className="relative">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-base font-semibold text-white">
+            {emoji ? `${emoji} ` : ""}
+            {title}
+          </div>
+          <div
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em]",
+              active
+                ? toneClasses.badge
+                : "border-white/10 bg-black/20 text-white/55",
+            )}
+          >
+            {metaLabel}
+          </div>
+        </div>
+        <div className="mt-3 text-xs leading-6 text-white/58">{subtitle}</div>
       </div>
     </button>
   );
@@ -604,6 +865,8 @@ export default function CreateCharacterPage() {
   const [creationTrack, setCreationTrack] = useState<CreationTrack>(null);
   const [visualWizardStep, setVisualWizardStep] =
     useState<VisualWizardStep>("entry");
+  const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>("personality");
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [lastName, setLastName] = useState("");
   const [promptIdea, setPromptIdea] = useState("");
   const [pendingCharacterCreation, setPendingCharacterCreation] = useState(false);
@@ -617,6 +880,47 @@ export default function CreateCharacterPage() {
   const [activeStep, setActiveStep] = useState<StudioStep>("identity");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [profileSummary, setProfileSummary] = useState<ProfileSummary | null>(null);
+  const [legacyRebuildNotice, setLegacyRebuildNotice] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
+  const [hydratedRebuildId, setHydratedRebuildId] = useState<string | null>(null);
+  const [rebuildRequest] = useState(() => {
+    if (typeof window === "undefined") {
+      return {
+        id: "",
+        source: "",
+      };
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    return {
+      id: params.get("rebuild")?.trim() ?? "",
+      source: params.get("source")?.trim() ?? "",
+    };
+  });
+  const rebuildId = rebuildRequest.id;
+  const rebuildSource = rebuildRequest.source;
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+
+    if (detailModalOpen) {
+      document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    }
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, [detailModalOpen]);
 
   const isQuickMode = form.mode === "quick";
   const structuredValues = useMemo(
@@ -643,8 +947,13 @@ export default function CreateCharacterPage() {
   const greetingStyle = structuredValues["Greeting style"];
   const chatMode = structuredValues["Chat mode"];
   const avatarStyle = structuredValues["Avatar style"];
+  const origin = structuredValues.Origin || form.region;
   const skinTone = structuredValues["Skin tone"];
+  const eyeColor = structuredValues["Eye color"] || structuredValues.Eyes;
   const hair = structuredValues.Hair;
+  const hairColor = structuredValues["Hair color"];
+  const hairStyle = structuredValues["Hair style"];
+  const customHairStyle = structuredValues["Custom hairstyle"];
   const hairTexture = structuredValues["Hair texture"];
   const eyes = structuredValues.Eyes;
   const eyeShape = structuredValues["Eye shape"];
@@ -654,7 +963,9 @@ export default function CreateCharacterPage() {
   const palette = structuredValues.Palette;
   const bodyType = structuredValues["Body type"];
   const bustSize = structuredValues["Bust size"];
+  const breastType = structuredValues["Breast type"];
   const hipsType = structuredValues["Hip shape"];
+  const buttSize = structuredValues["Butt size"];
   const waistDefinition = structuredValues["Waist definition"];
   const heightImpression = structuredValues["Height impression"];
   const exposureLevel = structuredValues["Exposure level"];
@@ -678,8 +989,11 @@ export default function CreateCharacterPage() {
   const publicTagline = structuredValues["Public tagline"];
   const publicTeaser = structuredValues["Public teaser"];
   const publicTags = structuredValues["Public tags"];
-  const profession = structuredValues.Profession;
   const traitStack = structuredValues["Trait stack"];
+  const hobbies = structuredValues.Hobbies;
+  const fetishes = structuredValues.Fetishes;
+  const extraPersonalityDetails = structuredValues["Extra personality details"];
+  const extraPhysicalDetails = structuredValues["Extra physical details"];
 
   const bodyNotes = useMemo(() => {
     let result = form.customNotes;
@@ -691,7 +1005,7 @@ export default function CreateCharacterPage() {
 
   const parsedAge = Number(form.age);
   const ageValue = Number.isFinite(parsedAge)
-    ? Math.min(55, Math.max(18, parsedAge))
+    ? Math.min(70, Math.max(18, parsedAge))
     : 25;
 
   const isKnownRegion = REGION_OPTIONS.includes(
@@ -703,6 +1017,84 @@ export default function CreateCharacterPage() {
   const selectedInterests = useMemo(() => parseCsv(interestNote), [interestNote]);
   const selectedBoundaries = useMemo(() => parsePipe(boundaries), [boundaries]);
   const selectedTraits = useMemo(() => parseCsv(traitStack), [traitStack]);
+  const selectedHobbies = useMemo(() => parseCsv(hobbies), [hobbies]);
+  const selectedFetishes = useMemo(() => parseCsv(fetishes), [fetishes]);
+  const relationshipPresetChoices = useMemo<string[]>(
+    () => RELATIONSHIP_CHOICES.filter((item) => item !== "Custom"),
+    [],
+  );
+  const hasCustomRelationship =
+    Boolean(form.relationshipToUser.trim()) &&
+    !relationshipPresetChoices.includes(form.relationshipToUser);
+  const detailTabCards = [
+    {
+      id: "personality" as const,
+      label: "Personality",
+      eyebrow: "Core tone",
+      description: "Pick the emotional and social signal this character carries into every reply.",
+      summary:
+        selectedTraits.slice(0, 3).join(" • ") ||
+        "No traits locked yet.",
+      countLabel: selectedTraits.length
+        ? `${selectedTraits.length} traits`
+        : "Open",
+      tone: "fuchsia" as const,
+    },
+    {
+      id: "voice" as const,
+      label: "Voice (Soon)",
+      eyebrow: "Delivery",
+      description: "Reserved for future voice and cadence tuning.",
+      summary: "This card is visible now so the structure stays ready.",
+      countLabel: "Soon",
+      tone: "slate" as const,
+    },
+    {
+      id: "clothes" as const,
+      label: "Clothes",
+      eyebrow: "Look",
+      description: "Choose one clear outfit direction instead of building a long wardrobe spec.",
+      summary: outfit || "No outfit selected yet.",
+      countLabel: outfit ? "Locked" : "Pick one",
+      tone: "rose" as const,
+    },
+    {
+      id: "relationship" as const,
+      label: "Scenario/Relationship",
+      eyebrow: "Setup",
+      description: "Define the connection that frames the first scene and early chemistry.",
+      summary:
+        form.relationshipToUser.trim() || "No relationship selected yet.",
+      countLabel: form.relationshipToUser.trim() ? "Locked" : "Pick one",
+      tone: "amber" as const,
+    },
+    {
+      id: "hobby" as const,
+      label: "Hobby",
+      eyebrow: "Lifestyle",
+      description: "Add a few leisure anchors so the character feels lived-in.",
+      summary:
+        selectedHobbies.slice(0, 3).join(" • ") ||
+        "No hobbies selected yet.",
+      countLabel: selectedHobbies.length
+        ? `${selectedHobbies.length} picked`
+        : "Optional",
+      tone: "cyan" as const,
+    },
+    {
+      id: "fetishes" as const,
+      label: "Fetishes",
+      eyebrow: "Adult tone",
+      description: "Set intimacy preferences with a few direct presets instead of long notes.",
+      summary:
+        selectedFetishes.slice(0, 3).join(" • ") ||
+        "No adult preferences selected yet.",
+      countLabel: selectedFetishes.length
+        ? `${selectedFetishes.length} picked`
+        : "Optional",
+      tone: "fuchsia" as const,
+    },
+  ];
   const monetization = useMemo(() => {
     if (!profileSummary) return null;
 
@@ -878,10 +1270,15 @@ export default function CreateCharacterPage() {
       assertiveness: form.assertiveness,
       mystery: form.mystery,
       playfulness: form.playfulness,
+      replyLength: form.replyLength,
+      speechStyle: form.speechStyle,
+      relationshipPace: form.relationshipPace,
       tone: form.tone,
       setting: form.setting,
       relationshipToUser: form.relationshipToUser,
       sceneGoal: form.sceneGoal,
+      openingState: form.openingState,
+      customScenario: form.customScenario,
       customNotes: form.customNotes,
     });
   }, [
@@ -897,10 +1294,15 @@ export default function CreateCharacterPage() {
     form.assertiveness,
     form.mystery,
     form.playfulness,
+    form.replyLength,
+    form.speechStyle,
+    form.relationshipPace,
     form.tone,
     form.setting,
     form.relationshipToUser,
     form.sceneGoal,
+    form.openingState,
+    form.customScenario,
     form.customNotes,
   ]);
 
@@ -972,49 +1374,33 @@ export default function CreateCharacterPage() {
   ].join(" • ");
 
   const visualSummary = [
-    avatarStyle,
+    origin,
     skinTone,
-    hair,
-    hairTexture,
-    eyes,
-    eyeShape,
-    makeupStyle,
-    accessoryVibe,
+    eyeColor,
+    hairColor,
+    hairStyle === "custom" ? customHairStyle : hairStyle,
     bodyType,
     bustSize,
-    hipsType,
-    waistDefinition,
-    heightImpression,
+    breastType,
+    buttSize,
     outfit,
-    palette,
-    exposureLevel,
-    camera,
-    lightingMood,
-    signatureDetail,
+    form.relationshipToUser,
   ]
     .filter(Boolean)
     .join(" • ");
   const visualTags = [
-    avatarStyle,
+    origin,
     skinTone,
-    hair,
-    hairTexture,
-    eyes,
-    eyeShape,
-    makeupStyle,
-    accessoryVibe,
+    eyeColor,
+    hairColor,
+    hairStyle === "custom" ? customHairStyle : hairStyle,
     bodyType,
     bustSize,
-    hipsType,
-    waistDefinition,
-    heightImpression,
+    breastType,
+    buttSize,
     outfit,
-    palette,
-    exposureLevel,
-    camera,
-    lightingMood,
-    photoPack,
-    signatureDetail,
+    ...selectedTraits,
+    ...selectedHobbies,
   ].filter(Boolean);
   const publicTagsList = parseCsv(publicTags);
 
@@ -1034,6 +1420,54 @@ export default function CreateCharacterPage() {
     keyMemories ? `memories: ${keyMemories}` : "",
     userRole ? `user role: ${userRole}` : "",
   ].filter(Boolean);
+
+  const selectionCompiler = useMemo(
+    () =>
+      buildSelectionCompilerOutputFromStudioSource({
+        name: form.name,
+        age: form.age,
+        region: form.region,
+        archetype: form.archetype,
+        genderPresentation: form.genderPresentation,
+        coreVibes: form.coreVibes,
+        warmth: form.warmth,
+        assertiveness: form.assertiveness,
+        mystery: form.mystery,
+        playfulness: form.playfulness,
+        replyLength: form.replyLength,
+        speechStyle: form.speechStyle,
+        relationshipPace: form.relationshipPace,
+        setting: form.setting,
+        relationshipToUser: form.relationshipToUser,
+        sceneGoal: form.sceneGoal,
+        tone: form.tone,
+        openingState: form.openingState,
+        customScenario: form.customScenario,
+        customNotes: mergedCustomNotes,
+      }),
+    [
+      form.age,
+      form.archetype,
+      form.assertiveness,
+      form.coreVibes,
+      form.customScenario,
+      form.genderPresentation,
+      form.mystery,
+      form.name,
+      form.openingState,
+      form.playfulness,
+      form.region,
+      form.relationshipPace,
+      form.relationshipToUser,
+      form.replyLength,
+      form.sceneGoal,
+      form.setting,
+      form.speechStyle,
+      form.tone,
+      form.warmth,
+      mergedCustomNotes,
+    ],
+  );
 
   const openingPack = useMemo(
     () =>
@@ -1061,6 +1495,10 @@ export default function CreateCharacterPage() {
         eyes,
         hair,
         signatureDetail,
+        initiativePattern: selectionCompiler.openingSignals.initiativePattern,
+        conflictBehavior: selectionCompiler.openingSignals.conflictBehavior,
+        affectionStyle: selectionCompiler.openingSignals.affectionStyle,
+        paceOfWarmth: selectionCompiler.openingSignals.paceOfWarmth,
       }),
     [
       attentionHook,
@@ -1078,6 +1516,10 @@ export default function CreateCharacterPage() {
       hair,
       nickname,
       replyObjective,
+      selectionCompiler.openingSignals.affectionStyle,
+      selectionCompiler.openingSignals.conflictBehavior,
+      selectionCompiler.openingSignals.initiativePattern,
+      selectionCompiler.openingSignals.paceOfWarmth,
       relationshipDynamic,
       signatureDetail,
       sceneType,
@@ -1146,6 +1588,11 @@ export default function CreateCharacterPage() {
       consentConfirmed: true,
       depictsRealPerson: false,
       depictsPublicFigure: false,
+      depictsFranchiseCharacter: false,
+      depictsProtectedStyleRequest: false,
+      lookalikeRiskFlag: false,
+      namedCharacterReferenceFlag: false,
+      blockedRequestReason: null,
       nonConsensualFlag: false,
       underageRiskFlag: false,
       illegalContentFlag: false,
@@ -1162,15 +1609,92 @@ export default function CreateCharacterPage() {
     clearAvatarPreview,
     generatedAvatarUrl,
     handleGenerateAvatar,
-    lastAvatarNegativePrompt,
     lastAvatarPromptInput,
-    lastAvatarResolvedPrompt,
   } = useAvatarGeneration({
     form,
     safety: avatarSafetyInput,
     setBanner,
     setActiveStep,
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLegacyRebuild() {
+      if (!rebuildId) return;
+      if (rebuildSource && rebuildSource !== "legacy") return;
+      if (hydratedRebuildId === rebuildId) return;
+
+      try {
+        const response = await fetch(
+          `/api/characters/rebuild-source?id=${encodeURIComponent(rebuildId)}`,
+          {
+            credentials: "same-origin",
+          },
+        );
+        const data = (await response.json().catch(() => null)) as
+          | ({ ok: true } & LegacyRebuildSourcePayload)
+          | { ok?: false; error?: string }
+          | null;
+
+        if (!response.ok || !data || data.ok !== true) {
+          const errorMessage =
+            data && "error" in data && typeof data.error === "string"
+              ? data.error
+              : "Could not load the legacy rebuild.";
+          throw new Error(errorMessage);
+        }
+
+        if (cancelled) return;
+
+        const nameParts = data.form.name.trim().split(/\s+/).filter(Boolean);
+        const rebuiltNotes = readStructuredNotes(data.form.customNotes);
+        const nextDynamism = Number(rebuiltNotes.Dynamism);
+
+        setForm(data.form);
+        setDynamism(Number.isFinite(nextDynamism) ? nextDynamism : 68);
+        setCreatorEntry("women");
+        setCreationTrack("ready");
+        setVisualWizardStep("review");
+        setActiveStep("identity");
+        setSelectedTemplateId("");
+        setCreatedCharacter(null);
+        setResultImageUrl(null);
+        setPromptIdea("");
+        setLastName(nameParts.slice(1).join(" "));
+        clearAvatarPreview();
+        setLegacyRebuildNotice({
+          title: data.noticeTitle,
+          message: data.noticeMessage,
+        });
+        setHydratedRebuildId(rebuildId);
+        setBanner(null);
+        router.replace("/create-character", { scroll: false });
+      } catch (error) {
+        if (cancelled) return;
+
+        setBanner({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not load the legacy rebuild.",
+        });
+      }
+    }
+
+    void loadLegacyRebuild();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    clearAvatarPreview,
+    hydratedRebuildId,
+    rebuildId,
+    rebuildSource,
+    router,
+  ]);
 
   function setField<K extends keyof StudioFormState>(
     key: K,
@@ -1186,6 +1710,7 @@ export default function CreateCharacterPage() {
   function resetStudio() {
     setForm(defaultStudioForm());
     setBanner(null);
+    setLegacyRebuildNotice(null);
     setDynamism(68);
     setActiveStep("identity");
     setSelectedTemplateId("");
@@ -1305,6 +1830,86 @@ export default function CreateCharacterPage() {
     setBanner(null);
   }
 
+  function setSkinTone(value: string) {
+    rebuildCustomNotes({ "Skin tone": value });
+  }
+
+  function setEyeColor(value: string) {
+    rebuildCustomNotes({
+      "Eye color": value,
+      Eyes: value,
+    });
+  }
+
+  function setHairColor(value: string) {
+    const nextStyle =
+      hairStyle || customHairStyle || "long";
+
+    rebuildCustomNotes({
+      "Hair color": value,
+      Hair: `${value} ${nextStyle}`.trim(),
+    });
+  }
+
+  function setHairStyleValue(value: string) {
+    const nextHairColor = hairColor || "black";
+
+    rebuildCustomNotes({
+      "Hair style": value,
+      "Custom hairstyle": value === "custom" ? customHairStyle : "",
+      Hair: `${nextHairColor} ${value === "custom" ? customHairStyle || "custom hairstyle" : value}`.trim(),
+    });
+  }
+
+  function setCustomHairStyleValue(value: string) {
+    const nextHairColor = hairColor || "black";
+    rebuildCustomNotes({
+      "Hair style": "custom",
+      "Custom hairstyle": value,
+      Hair: `${nextHairColor} ${value}`.trim(),
+    });
+  }
+
+  function setBodyChoice(key: "Body type" | "Bust size" | "Breast type" | "Butt size", value: string) {
+    const nextValues: Partial<StructuredNoteMap> = { [key]: value } as Partial<StructuredNoteMap>;
+
+    if (key === "Butt size") {
+      nextValues["Hip shape"] = value;
+    }
+
+    rebuildCustomNotes(nextValues);
+  }
+
+  function toggleMultiChoice(
+    key: "Hobbies" | "Fetishes",
+    current: string[],
+    value: string,
+    limit = 12,
+  ) {
+    const next = toggleListItem(current, value, limit);
+    rebuildCustomNotes({ [key]: next.join(", ") } as Partial<StructuredNoteMap>);
+  }
+
+  function setRelationshipChoice(value: string) {
+    if (value === "Custom") {
+      rebuildCustomNotes({ "Relationship dynamic": "" });
+      setField("relationshipToUser", "");
+      return;
+    }
+
+    setField("relationshipToUser", value);
+  }
+
+  function openDetailModal(tab: DetailTab) {
+    if (tab === "voice") return;
+    setActiveDetailTab(tab);
+    setDetailModalOpen(true);
+  }
+
+  function closeDetailModal() {
+    setDetailModalOpen(false);
+  }
+
   function applyScenePreset(preset: (typeof SCENE_PRESETS)[number]) {
     setForm((current) => ({
       ...current,
@@ -1348,14 +1953,10 @@ export default function CreateCharacterPage() {
   }
 
   const { handleSubmit } = useCreateCharacterSubmit({
-    avatarProvider,
-    avatarSafetyInput,
     draft,
     form,
     generatedAvatarUrl,
-    lastAvatarNegativePrompt,
     lastAvatarPromptInput,
-    lastAvatarResolvedPrompt,
     saving,
     setActiveStep,
     setBanner,
@@ -1390,55 +1991,61 @@ export default function CreateCharacterPage() {
   const visualReviewItems = [
     { label: "Name", value: form.name.trim() },
     { label: "Age", value: form.age.trim() },
-    { label: "Region", value: form.region.trim() },
-    { label: "Profession", value: profession },
+    { label: "Origin", value: form.region.trim() },
+    { label: "Skin tone", value: skinTone },
+    { label: "Eye color", value: eyeColor },
+    { label: "Hair", value: [hairColor, hairStyle === "custom" ? customHairStyle : hairStyle].filter(Boolean).join(" • ") },
     { label: "Traits", value: selectedTraits.join(" • ") },
-    { label: "Skin", value: skinTone },
-    { label: "Eyes", value: [eyes, eyeShape].filter(Boolean).join(" • ") },
-    { label: "Hair", value: [hair, hairTexture].filter(Boolean).join(" • ") },
-    { label: "Body", value: [bodyType, bustSize, hipsType].filter(Boolean).join(" • ") },
-    { label: "Style", value: [outfit, lightingMood, palette].filter(Boolean).join(" • ") },
-    { label: "Scenario", value: form.customScenario.trim() || [form.setting.trim(), form.sceneGoal.trim(), form.tone.trim()].filter(Boolean).join(" • ") },
+    { label: "Clothes", value: outfit },
+    { label: "Relationship", value: form.relationshipToUser.trim() || "Custom relationship not added" },
+    { label: "Hobbies", value: selectedHobbies.join(" • ") },
+    { label: "Fetishes", value: selectedFetishes.join(" • ") },
+    { label: "Extra personality", value: extraPersonalityDetails },
+    { label: "Extra physical", value: extraPhysicalDetails },
+    { label: "Body", value: [bodyType, bustSize, breastType, buttSize].filter(Boolean).join(" • ") },
   ].filter((item) => item.value);
+  const compactImageReviewItems = visualReviewItems.slice(0, 8);
 
   const resultPreviewUrl = resultImageUrl || generatedAvatarUrl;
   const readyVisualSteps: VisualWizardStep[] = [
     "identity",
-    "traits",
+    "general",
     "face",
-    "hair",
     "body",
-    "style",
-    "scenario",
-    "review",
+    "details",
+    "image",
   ];
+  const readyVisualStepLabels: Partial<Record<VisualWizardStep, string>> = {
+    identity: "Identity",
+    general: "General",
+    face: "Face",
+    body: "Body",
+    details: "Details",
+    image: "Image",
+  };
   const readyVisualStepIndex = readyVisualSteps.indexOf(visualWizardStep);
   const canAdvanceVisualStep =
     visualWizardStep === "prompt"
       ? Boolean(form.name.trim() && form.age.trim() && promptIdea.trim())
       : visualWizardStep === "identity"
         ? Boolean(form.name.trim() && form.age.trim() && form.region.trim())
-        : visualWizardStep === "traits"
-          ? Boolean(profession && selectedTraits.length > 0)
+        : visualWizardStep === "general"
+          ? Boolean(skinTone)
         : visualWizardStep === "face"
-          ? Boolean(skinTone && eyes)
-          : visualWizardStep === "hair"
-            ? Boolean(hair.trim())
+          ? Boolean(eyeColor && hairColor && (hairStyle !== "custom" ? hairStyle : customHairStyle))
             : visualWizardStep === "body"
-              ? Boolean(bodyType && bustSize && hipsType)
-              : visualWizardStep === "style"
-                ? Boolean(outfit && lightingMood)
-                : visualWizardStep === "scenario"
-                  ? Boolean(form.sceneGoal.trim() && (form.customScenario.trim() || form.setting.trim()))
+              ? Boolean(bodyType && bustSize && breastType && buttSize)
+              : visualWizardStep === "details"
+                ? Boolean(selectedTraits.length > 0 && outfit && form.relationshipToUser.trim())
                 : true;
   const currentBanner = banner;
   const currentReadyStepCopy =
     creationTrack === "ready" &&
     readyVisualSteps.includes(visualWizardStep as (typeof readyVisualSteps)[number])
-      ? READY_STEP_COPY[
+        ? READY_STEP_COPY[
           visualWizardStep as Exclude<
             VisualWizardStep,
-            "entry" | "track" | "prompt" | "generating" | "result"
+            "entry" | "track" | "prompt" | "review" | "generating" | "result"
           >
         ]
       : null;
@@ -1467,13 +2074,13 @@ export default function CreateCharacterPage() {
 
     if (track === "prompt") {
       setField("region", "Global");
-      setField("setting", form.setting || "private luxury interior");
+      setField("setting", form.setting || "natural indoor lifestyle setting");
       setField("relationshipToUser", form.relationshipToUser || "new attraction");
       setField("sceneGoal", form.sceneGoal || "build chemistry slowly");
-      setField("tone", form.tone || "cinematic, intimate, premium");
+      setField("tone", form.tone || "natural, grounded, softly intimate");
       rebuildCustomNotes({
         "Image prompt": promptIdea,
-        "Visual aura": visualNote || "clean luxury",
+        "Visual aura": visualNote || "natural realism",
       }, promptIdea);
     }
   }
@@ -1545,21 +2152,14 @@ export default function CreateCharacterPage() {
     setBanner(null);
 
     try {
-      const created = await createMyCustomCharacter(draft);
-
-      if (generatedAvatarUrl && lastAvatarPromptInput) {
-        await requestImageGeneration({
-          provider: avatarProvider,
-          kind: "avatar",
-          characterId: created.id,
-          userId: created.user_id,
-          promptInput: lastAvatarPromptInput,
-          safety: avatarSafetyInput,
-          previewImageUrl: generatedAvatarUrl,
-          previewResolvedPrompt: lastAvatarResolvedPrompt,
-          previewNegativePrompt: lastAvatarNegativePrompt,
-        });
+      if (!generatedAvatarUrl || !lastAvatarPromptInput) {
+        throw new Error("Generate the avatar first before creating this character.");
       }
+
+      const created = await finalizeMyCustomCharacterCreation({
+        draft,
+        imageUrl: generatedAvatarUrl,
+      });
 
       setCreatedCharacter(created);
       setResultImageUrl(generatedAvatarUrl);
@@ -1568,6 +2168,8 @@ export default function CreateCharacterPage() {
         type: "success",
         message: `"${created.name}" is ready.`,
       });
+      router.push("/my-characters");
+      router.refresh();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not create character.";
@@ -1578,19 +2180,17 @@ export default function CreateCharacterPage() {
             ? "You need to log in before creating a character."
             : message,
       });
-      setVisualWizardStep("review");
+      setVisualWizardStep(creationTrack === "prompt" ? "review" : "image");
     } finally {
       setSaving(false);
       setPendingCharacterCreation(false);
     }
   }, [
-    avatarProvider,
-    avatarSafetyInput,
     draft,
     generatedAvatarUrl,
-    lastAvatarNegativePrompt,
     lastAvatarPromptInput,
-    lastAvatarResolvedPrompt,
+    creationTrack,
+    router,
     saving,
   ]);
 
@@ -1607,7 +2207,7 @@ export default function CreateCharacterPage() {
     }
 
     if (!form.setting.trim()) {
-      setField("setting", "private luxury interior");
+      setField("setting", "natural indoor lifestyle setting");
     }
 
     if (!form.relationshipToUser.trim()) {
@@ -1619,7 +2219,12 @@ export default function CreateCharacterPage() {
     }
 
     if (!form.tone.trim()) {
-      setField("tone", creationTrack === "prompt" ? "cinematic, intimate, premium" : "stylish, magnetic, intimate");
+      setField(
+        "tone",
+        creationTrack === "prompt"
+          ? "natural, grounded, softly intimate"
+          : "natural, realistic, softly intimate",
+      );
     }
 
     setVisualWizardStep("generating");
@@ -1640,15 +2245,19 @@ export default function CreateCharacterPage() {
     setBanner(null);
 
     try {
+      const refreshedPromptInput = { ...lastAvatarPromptInput };
+
       const result = await requestImageGeneration({
         provider: avatarProvider,
         kind: "avatar",
         characterId: createdCharacter.id,
         userId: createdCharacter.user_id,
-        promptInput: lastAvatarPromptInput,
+        promptInput: refreshedPromptInput,
         safety: avatarSafetyInput,
-        consistencySourceImageUrl: resultImageUrl ?? generatedAvatarUrl ?? null,
-        consistencyStrength: "strict",
+        baseSeed: Math.floor(Math.random() * 2_000_000_000),
+        generationProfile: "identity_locked_avatar",
+        qualityTier: "max",
+        referenceStrategy: "single_avatar_lock",
       });
 
       if (!result.ok || !result.imageUrl) {
@@ -1658,7 +2267,7 @@ export default function CreateCharacterPage() {
       setResultImageUrl(result.imageUrl);
       setBanner({
         type: "success",
-        message: "A fresh image was generated with the same selections.",
+        message: "A fresh image was generated with the same prompt and framing lock.",
       });
     } catch (error) {
       const message =
@@ -1674,9 +2283,9 @@ export default function CreateCharacterPage() {
 
     if (avatarJobStatus === "failed") {
       setPendingCharacterCreation(false);
-      setVisualWizardStep("review");
+      setVisualWizardStep(creationTrack === "prompt" ? "review" : "image");
     }
-  }, [avatarJobStatus, pendingCharacterCreation]);
+  }, [avatarJobStatus, creationTrack, pendingCharacterCreation]);
 
   useEffect(() => {
     if (!pendingCharacterCreation || !generatedAvatarUrl) return;
@@ -1723,6 +2332,7 @@ export default function CreateCharacterPage() {
                     setCreatedCharacter(null);
                     setResultImageUrl(null);
                     setPromptIdea("");
+                    setLegacyRebuildNotice(null);
                     resetStudio();
                   }}
                   className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/80 transition hover:border-white/20 hover:bg-white/10"
@@ -1742,6 +2352,17 @@ export default function CreateCharacterPage() {
                 )}
               >
                 {currentBanner.message}
+                </div>
+              ) : null}
+
+            {legacyRebuildNotice ? (
+              <div className="mb-6 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-4 text-sm text-cyan-50">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-100/80">
+                  {legacyRebuildNotice.title}
+                </div>
+                <p className="mt-2 max-w-3xl leading-7 text-cyan-50/92">
+                  {legacyRebuildNotice.message}
+                </p>
               </div>
             ) : null}
 
@@ -1752,6 +2373,7 @@ export default function CreateCharacterPage() {
                   subtitle="Build a visual-first female character with region, face, hair, body, style, AI image generation, and direct chat handoff."
                   gradient="from-fuchsia-500/45 via-rose-400/20 to-cyan-500/20"
                   active={creatorEntry === "women"}
+                  imageSrc="/create-character/woman/woman-cover.jpg"
                   onClick={() => selectHeroPath("women")}
                 />
                 <VisualHeroCard
@@ -1805,7 +2427,7 @@ export default function CreateCharacterPage() {
             ) : null}
 
             {visualWizardStep === "prompt" ? (
-              <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="mx-auto grid max-w-4xl gap-6">
                 <Section title="Prompt studio" description="Name, age, and one strong visual prompt are enough here." accent="fuchsia">
                   <div className="mb-5 flex flex-wrap gap-2">
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.18em] text-white/60">Fast path</span>
@@ -1830,7 +2452,7 @@ export default function CreateCharacterPage() {
                     <input
                       type="range"
                       min={18}
-                      max={55}
+                      max={70}
                       value={ageValue}
                       onChange={(event) => setAgeFromSlider(Number(event.target.value))}
                       className="w-full accent-fuchsia-400"
@@ -1848,7 +2470,7 @@ export default function CreateCharacterPage() {
                         setPromptIdea(value);
                         rebuildCustomNotes({ "Image prompt": value }, value);
                       }}
-                      placeholder="luxury brunette woman, dangerous eye contact, fitted black dress, soft gold light, premium editorial portrait, intense but elegant..."
+                      placeholder="dark-haired woman, dangerous eye contact, fitted black dress, soft gold light, realistic upper-body photo, intense but elegant..."
                       rows={7}
                     />
                   </div>
@@ -1875,7 +2497,7 @@ export default function CreateCharacterPage() {
                   <div className="space-y-4 text-sm leading-7 text-white/70">
                     <p>Name, age and your prompt stay visible. The engine expands them into richer visual identity, opening beat, greeting, and image prompt structure.</p>
                     <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">Current opening preview</div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">Current opening</div>
                       <p className="mt-3 text-sm leading-7 text-white/80">{openingPack.greeting}</p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
@@ -1915,21 +2537,21 @@ export default function CreateCharacterPage() {
               </div>
             ) : null}
 
-            {["identity", "traits", "face", "hair", "body", "style", "scenario", "review"].includes(visualWizardStep) && creationTrack === "ready" ? (
-              <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr]">
+            {["identity", "general", "face", "body", "details", "image"].includes(visualWizardStep) && creationTrack === "ready" ? (
+              <div className="mx-auto max-w-5xl">
                 <div className="space-y-6">
                   <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-3">
                     <div className="mb-3 flex items-center justify-between gap-3 px-2">
                       <div className="text-xs uppercase tracking-[0.2em] text-white/45">Build progress</div>
                       <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-white/65">
-                        Step {["identity", "traits", "face", "hair", "body", "style", "scenario", "review"].indexOf(visualWizardStep) + 1} / 8
+                        Step {readyVisualSteps.indexOf(visualWizardStep) + 1} / {readyVisualSteps.length}
                       </div>
                     </div>
                     <div className="mb-4 h-2 overflow-hidden rounded-full bg-white/10">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-fuchsia-400 to-cyan-400 transition-all"
                         style={{
-                          width: `${((["identity", "traits", "face", "hair", "body", "style", "scenario", "review"].indexOf(visualWizardStep) + 1) / 8) * 100}%`,
+                          width: `${((readyVisualSteps.indexOf(visualWizardStep) + 1) / readyVisualSteps.length) * 100}%`,
                         }}
                       />
                     </div>
@@ -1952,7 +2574,7 @@ export default function CreateCharacterPage() {
                               : "border border-white/10 bg-white/5 text-white/70",
                         )}
                       >
-                        {step}
+                        {readyVisualStepLabels[step]}
                       </button>
                     ))}
                     </div>
@@ -1993,7 +2615,7 @@ export default function CreateCharacterPage() {
                         <input
                           type="range"
                           min={18}
-                          max={55}
+                          max={70}
                           value={ageValue}
                           onChange={(event) => setAgeFromSlider(Number(event.target.value))}
                           className="w-full accent-fuchsia-400"
@@ -2016,402 +2638,494 @@ export default function CreateCharacterPage() {
                     </Section>
                   ) : null}
 
-                  {visualWizardStep === "traits" ? (
-                    <Section title="Traits and profession" description="Pick a job and the personality traits that should shape how she behaves." accent="cyan">
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <SelectField
-                          label="Profession"
-                          value={profession || ""}
-                          onChange={(value) => rebuildCustomNotes({ Profession: value })}
-                          options={[
-                            { value: "", label: "Select a profession" },
-                            ...PROFESSION_OPTIONS.map((value) => ({ value, label: value })),
-                          ]}
-                        />
-                        <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                            Selected traits
+                  {visualWizardStep === "general" ? (
+                    <Section title="General" description="Keep this step simple: set the core complexion before the face and body." accent="cyan">
+                      <div>
+                        <div className="mb-4 text-center">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-100/72">
+                            Skin tone
                           </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {selectedTraits.length > 0 ? (
-                              selectedTraits.map((trait) => (
-                                <button
-                                  key={trait}
-                                  type="button"
-                                  onClick={() => toggleTrait(trait)}
-                                  className="rounded-full border border-fuchsia-400/20 bg-fuchsia-400/10 px-3 py-1 text-xs text-fuchsia-100"
-                                >
-                                  {TRAIT_EMOJI[trait as keyof typeof TRAIT_EMOJI]} {trait}
-                                </button>
-                              ))
-                            ) : (
-                              <span className="text-sm text-white/55">
-                                Pick at least one trait.
-                              </span>
-                            )}
-                          </div>
+                          <p className="mt-2 text-sm leading-7 text-white/62">
+                            Choose the overall complexion first so the next steps stay visually consistent.
+                          </p>
                         </div>
-                      </div>
+                        <div className="flex flex-wrap justify-center gap-4">
+                        {SKIN_TONE_CHOICES.map((option) => {
+                          const active = skinTone === option.value;
 
-                      <div className="mt-6">
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">
-                          Personality traits
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                          {TRAIT_OPTIONS.map((trait) => {
-                            const active = selectedTraits.includes(trait);
-                            const disabled =
-                              !active &&
-                              selectedTraits.some(
-                                (selected) =>
-                                  (TRAIT_CONFLICTS[trait] ?? []).includes(selected) ||
-                                  (TRAIT_CONFLICTS[selected] ?? []).includes(trait),
-                              );
-
-                            return (
-                              <button
-                                key={trait}
-                                type="button"
-                                onClick={() => toggleTrait(trait)}
-                                className={cn(
-                                  "rounded-[20px] border px-4 py-3 text-left text-sm transition",
-                                  active
-                                    ? "border-fuchsia-400/30 bg-fuchsia-400/10 text-fuchsia-100"
-                                    : disabled
-                                      ? "cursor-not-allowed border-white/5 bg-white/[0.02] text-white/25"
-                                      : "border-white/10 bg-white/[0.03] text-white/78 hover:border-white/20 hover:bg-white/[0.05]",
-                                )}
-                              >
-                                <span className="mr-2">
-                                  {TRAIT_EMOJI[trait as keyof typeof TRAIT_EMOJI]}
-                                </span>
-                                {trait}
-                              </button>
-                            );
-                          })}
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              aria-label={option.value}
+                              onClick={() => setSkinTone(option.value)}
+                              className={cn(
+                                "h-20 w-20 rounded-full border-4 transition",
+                                active
+                                  ? "border-white shadow-[0_0_0_4px_rgba(34,211,238,0.25)]"
+                                  : "border-white/10",
+                              )}
+                              style={{ backgroundColor: option.color }}
+                            >
+                              <span className="sr-only">{option.value}</span>
+                            </button>
+                          );
+                        })}
                         </div>
                       </div>
                     </Section>
                   ) : null}
 
                   {visualWizardStep === "face" ? (
-                    <Section title="Face and eyes" description="Choose the face anchors before hair and body." accent="cyan">
+                    <Section title="Face" description="Choose eyes, hair color, and hairstyle." accent="cyan">
                       <div>
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Skin tone</div>
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                          {FACE_CHOICES.skinTone.map((option) => (
-                            <VisualChoiceCard
-                              key={option.value}
-                              option={option}
-                              active={skinTone === option.value}
-                              onClick={() => rebuildCustomNotes({ "Skin tone": option.value })}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                      <div className="mt-6">
                         <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Eye color</div>
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                          {FACE_CHOICES.eyes.map((option) => (
+                          {EYE_COLOR_CHOICES.map((option) => (
                             <VisualChoiceCard
                               key={option.value}
                               option={option}
-                              active={eyes === option.value}
-                              onClick={() => rebuildCustomNotes({ Eyes: option.value })}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </Section>
-                  ) : null}
-
-                  {visualWizardStep === "hair" ? (
-                    <Section title="Hair" description="Color, model, and texture set the strongest visual frame." accent="fuchsia">
-                      <div>
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Hair color</div>
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                          {HAIR_COLOR_CHOICES.map((option) => (
-                            <VisualChoiceCard
-                              key={option.value}
-                              option={option}
-                              active={hair.toLowerCase().includes(option.value)}
-                              onClick={() =>
-                                rebuildCustomNotes({
-                                  Hair: `${option.value} ${hair.replace(/^(black|dark brown|blonde|auburn|silver ash)\s*/i, "").trim() || "long flowing hair"}`.trim(),
-                                })
-                              }
+                              active={eyeColor === option.value}
+                              onClick={() => setEyeColor(option.value)}
                             />
                           ))}
                         </div>
                       </div>
                       <div className="mt-6">
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Hair model</div>
+                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Hair color</div>
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                          {HAIR_COLOR_CHOICES.map((option) => {
+                            return (
+                              <VisualChoiceCard
+                                key={option.value}
+                                option={option}
+                                active={hairColor === option.value}
+                                onClick={() => setHairColor(option.value)}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="mt-6">
+                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Hairstyle</div>
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                           {HAIR_STYLE_CHOICES.map((option) => (
                             <VisualChoiceCard
                               key={option.value}
                               option={option}
-                              active={hair.toLowerCase().includes(option.value)}
-                              onClick={() =>
-                                rebuildCustomNotes({
-                                  Hair: `${(hair.match(/^(black|dark brown|blonde|auburn|silver ash)/i)?.[0] || "black")} ${option.value}`.trim(),
-                                })
-                              }
+                              active={hairStyle === option.value}
+                              onClick={() => setHairStyleValue(option.value)}
                             />
                           ))}
                         </div>
                       </div>
+
+                      {hairStyle === "custom" ? (
+                        <div className="mt-6">
+                          <InputField
+                            label="Custom hairstyle"
+                            value={customHairStyle}
+                            onChange={setCustomHairStyleValue}
+                            placeholder="Describe the hairstyle you want"
+                          />
+                        </div>
+                      ) : null}
                     </Section>
                   ) : null}
 
                   {visualWizardStep === "body" ? (
-                    <Section title="Body features" description="These choices stay visual-first and feed a deeper hidden prompt." accent="cyan">
+                    <Section title="Body" description="Choose the body shape and proportions." accent="cyan">
                       <div className="grid gap-6">
                         <div>
                           <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Body type</div>
                           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                             {BODY_CHOICES.bodyType.map((option) => (
-                              <VisualChoiceCard key={option.value} option={option} active={bodyType === option.value} onClick={() => rebuildCustomNotes({ "Body type": option.value })} />
+                              <VisualChoiceCard key={option.value} option={option} active={bodyType === option.value} onClick={() => setBodyChoice("Body type", option.value)} />
                             ))}
                           </div>
                         </div>
                         <div>
-                          <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Bust type</div>
+                          <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Breast size</div>
                           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                            {BODY_CHOICES.bust.map((option) => (
-                              <VisualChoiceCard key={option.value} option={option} active={bustSize === option.value} onClick={() => rebuildCustomNotes({ "Bust size": option.value })} />
+                            {BODY_CHOICES.breastSize.map((option) => (
+                              <VisualChoiceCard key={option.value} option={option} active={bustSize === option.value} onClick={() => setBodyChoice("Bust size", option.value)} />
                             ))}
                           </div>
                         </div>
                         <div>
-                          <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Hip type</div>
+                          <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Breast type</div>
                           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                            {BODY_CHOICES.hips.map((option) => (
-                              <VisualChoiceCard key={option.value} option={option} active={hipsType === option.value} onClick={() => rebuildCustomNotes({ "Hip shape": option.value })} />
+                            {BODY_CHOICES.breastType.map((option) => (
+                              <VisualChoiceCard key={option.value} option={option} active={breastType === option.value} onClick={() => setBodyChoice("Breast type", option.value)} />
                             ))}
                           </div>
                         </div>
-                      </div>
-                    </Section>
-                  ) : null}
-
-                  {visualWizardStep === "style" ? (
-                    <Section title="Style and final mood" description="Outfit and lighting decide how premium the result feels." accent="fuchsia">
-                      <div>
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Outfit</div>
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                          {STYLE_CHOICES.outfit.map((option) => (
-                            <VisualChoiceCard key={option.value} option={option} active={outfit === option.value} onClick={() => rebuildCustomNotes({ Outfit: option.value })} />
-                          ))}
-                        </div>
-                      </div>
-                      <div className="mt-6">
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Lighting mood</div>
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                          {STYLE_CHOICES.lighting.map((option) => (
-                            <VisualChoiceCard key={option.value} option={option} active={lightingMood === option.value} onClick={() => rebuildCustomNotes({ "Lighting mood": option.value })} />
-                          ))}
-                        </div>
-                      </div>
-                    </Section>
-                  ) : null}
-
-                  {visualWizardStep === "scenario" ? (
-                    <Section title="Scenario" description="Choose the situation first, then write your own scene note if you want." accent="cyan">
-                      <div>
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Scenario examples</div>
-                        <div className="grid gap-4 md:grid-cols-2">
-                          {ROLEPLAY_SCENARIO_TEMPLATES.map((template) => {
-                            const active =
-                              form.customScenario === template.customScenario &&
-                              form.setting === template.setting;
-
-                            return (
-                              <button
-                                key={template.title}
-                                type="button"
-                                onClick={() => applyRoleplayScenarioTemplate(template)}
-                                className={cn(
-                                  "rounded-[24px] border p-4 text-left transition",
-                                  active
-                                    ? "border-fuchsia-400/25 bg-fuchsia-400/10"
-                                    : "border-white/10 bg-black/25 hover:border-cyan-400/25 hover:bg-black/35",
-                                )}
-                              >
-                                <div className="text-sm font-medium text-white">
-                                  {template.title}
-                                </div>
-                                <div className="mt-2 text-xs leading-6 text-white/55">
-                                  {template.summary}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="mt-6 grid gap-4 md:grid-cols-2">
-                        <InputField
-                          label="Setting"
-                          value={form.setting}
-                          onChange={(value) => setField("setting", value)}
-                          placeholder="private penthouse after an event"
-                        />
-                        <InputField
-                          label="Relationship"
-                          value={form.relationshipToUser}
-                          onChange={(value) => setField("relationshipToUser", value)}
-                          placeholder="forbidden attraction"
-                        />
-                        <InputField
-                          label="Scene goal"
-                          value={form.sceneGoal}
-                          onChange={(value) => setField("sceneGoal", value)}
-                          placeholder="keep control while tension grows"
-                        />
-                        <InputField
-                          label="Tone"
-                          value={form.tone}
-                          onChange={(value) => setField("tone", value)}
-                          placeholder="restrained, intimate, expensive"
-                        />
-                      </div>
-
-                      <div className="mt-6">
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Relationship dynamic</div>
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                          {ROLEPLAY_DYNAMIC_CHOICES.map((option) => (
-                            <VisualChoiceCard
-                              key={option.value}
-                              option={option}
-                              active={relationshipDynamic === option.value}
-                              onClick={() => rebuildCustomNotes({ "Relationship dynamic": option.value })}
-                            />
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="mt-6">
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Scene type</div>
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                          {ROLEPLAY_SCENE_CHOICES.map((option) => (
-                            <VisualChoiceCard
-                              key={option.value}
-                              option={option}
-                              active={sceneType === option.value}
-                              onClick={() => rebuildCustomNotes({ "Scene type": option.value })}
-                            />
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="mt-6 grid gap-6 xl:grid-cols-2">
                         <div>
-                          <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Behavior mode</div>
-                          <div className="grid gap-4 md:grid-cols-2">
-                            {ROLEPLAY_BEHAVIOR_CHOICES.map((option) => (
-                              <VisualChoiceCard
-                                key={option.value}
-                                option={option}
-                                active={behaviorMode === option.value}
-                                onClick={() => rebuildCustomNotes({ "Behavior mode": option.value })}
-                              />
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Arc stage</div>
-                          <div className="grid gap-4 md:grid-cols-2">
-                            {ROLEPLAY_ARC_CHOICES.map((option) => (
-                              <VisualChoiceCard
-                                key={option.value}
-                                option={option}
-                                active={arcStage === option.value}
-                                onClick={() => rebuildCustomNotes({ "Arc stage": option.value })}
-                              />
+                          <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">Butt size</div>
+                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            {BODY_CHOICES.buttSize.map((option) => (
+                              <VisualChoiceCard key={option.value} option={option} active={buttSize === option.value} onClick={() => setBodyChoice("Butt size", option.value)} />
                             ))}
                           </div>
                         </div>
                       </div>
+                    </Section>
+                  ) : null}
 
-                      <div className="mt-6">
-                        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/40">How she sees the user</div>
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                          {ROLEPLAY_USER_ROLE_CHOICES.map((option) => (
-                            <VisualChoiceCard
-                              key={option.value}
-                              option={option}
-                              active={userRole === option.value}
-                              onClick={() => rebuildCustomNotes({ "User role": option.value })}
+                  {visualWizardStep === "details" ? (
+                    <Section title="Details" description="Open a category, make the picks, and keep the builder clean." accent="fuchsia">
+                      <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 md:p-6">
+                        <div className="text-center">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-white/42">
+                            Details selection
+                          </div>
+                          <h3 className="mt-3 text-2xl font-semibold text-white">
+                            Choose only what matters
+                          </h3>
+                          <p className="mx-auto mt-2 max-w-2xl text-sm leading-7 text-white/62">
+                            Tap a card to open a focused modal. The selection stays simple, centered, and easy to scan.
+                          </p>
+                        </div>
+
+                        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                          {detailTabCards.map((item) => (
+                            <DetailDeckCard
+                              key={item.id}
+                              label={item.label}
+                              eyebrow={item.eyebrow}
+                              description={item.description}
+                              summary={item.summary}
+                              countLabel={item.countLabel}
+                              active={activeDetailTab === item.id}
+                              tone={item.tone}
+                              onClick={() => openDetailModal(item.id)}
                             />
                           ))}
                         </div>
                       </div>
 
-                      <div className="mt-6">
-                        <TextAreaField
-                          label="Custom scenario"
-                          value={form.customScenario}
-                          onChange={(value) => setField("customScenario", value)}
-                          placeholder="Write the exact moment you want. Example: She closes the penthouse door, keeps her voice low, and finally admits she has been watching you all night."
-                          rows={6}
-                        />
-                      </div>
-
-                      <div className="mt-6 grid gap-4 md:grid-cols-2">
-                        <SelectField
-                          label="User role"
-                          value={userRole || USER_ROLE_OPTIONS_EXTENDED[0]}
-                          onChange={(value) => rebuildCustomNotes({ "User role": value })}
-                          options={USER_ROLE_OPTIONS_EXTENDED.map((value) => ({ value, label: value }))}
-                        />
-                        <SelectField
-                          label="Behavior mode"
-                          value={behaviorMode || BEHAVIOR_MODE_OPTIONS[0]}
-                          onChange={(value) => rebuildCustomNotes({ "Behavior mode": value })}
-                          options={BEHAVIOR_MODE_OPTIONS.map((value) => ({ value, label: value }))}
-                        />
-                      </div>
+                      <details className="mt-6 rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 md:p-6">
+                        <summary className="cursor-pointer list-none">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-100/76">
+                                Extras
+                              </div>
+                              <div className="mt-2 text-xl font-semibold text-white">
+                                Optional polish notes
+                              </div>
+                            </div>
+                            <SelectionPill
+                              label={
+                                [extraPersonalityDetails, extraPhysicalDetails].filter(Boolean)
+                                  .length
+                                  ? "Notes added"
+                                  : "Optional"
+                              }
+                              tone="cyan"
+                            />
+                          </div>
+                        </summary>
+                        <div className="mt-6 grid gap-5 xl:grid-cols-2">
+                          <div className="rounded-[24px] border border-white/10 bg-black/20 p-5">
+                            <TextAreaField
+                              label="Extra personality details"
+                              value={extraPersonalityDetails}
+                              onChange={(value) =>
+                                rebuildCustomNotes({
+                                  "Extra personality details": value,
+                                })
+                              }
+                              placeholder="Add quirks, attitude, favorite phrases, or other final personality details"
+                              rows={5}
+                            />
+                          </div>
+                          <div className="rounded-[24px] border border-white/10 bg-black/20 p-5">
+                            <TextAreaField
+                              label="Extra physical details"
+                              value={extraPhysicalDetails}
+                              onChange={(value) =>
+                                rebuildCustomNotes({
+                                  "Extra physical details": value,
+                                })
+                              }
+                              placeholder="Add tattoos, piercings, scars, freckles, jewelry, or other physical details"
+                              rows={5}
+                            />
+                          </div>
+                        </div>
+                      </details>
                     </Section>
                   ) : null}
 
-                  {visualWizardStep === "review" ? (
-                    <Section title="Final review" description="These are the selected visual anchors the AI will use." accent="cyan">
-                      <div className="mb-5 rounded-[24px] border border-emerald-400/15 bg-emerald-400/10 p-4">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-100/85">
-                          What happens next
+                  {visualWizardStep === "details" && detailModalOpen ? (
+                    <div
+                      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/72 px-4 py-6 backdrop-blur-sm md:py-8"
+                      onClick={closeDetailModal}
+                    >
+                      <div
+                        className="mt-4 flex h-[72vh] w-full max-w-3xl min-h-0 flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[#171821] shadow-[0_30px_120px_rgba(0,0,0,0.45)] md:mt-6 xl:max-w-[42vw]"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between border-b border-white/10 px-6 py-5 md:px-8">
+                          <div className="w-10" />
+                          <div className="text-center">
+                            <div className="text-[11px] uppercase tracking-[0.22em] text-white/42">
+                              Detail selection
+                            </div>
+                            <h3 className="mt-2 text-3xl font-semibold text-white">
+                              {detailTabCards.find((item) => item.id === activeDetailTab)?.label}
+                            </h3>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={closeDetailModal}
+                            aria-label="Close detail selection"
+                            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-xl text-white/72 transition hover:border-white/20 hover:bg-white/10"
+                          >
+                            ×
+                          </button>
                         </div>
-                        <div className="mt-3 grid gap-3 md:grid-cols-3">
-                          <div className="rounded-2xl border border-white/10 bg-black/20 p-3 text-sm text-white/78">
-                            1. We turn your choices into a locked image prompt.
-                          </div>
-                          <div className="rounded-2xl border border-white/10 bg-black/20 p-3 text-sm text-white/78">
-                            2. We generate the avatar and save the full profile.
-                          </div>
-                          <div className="rounded-2xl border border-white/10 bg-black/20 p-3 text-sm text-white/78">
-                            3. You can reroll the image or go straight into chat.
-                          </div>
-                        </div>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {visualReviewItems.map((item, index) => (
-                          <div key={`${item.label}-${index}`} className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">{item.label}</div>
-                            <div className="mt-2 text-sm leading-7 text-white/80">{item.value}</div>
-                          </div>
-                        ))}
-                      </div>
 
-                      <div className="mt-5 rounded-[24px] border border-amber-400/20 bg-amber-400/10 p-4">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-amber-100/85">
-                          Before you create
+                        <div className="min-h-0 flex-1 overflow-y-scroll overscroll-contain px-6 py-6 md:px-8 md:py-8">
+                          {activeDetailTab === "personality" ? (
+                            <div>
+                              <div className="mb-5 flex flex-wrap gap-2">
+                                {selectedTraits.length > 0 ? selectedTraits.map((trait) => (
+                                  <SelectionPill key={trait} label={`${TRAIT_EMOJI[trait as keyof typeof TRAIT_EMOJI]} ${trait}`} tone="fuchsia" />
+                                )) : <span className="text-sm text-white/55">No traits selected yet.</span>}
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                {TRAIT_OPTIONS.map((trait) => {
+                                  const active = selectedTraits.includes(trait);
+                                  const disabled =
+                                    !active &&
+                                    selectedTraits.some(
+                                      (selected) =>
+                                        (TRAIT_CONFLICTS[trait] ?? []).includes(selected) ||
+                                        (TRAIT_CONFLICTS[selected] ?? []).includes(trait),
+                                    );
+                                  return (
+                                    <PremiumSelectionTile
+                                      key={trait}
+                                      title={trait}
+                                      subtitle={disabled ? "Conflicts with a selected trait." : "Adds a strong behavior anchor."}
+                                      emoji={TRAIT_EMOJI[trait as keyof typeof TRAIT_EMOJI]}
+                                      tone="fuchsia"
+                                      active={active}
+                                      disabled={disabled}
+                                      metaLabel={active ? "Selected" : disabled ? "Locked" : "Add"}
+                                      onClick={() => toggleTrait(trait)}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {activeDetailTab === "clothes" ? (
+                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                              {CLOTHES_CHOICES.map((item) => (
+                                <PremiumSelectionTile
+                                  key={item}
+                                  title={item}
+                                  subtitle="Single look anchor for image and roleplay tone."
+                                  tone="rose"
+                                  active={outfit === item}
+                                  metaLabel={outfit === item ? "Locked" : "Pick"}
+                                  onClick={() => rebuildCustomNotes({ Outfit: item })}
+                                />
+                              ))}
+                            </div>
+                          ) : null}
+
+                          {activeDetailTab === "relationship" ? (
+                            <div>
+                              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                {RELATIONSHIP_CHOICES.map((item) => {
+                                  const active =
+                                    item === "Custom"
+                                      ? hasCustomRelationship
+                                      : form.relationshipToUser === item;
+                                  return (
+                                    <PremiumSelectionTile
+                                      key={item}
+                                      title={item}
+                                      subtitle={item === "Custom" ? "Describe your own setup below." : "Preset relationship anchor."}
+                                      tone="amber"
+                                      active={active}
+                                      metaLabel={active ? "Locked" : "Pick"}
+                                      onClick={() => setRelationshipChoice(item)}
+                                    />
+                                  );
+                                })}
+                              </div>
+                              {(hasCustomRelationship || !form.relationshipToUser.trim()) ? (
+                                <div className="mt-6 rounded-[24px] border border-white/10 bg-black/20 p-5">
+                                  <InputField
+                                    label="Custom relationship or scenario"
+                                    value={form.relationshipToUser}
+                                    onChange={(value) => setField("relationshipToUser", value)}
+                                    placeholder="Describe the relationship or setup"
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          {activeDetailTab === "hobby" ? (
+                            <div>
+                              <div className="mb-5 flex flex-wrap gap-2">
+                                {selectedHobbies.length > 0 ? selectedHobbies.map((item) => (
+                                  <SelectionPill key={item} label={item} tone="cyan" />
+                                )) : <span className="text-sm text-white/55">No hobbies selected yet.</span>}
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                {HOBBY_CHOICES.map((item) => {
+                                  const active = selectedHobbies.includes(item.value);
+                                  return (
+                                    <PremiumSelectionTile
+                                      key={item.value}
+                                      title={item.value}
+                                      subtitle={item.caption}
+                                      emoji={item.emoji}
+                                      tone="cyan"
+                                      active={active}
+                                      metaLabel={active ? "Selected" : "Add"}
+                                      onClick={() => toggleMultiChoice("Hobbies", selectedHobbies, item.value, 10)}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {activeDetailTab === "fetishes" ? (
+                            <div>
+                              <div className="mb-5 flex flex-wrap gap-2">
+                                {selectedFetishes.length > 0 ? selectedFetishes.map((item) => (
+                                  <SelectionPill key={item} label={item} tone="fuchsia" />
+                                )) : <span className="text-sm text-white/55">No adult preferences selected yet.</span>}
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                {FETISH_CHOICES.map((item) => {
+                                  const active = selectedFetishes.includes(item.value);
+                                  return (
+                                    <PremiumSelectionTile
+                                      key={item.value}
+                                      title={item.value}
+                                      subtitle={item.caption}
+                                      emoji={item.emoji}
+                                      tone="fuchsia"
+                                      active={active}
+                                      metaLabel={active ? "Selected" : "Add"}
+                                      onClick={() => toggleMultiChoice("Fetishes", selectedFetishes, item.value, 16)}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
-                        <p className="mt-2 text-sm leading-7 text-amber-50/90">
-                          Once this character is created, it becomes locked. You will be able to
-                          open it and chat with it later, but you will not be able to edit its
-                          identity, roleplay setup, or visual profile.
-                        </p>
+
+                        <div className="flex items-center justify-between gap-3 border-t border-white/10 px-6 py-4 md:px-8">
+                          <div className="text-sm text-white/48">
+                            Scroll to explore more options
+                          </div>
+                          <button
+                            type="button"
+                            onClick={closeDetailModal}
+                            className="rounded-full bg-white px-6 py-3 text-sm font-medium text-black"
+                          >
+                            Save selection
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {visualWizardStep === "image" ? (
+                    <Section title="Image" description="Review the final build, generate the avatar, and lock the character." accent="cyan">
+                  <div className="mb-5 rounded-[20px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/65">
+                    This step creates the final locked avatar. Refresh if you want a better shot before saving.
+                  </div>
+
+                      <div className="mt-5 rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(2,8,20,0.82))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_30px_80px_rgba(0,0,0,0.22)] sm:p-5">
+                        <div className="grid gap-5 xl:grid-cols-[1.18fr_0.82fr]">
+                          <div className="space-y-4">
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-white/42">
+                                Avatar preview
+                              </div>
+                              <div className="mt-2 text-sm text-white/68">
+                                Status: {avatarStatusLabel}
+                              </div>
+                            </div>
+
+                            <div className="overflow-hidden rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(4,10,22,0.92))] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_24px_70px_rgba(0,0,0,0.22)]">
+                              <div className="grid min-h-[clamp(400px,64vh,600px)] place-items-center overflow-hidden rounded-[20px] border border-white/6 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_40%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(0,0,0,0.34))] px-3 py-4">
+                              {resultPreviewUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={resultPreviewUrl}
+                                  alt={form.name || "Character preview"}
+                                  className="max-h-[clamp(392px,60vh,584px)] w-full object-contain object-center drop-shadow-[0_18px_40px_rgba(0,0,0,0.32)]"
+                                />
+                              ) : (
+                                <div className="flex min-h-[clamp(400px,64vh,600px)] items-center justify-center px-8 py-12 text-center text-sm leading-7 text-white/52">
+                                  Your avatar preview will appear here after you generate the final image.
+                                </div>
+                              )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="rounded-[24px] border border-cyan-400/15 bg-[linear-gradient(180deg,rgba(34,211,238,0.16),rgba(8,38,55,0.78))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-100/85">
+                                Short build review
+                              </div>
+                              <p className="mt-2 text-sm leading-7 text-white/72">
+                                Current identity, body, clothes, and relationship setup.
+                              </p>
+                            </div>
+
+                            <div className="grid gap-3">
+                              {compactImageReviewItems.slice(0, 6).map((item, index) => (
+                                <div
+                                  key={`${item.label}-${index}-compact`}
+                                  className="rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.02))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+                                >
+                                  <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
+                                    {item.label}
+                                  </div>
+                                  <div className="mt-2 text-sm leading-7 text-white/80">
+                                    {item.value}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-5">
+                          <button
+                            type="button"
+                            onClick={handleGenerateAvatar}
+                            disabled={avatarGenerating || saving}
+                            className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/85 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {avatarGenerating ? "Generating preview..." : generatedAvatarUrl ? "Refresh preview" : "Generate preview"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleVisualCreate}
+                            disabled={saving || avatarGenerating}
+                            className="rounded-full bg-white px-6 py-3 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {saving || avatarGenerating ? "Creating your locked character..." : "Create locked character"}
+                          </button>
+                        </div>
                       </div>
 
                       {monetization ? (
@@ -2419,7 +3133,7 @@ export default function CreateCharacterPage() {
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                               <div className="text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/85">
-                                Current plan
+                                Plan
                               </div>
                               <div className="mt-2 text-lg font-semibold text-white">
                                 {monetization.currentPlan.label}
@@ -2446,7 +3160,7 @@ export default function CreateCharacterPage() {
                     </Section>
                   ) : null}
 
-                  {visualWizardStep !== "review" ? (
+                  {visualWizardStep !== "image" ? (
                     <div className="flex flex-wrap gap-3">
                       <button type="button" onClick={goToPreviousVisualStep} className="rounded-full border border-white/10 bg-white/5 px-6 py-3 text-sm text-white/80">
                         Back
@@ -2465,88 +3179,11 @@ export default function CreateCharacterPage() {
                       <button type="button" onClick={goToPreviousVisualStep} className="rounded-full border border-white/10 bg-white/5 px-6 py-3 text-sm text-white/80">
                         Back
                       </button>
-                      <button type="button" onClick={handleVisualCreate} disabled={saving || avatarGenerating} className="rounded-full bg-white px-6 py-3 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-60">
-                        {saving || avatarGenerating ? "Creating your locked character..." : "Create locked character"}
-                      </button>
+                      <div className="text-sm text-white/55">
+                        Use the buttons under the preview to refresh or create.
+                      </div>
                     </div>
                   )}
-                </div>
-
-                <div className="space-y-6">
-                  <Section title="Live summary" description="The current look and opening feel update live." accent="cyan">
-                    <div className="rounded-[26px] border border-white/10 bg-black/20 p-5">
-                      <div className="text-xs uppercase tracking-[0.18em] text-white/40">Chosen look</div>
-                      <p className="mt-3 text-sm leading-7 text-white/80">{visualSummary || "Selections will appear here."}</p>
-                    </div>
-                    <div className="rounded-[26px] border border-white/10 bg-black/20 p-5">
-                      <div className="text-xs uppercase tracking-[0.18em] text-white/40">Opening line</div>
-                      <p className="mt-3 text-sm leading-7 text-white/80">{openingPack.greeting}</p>
-                    </div>
-                    <div className="rounded-[26px] border border-white/10 bg-black/20 p-5">
-                      <div className="text-xs uppercase tracking-[0.18em] text-white/40">Scenario focus</div>
-                      <p className="mt-3 text-sm leading-7 text-white/80">
-                        {form.customScenario.trim() || openingPack.openingSummary}
-                      </p>
-                    </div>
-                    {monetization ? (
-                      <div className="rounded-[26px] border border-fuchsia-400/20 bg-fuchsia-400/10 p-5">
-                        <div className="text-xs uppercase tracking-[0.18em] text-fuchsia-100/80">Plan status</div>
-                        <p className="mt-3 text-sm leading-7 text-white/82">
-                          {monetization.currentPlan.label} gives you {monetization.currentPlan.customCharacterSlots} locked character slots and{" "}
-                          {monetization.currentPlan.monthlyRerolls} image rerolls each month.
-                        </p>
-                        <p className="mt-3 text-xs leading-6 text-white/60">
-                          {monetization.slotUsageLabel} • {monetization.rerollUsageLabel}
-                        </p>
-                      </div>
-                    ) : null}
-                    <div className="rounded-[26px] border border-white/10 bg-black/20 p-5">
-                      <div className="text-xs uppercase tracking-[0.18em] text-white/40">Personality build</div>
-                      <p className="mt-3 text-sm leading-7 text-white/80">
-                        {[profession, selectedTraits.join(", ")].filter(Boolean).join(" • ") || "Profession and traits will appear here."}
-                      </p>
-                    </div>
-                    <div className="rounded-[26px] border border-white/10 bg-black/20 p-5">
-                      <div className="text-xs uppercase tracking-[0.18em] text-white/40">Selected stack</div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {visualTags.slice(0, 8).map((item) => (
-                          <span
-                            key={item}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/72"
-                          >
-                            {item}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <RoleplaySummaryCard
-                        label="User role"
-                        value={userRole}
-                        helper="How she frames the user emotionally."
-                      />
-                      <RoleplaySummaryCard
-                        label="Dynamic"
-                        value={relationshipDynamic}
-                        helper="The main emotional pattern of the connection."
-                      />
-                      <RoleplaySummaryCard
-                        label="Scene type"
-                        value={sceneType}
-                        helper="The situation that shapes her replies."
-                      />
-                      <RoleplaySummaryCard
-                        label="Behavior"
-                        value={behaviorMode}
-                        helper="How direct, teasing, guarded, or controlling she feels."
-                      />
-                      <RoleplaySummaryCard
-                        label="Arc stage"
-                        value={arcStage}
-                        helper="How far the bond has already developed."
-                      />
-                    </div>
-                  </Section>
                 </div>
               </div>
             ) : null}
@@ -2730,9 +3367,15 @@ export default function CreateCharacterPage() {
                       </div>
                     ) : null}
                     {resultPreviewUrl ? (
-                      <div className="overflow-hidden rounded-[28px] border border-white/10 bg-black/20">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={resultPreviewUrl} alt={createdCharacter.name} className="h-[520px] w-full object-cover" />
+                      <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(3,10,19,0.92))] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_24px_72px_rgba(0,0,0,0.22)]">
+                        <div className="grid min-h-[clamp(380px,60vh,560px)] place-items-center overflow-hidden rounded-[22px] border border-white/6 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(0,0,0,0.34))] px-3 py-4">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={resultPreviewUrl}
+                            alt={createdCharacter.name}
+                            className="max-h-[clamp(368px,56vh,540px)] w-full object-contain object-center drop-shadow-[0_18px_40px_rgba(0,0,0,0.32)]"
+                          />
+                        </div>
                       </div>
                     ) : null}
                     <div className="flex flex-wrap gap-3">
@@ -2957,6 +3600,8 @@ export default function CreateCharacterPage() {
                 <VisualStepSection
                   accessoryVibe={accessoryVibe}
                   avatarStyle={avatarStyle}
+                  breastType={breastType}
+                  buttSize={buttSize}
                   camera={camera}
                   bodyType={bodyType}
                   bustSize={bustSize}

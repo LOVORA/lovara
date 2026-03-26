@@ -10,34 +10,34 @@ const QUICK_MODE_FEATURES = [
   "Name",
   "Age",
   "Region",
-  "Hobbies / interests",
-  "Basic traits",
+  "Interests",
+  "Core traits",
   "Short scenario",
-  "Publish visibility",
-  "Avatar preview generation",
-  "Avatar queue polling",
-  "Builder-v2 metadata enrichment",
+  "Visibility",
+  "Avatar image",
+  "Image status checks",
+  "Character details",
 ] as const;
 
 const DEEP_MODE_FEATURES = [
   "Relationship stage",
-  "Jealousy / attachment / protectiveness",
+  "Attachment, jealousy, protectiveness",
   "Conversation initiative",
   "Affection style",
   "Conflict style",
   "Emotional availability",
-  "Message format + linguistic flavor",
-  "Reply objective + scene focus",
-  "Forbidden behaviors",
-  "Chemistry template",
-  "Current energy / status",
-  "Public card customization",
-  "First-message variants preview",
-  "Visual lab prep",
-  "Skin tone / makeup / accessories / lighting",
-  "Avatar preview generation",
-  "Avatar queue polling",
-  "Builder-v2 prompt summary + canonical prompt",
+  "Message style",
+  "Reply goal and scene focus",
+  "Boundaries",
+  "Chemistry setup",
+  "Current energy",
+  "Public card text",
+  "Opening message options",
+  "Visual planning",
+  "Skin tone, makeup, accessories, lighting",
+  "Avatar image",
+  "Image status checks",
+  "Prompt summary",
 ] as const;
 
 type StudioSidebarProps = {
@@ -102,14 +102,14 @@ export function StudioSidebar({
   return (
     <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
       <Section
-        title="Live preview"
-        description="This is how the character currently reads as you build it."
+        title="Live view"
+        description="This is how the character feels right now as you build it."
         accent="fuchsia"
       >
         <div className="rounded-[26px] border border-white/10 bg-gradient-to-br from-black/35 to-black/20 p-5">
           <div className="flex items-center justify-between gap-3">
             <div className="text-xs uppercase tracking-[0.22em] text-fuchsia-200/80">
-              Preview
+              Current read
             </div>
             <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/45">
               live
@@ -160,48 +160,48 @@ export function StudioSidebar({
 
           <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                Ready score
+                Readiness
               </div>
             <div className="mt-3">
               <ProgressBar value={readinessScore} />
             </div>
           </div>
 
-          <DividerLabel label="Prompt preview" />
+          <DividerLabel label="Prompt summary" />
           <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
               Prompt summary
             </div>
             <p className="mt-2 text-sm leading-7 text-white/75">
-              {promptSummary || "No prompt summary yet."}
+              {promptSummary || "No summary yet."}
             </p>
 
             <div className="mt-4 text-[11px] uppercase tracking-[0.18em] text-white/35">
-              Main prompt
+              Core prompt
             </div>
             <p className="mt-2 max-h-40 overflow-auto rounded-2xl border border-white/10 bg-black/20 p-3 text-xs leading-6 text-white/70">
               {canonicalPrompt}
             </p>
 
             <div className="mt-4 text-[11px] uppercase tracking-[0.18em] text-white/35">
-              Things to avoid
+              Avoid
             </div>
             <p className="mt-2 max-h-32 overflow-auto rounded-2xl border border-white/10 bg-black/20 p-3 text-xs leading-6 text-white/70">
               {negativePrompt}
             </p>
           </div>
 
-          <DividerLabel label="Avatar preview" />
+          <DividerLabel label="Avatar image" />
           <div className="mt-4 rounded-[24px] border border-white/10 bg-gradient-to-br from-fuchsia-400/10 via-white/[0.02] to-cyan-400/10 p-4">
             {generatedAvatarUrl ? (
               <div className="relative h-[340px] w-full overflow-hidden rounded-[20px]">
                 <Image
                   src={generatedAvatarUrl}
-                  alt="Avatar preview"
+                  alt="Avatar image"
                   fill
                   unoptimized
                   sizes="(max-width: 1024px) 100vw, 32vw"
-                  className="object-cover"
+                  className="object-contain bg-black/30 object-center"
                 />
               </div>
             ) : (
@@ -214,7 +214,7 @@ export function StudioSidebar({
 
                 <div className="space-y-2">
                   <div className="text-sm text-white/80">
-                    {visualSummary || "Visual details are still simple"}
+                    {visualSummary || "Visual details are still taking shape"}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {visualTags.map((item) => (
@@ -234,7 +234,7 @@ export function StudioSidebar({
           {!isQuickMode && imagePrompt ? (
             <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
-                Image notes
+                Image direction
               </div>
               <p className="mt-3 text-sm leading-7 text-white/75">
                 {imagePrompt}
@@ -260,7 +260,7 @@ export function StudioSidebar({
             </>
           ) : null}
 
-          <DividerLabel label="First message ideas" />
+          <DividerLabel label="Opening options" />
           <div className="mt-4 space-y-4">
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">
@@ -291,7 +291,7 @@ export function StudioSidebar({
           {!isQuickMode &&
           (publicTagline || publicTeaser || publicTagsList.length > 0) ? (
             <>
-              <DividerLabel label="Public showcase" />
+              <DividerLabel label="Public card" />
               <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                 {publicTagline ? (
                   <div className="text-base font-medium text-white">
@@ -319,7 +319,7 @@ export function StudioSidebar({
             </>
           ) : null}
 
-          <DividerLabel label="Draft output" />
+          <DividerLabel label="Current draft" />
           <div className="mt-5 space-y-4 text-sm text-white/75">
             <div>
               <div className="mb-1 text-xs uppercase tracking-[0.18em] text-white/40">
@@ -351,7 +351,7 @@ export function StudioSidebar({
 
             <div>
               <div className="mb-1 text-xs uppercase tracking-[0.18em] text-white/40">
-                Preview message
+                Card message
               </div>
               <p>{previewMessage}</p>
             </div>
@@ -385,8 +385,8 @@ export function StudioSidebar({
         title="What this final version includes"
         description={
           isQuickMode
-            ? "Quick Mode keeps only the essentials visible."
-            : "Deep Studio includes the most important advanced controls."
+            ? "Quick mode keeps only the essentials in view."
+            : "Deep Studio gives you more control over tone, behavior, and image direction."
         }
       >
         <ul className="space-y-3 text-sm text-white/68">

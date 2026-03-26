@@ -52,8 +52,8 @@ export default function Hero() {
 
           <p className="mt-6 max-w-2xl text-base leading-8 text-white/65 sm:text-lg">
             Build original characters, shape their tone, relationship dynamic,
-            and scenario, then jump into a premium one-on-one chat experience
-            that feels more immersive than a generic AI conversation.
+            and scenario, then move into a one-on-one chat experience that
+            feels more grounded than a generic AI conversation.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -68,7 +68,7 @@ export default function Hero() {
               href="/characters"
               className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5 px-6 py-3 text-sm font-medium text-white/80 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
             >
-              Professional Characters
+              Characters
             </Link>
           </div>
 
@@ -124,7 +124,7 @@ export default function Hero() {
               </div>
 
               <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-6 text-white/50">
-                Designed for scenario-driven, premium character chat.
+                Designed for scenario-driven character chat.
               </div>
             </div>
           </div>

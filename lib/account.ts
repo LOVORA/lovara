@@ -12,8 +12,13 @@ export type CharacterScenario = {
   openingState?: string;
 };
 
-type CustomCharacterRow = Database["public"]["Tables"]["custom_characters"]["Row"];
-type CustomCharacterInsert = Database["public"]["Tables"]["custom_characters"]["Insert"];
+type CustomCharacterRow = Database["public"]["Tables"]["custom_characters"]["Row"] & {
+  style_type?: "realistic" | "anime" | null;
+  primary_image_url?: string | null;
+};
+type CustomCharacterInsert = Database["public"]["Tables"]["custom_characters"]["Insert"] & {
+  style_type?: "realistic" | "anime" | null;
+};
 
 export type DbProfile = {
   id: string;
@@ -40,6 +45,8 @@ export type DbCustomCharacter = {
   scenario: CharacterScenario;
   metadata: Record<string, unknown>;
   payload: Record<string, unknown>;
+  style_type: "realistic" | "anime" | null;
+  primary_image_url: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -62,6 +69,8 @@ export type DbCustomMessage = {
   created_at: string;
 };
 
+export type SavedCharacterSource = "custom" | "community" | "professional";
+
 export type CharacterDraftInput = {
   name: string;
   archetype: string;
@@ -76,13 +85,35 @@ export type CharacterDraftInput = {
   payload?: Record<string, unknown>;
 };
 
+export type AttachPreviewAvatarInput = {
+  characterId: string;
+  imageUrl: string;
+  imageVisibility?: string | null;
+  imagePromptVersion?: number | null;
+};
+
+export type FinalizeCustomCharacterCreationInput = {
+  draft: CharacterDraftInput;
+  imageUrl: string;
+};
+
 function clean(value?: string | null): string {
-  return (value ?? "").trim();
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return "";
+
+  const lowered = trimmed.toLowerCase();
+  if (lowered === "undefined" || lowered === "null") return "";
+
+  return trimmed;
 }
 
 function cleanOptional(value?: string | null): string | undefined {
   const trimmed = clean(value);
   return trimmed ? trimmed : undefined;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function slugify(value?: string | null): string {
@@ -162,15 +193,15 @@ function toScenario(value: Json | null | undefined): CharacterScenario {
   }
 
   return {
-    setting: typeof value.setting === "string" ? value.setting : undefined,
+    setting: typeof value.setting === "string" ? cleanOptional(value.setting) : undefined,
     relationshipToUser:
       typeof value.relationshipToUser === "string"
-        ? value.relationshipToUser
+        ? cleanOptional(value.relationshipToUser)
         : undefined,
-    sceneGoal: typeof value.sceneGoal === "string" ? value.sceneGoal : undefined,
-    tone: typeof value.tone === "string" ? value.tone : undefined,
+    sceneGoal: typeof value.sceneGoal === "string" ? cleanOptional(value.sceneGoal) : undefined,
+    tone: typeof value.tone === "string" ? cleanOptional(value.tone) : undefined,
     openingState:
-      typeof value.openingState === "string" ? value.openingState : undefined,
+      typeof value.openingState === "string" ? cleanOptional(value.openingState) : undefined,
   };
 }
 
@@ -200,18 +231,24 @@ function mapCharacterRow(row: CustomCharacterRow): DbCustomCharacter {
     id: row.id,
     user_id: row.user_id,
     slug: row.slug,
-    name: row.name,
-    archetype: row.archetype,
-    headline: row.headline,
-    description: row.description,
-    greeting: row.greeting,
-    preview_message: row.preview_message,
-    backstory: row.backstory,
+    name: clean(row.name),
+    archetype: clean(row.archetype),
+    headline: clean(row.headline),
+    description: clean(row.description),
+    greeting: clean(row.greeting),
+    preview_message: clean(row.preview_message),
+    backstory: clean(row.backstory),
     tags: Array.isArray(row.tags) ? row.tags : [],
     trait_badges: toTraitBadges(row.trait_badges),
     scenario: toScenario(row.scenario),
     metadata: toRecord(row.metadata),
     payload: toRecord(row.payload),
+    style_type:
+      row.style_type === "realistic" || row.style_type === "anime"
+        ? row.style_type
+        : null,
+    primary_image_url:
+      typeof row.primary_image_url === "string" ? row.primary_image_url : null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -434,6 +471,10 @@ export async function createMyCustomCharacter(
 ): Promise<DbCustomCharacter> {
   const user = await requireUser();
   const slug = await makeUniqueSlug(user.id, input.name);
+  const styleType =
+    isPlainObject(input.payload) && input.payload.styleType === "anime"
+      ? "anime"
+      : "realistic";
 
   const payload: CustomCharacterInsert = {
     user_id: user.id,
@@ -455,6 +496,7 @@ export async function createMyCustomCharacter(
       updatedAt: new Date().toISOString(),
     }),
     payload: toJson(input.payload ?? {}),
+    style_type: styleType,
   };
 
   const { data, error } = await supabase
@@ -481,15 +523,132 @@ export async function updateMyCustomCharacter(
 
 export async function deleteMyCustomCharacter(id: string): Promise<void> {
   const user = await requireUser();
-
-  const { error } = await supabase
+  const character = await supabase
     .from("custom_characters")
-    .delete()
+    .select("slug")
+    .eq("user_id", user.id)
     .eq("id", id)
-    .eq("user_id", user.id);
+    .maybeSingle();
 
-  if (error) {
-    throw new Error(error.message);
+  if (character.error) {
+    throw new Error(character.error.message);
+  }
+
+  const slug =
+    typeof character.data?.slug === "string" ? character.data.slug.trim() : "";
+
+  if (!slug) {
+    throw new Error("Character not found.");
+  }
+
+  await removeSavedCharacterFromAccount({
+    source: "custom",
+    characterId: id,
+    slug,
+  });
+}
+
+export async function attachPreviewAvatarToCustomCharacter(
+  input: AttachPreviewAvatarInput,
+): Promise<DbCustomCharacter> {
+  const user = await requireUser();
+  const attempts = 8;
+
+  for (let index = 0; index < attempts; index += 1) {
+    const { data, error } = await supabase
+      .from("custom_characters")
+      .update({
+        primary_image_url: cleanOptional(input.imageUrl) ?? null,
+        image_status: "ready",
+        image_visibility: cleanOptional(input.imageVisibility) ?? "private",
+        image_prompt_version:
+          typeof input.imagePromptVersion === "number" ? input.imagePromptVersion : 1,
+        image_last_generated_at: new Date().toISOString(),
+        image_generation_enabled: true,
+        consistency_status: "ready",
+      })
+      .eq("id", input.characterId)
+      .eq("user_id", user.id)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (data) {
+      return mapCharacterRow(data as CustomCharacterRow);
+    }
+
+    const refreshed = await supabase
+      .from("custom_characters")
+      .select("*")
+      .eq("id", input.characterId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (refreshed.error) {
+      throw new Error(refreshed.error.message);
+    }
+
+    const refreshedRow = refreshed.data
+      ? mapCharacterRow(refreshed.data as CustomCharacterRow)
+      : null;
+    if (refreshedRow?.primary_image_url) {
+      return refreshedRow;
+    }
+
+    if (index < attempts - 1) {
+      await sleep(150);
+    }
+  }
+
+  throw new Error("Could not attach the preview image to the new character.");
+}
+
+export async function finalizeMyCustomCharacterCreation(
+  input: FinalizeCustomCharacterCreationInput,
+): Promise<DbCustomCharacter> {
+  const response = await fetch("/api/custom-characters/finalize", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | { ok?: boolean; error?: string; character?: DbCustomCharacter }
+    | null;
+
+  if (!response.ok || !payload?.ok || !payload.character) {
+    throw new Error(payload?.error || "Could not create character.");
+  }
+
+  return payload.character;
+}
+
+export async function removeSavedCharacterFromAccount(input: {
+  source: SavedCharacterSource;
+  characterId: string;
+  slug: string;
+}): Promise<void> {
+  await requireUser();
+
+  const response = await fetch("/api/account/characters/delete", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | { ok?: boolean; error?: string }
+    | null;
+
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || "Could not delete this character.");
   }
 }
 
