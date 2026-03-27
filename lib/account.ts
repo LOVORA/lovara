@@ -2,6 +2,7 @@
 
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { countMonthlyUserMessages } from "@/lib/monetization-usage";
 import type { Database, Json } from "@/types/supabase";
 
 export type CharacterScenario = {
@@ -340,6 +341,7 @@ export async function getProfileSummary() {
   }).length;
 
   let rerollsThisMonth = 0;
+  let messagesThisMonth = 0;
 
   if (characterIds.length > 0) {
     const monthStart = new Date();
@@ -360,6 +362,11 @@ export async function getProfileSummary() {
     rerollsThisMonth = rerollCount ?? 0;
   }
 
+  messagesThisMonth = await countMonthlyUserMessages({
+    client: supabase as never,
+    userId: user.id,
+  });
+
   return {
     user,
     profile,
@@ -367,6 +374,7 @@ export async function getProfileSummary() {
     conversationCount: conversationCount ?? 0,
     publicCharacterCount,
     rerollsThisMonth,
+    messagesThisMonth,
   };
 }
 

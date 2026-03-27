@@ -1,12 +1,12 @@
 import AuthGuard from "@/components/auth/auth-guard";
 import { IdentityLockedPhotoStudio } from "@/components/characters/identity-locked-photo-studio";
+import { getManagedBuiltInCharacterBySlug } from "@/lib/character-admin";
 import {
   createSupabaseStorageSigner,
   resolveCharacterGalleryImages,
   resolveCharacterPrimaryImage,
 } from "@/lib/character-image-assets";
 import { buildPromptInputFromBuiltInCharacter } from "@/lib/character-image-prompt-input";
-import { getCharacterBySlug } from "@/lib/characters";
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 
@@ -18,13 +18,12 @@ type PageProps = {
 
 export default async function BuiltInPhotoStudioPage({ params }: PageProps) {
   const { slug } = await params;
-  const character = getCharacterBySlug(slug);
+  const supabase = await createClient();
+  const character = await getManagedBuiltInCharacterBySlug(supabase as never, slug);
 
-  if (!character) {
+  if (!character || !character.adminVisibility.showInPhotoStudio) {
     notFound();
   }
-
-  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();

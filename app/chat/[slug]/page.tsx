@@ -4,7 +4,8 @@ import CharacterInfoPanel from "@/components/chat/character-info-panel";
 import ChatShellNav from "@/components/chat/chat-shell-nav";
 import ChatSidebarRail from "@/components/chat/chat-sidebar-rail";
 import AuthGuard from "@/components/auth/auth-guard";
-import { getCharacterBySlug } from "@/lib/characters";
+import { getManagedBuiltInCharacterBySlug } from "@/lib/character-admin";
+import { createClient } from "@/lib/supabase/server";
 
 type ChatPageProps = {
   params: {
@@ -13,9 +14,13 @@ type ChatPageProps = {
 };
 
 export default async function ChatPage({ params }: ChatPageProps) {
-  const character = getCharacterBySlug(params.slug);
+  const supabase = await createClient();
+  const character = await getManagedBuiltInCharacterBySlug(
+    supabase as never,
+    params.slug,
+  );
 
-  if (!character) {
+  if (!character || !character.adminVisibility.chatEnabled) {
     notFound();
   }
 
@@ -62,7 +67,16 @@ export default async function ChatPage({ params }: ChatPageProps) {
               identityChips={identityChips}
               storySummary={storySummary}
               scenarioSummary={scenarioSummary}
-              photoStudioHref={`/photo-studio/built-in/${character.slug}`}
+              photoStudioHref={
+                character.adminVisibility.showInPhotoStudio
+                  ? `/photo-studio/built-in/${character.slug}`
+                  : "/photo-studio"
+              }
+              photoStudioLabel={
+                character.adminVisibility.showInPhotoStudio
+                  ? "Open Photo Studio"
+                  : "Photo Studio hidden"
+              }
             />
           </div>
         </div>

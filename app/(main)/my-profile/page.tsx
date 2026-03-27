@@ -1,15 +1,17 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/auth/auth-guard";
+import UpgradeSurface from "@/components/monetization/upgrade-surface";
+import UsageVisibilityCard from "@/components/monetization/usage-visibility-card";
 import {
   getProfileSummary,
   updateDisplayName,
   updatePassword,
 } from "@/lib/account";
 import { buildMonetizationSnapshot } from "@/lib/monetization";
+import { getCurrentPlanNarrative } from "@/lib/monetization-copy";
 import { clearLegacyLovoraLocalData, supabase } from "@/lib/supabase";
 
 type Summary = Awaited<ReturnType<typeof getProfileSummary>>;
@@ -52,7 +54,7 @@ export default function MyProfilePage() {
   }
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   async function handleNameSubmit(event: FormEvent<HTMLFormElement>) {
@@ -125,11 +127,10 @@ export default function MyProfilePage() {
                 My Profile
               </div>
               <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-                Your account, identity, and session control
+                Your account, plan visibility, and session control
               </h1>
               <p className="max-w-2xl text-base leading-7 text-white/65">
-                Manage your email-linked identity, update security settings, and control
-                active sessions from one place.
+                Track your current plan layer, account activity, and core security settings from one place.
               </p>
             </div>
           </header>
@@ -160,108 +161,62 @@ export default function MyProfilePage() {
                     conversationCount: summary.conversationCount,
                     publicCharacterCount: summary.publicCharacterCount,
                     rerollsThisMonth: summary.rerollsThisMonth,
+                    messagesThisMonth: summary.messagesThisMonth,
                   },
                 });
 
                 return (
                   <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-                    <div className="rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(217,70,239,0.14),rgba(255,255,255,0.04))] p-6">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.24em] text-fuchsia-200/80">
-                            Creator limits
-                          </div>
-                          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white">
-                            {monetization.currentPlan.label} level
-                          </h2>
-                          <p className="mt-2 max-w-xl text-sm leading-7 text-white/68">
-                            Your current usage, remaining room, and how your limits may grow later.
-                          </p>
-                        </div>
+                    <UsageVisibilityCard
+                      eyebrow="Current plan"
+                      title={`${monetization.currentPlan.label} access`}
+                      description={`${getCurrentPlanNarrative(
+                        monetization.currentPlan.id,
+                      )} Chat access on this level: ${monetization.currentPlan.chatLimitLabel}.`}
+                      items={[
+                        {
+                          label: "Monthly messages",
+                          value: `${monetization.remainingMessages} left`,
+                          helper: monetization.messageUsageLabel,
+                        },
+                        {
+                          label: "Locked characters",
+                          value: `${monetization.remainingCharacterSlots} left`,
+                          helper: monetization.slotUsageLabel,
+                        },
+                        {
+                          label: "Image rerolls",
+                          value: `${monetization.remainingRerolls} left`,
+                          helper: monetization.rerollUsageLabel,
+                        },
+                      ]}
+                      primaryHref="/pricing"
+                      primaryLabel="View plans"
+                      secondaryHref="/create-character"
+                      secondaryLabel="Create character"
+                    />
 
-                        <div className="rounded-[24px] border border-white/10 bg-black/20 px-5 py-4 text-right">
-                          <div className="text-[11px] uppercase tracking-[0.2em] text-white/42">
-                            Current level
-                          </div>
-                          <div className="mt-2 text-3xl font-semibold text-white">{monetization.currentPlan.label}</div>
-                          <div className="mt-1 text-sm text-white/52">
-                            {monetization.currentPlan.badge}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-6 grid gap-4 md:grid-cols-2">
-                        <div className="rounded-[24px] border border-white/10 bg-black/20 p-5">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-white/42">
-                            Character slots
-                          </div>
-                          <div className="mt-2 text-xl font-semibold text-white">
-                            {monetization.remainingCharacterSlots} left
-                          </div>
-                          <div className="mt-2 text-sm text-white/58">
-                            {monetization.slotUsageLabel}
-                          </div>
-                        </div>
-
-                        <div className="rounded-[24px] border border-white/10 bg-black/20 p-5">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-white/42">
-                            Image rerolls
-                          </div>
-                          <div className="mt-2 text-xl font-semibold text-white">
-                            {monetization.remainingRerolls} left this month
-                          </div>
-                          <div className="mt-2 text-sm text-white/58">
-                            {monetization.rerollUsageLabel}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-6 flex flex-wrap gap-3">
-                        <Link
-                          href="/pricing"
-                          className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
-                        >
-                          View plans
-                        </Link>
-                        <Link
-                          href="/create-character"
-                          className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10"
-                        >
-                          Create character
-                        </Link>
-                      </div>
-                    </div>
-
-                    <div className="rounded-[32px] border border-white/10 bg-white/[0.04] p-6">
-                      <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-200/80">
-                        What opens later
-                      </div>
-                      <div className="mt-4 space-y-3">
-                        {(monetization.upgradeReasons.length > 0
+                    <UpgradeSurface
+                      eyebrow="Premium direction"
+                      title="The account surface is ready for cleaner monetization later"
+                      description="Real billing is still off. This profile now reflects the new plan language while keeping your existing measurable usage visible."
+                      reasons={
+                        monetization.upgradeReasons.length > 0
                           ? monetization.upgradeReasons
-                          : ["Your account still has room. Higher levels are shown here so the limits stay easy to understand."]).map(
-                          (reason) => (
-                            <div
-                              key={reason}
-                              className="rounded-[22px] border border-white/10 bg-black/20 px-4 py-3 text-sm leading-6 text-white/68"
-                            >
-                              {reason}
-                            </div>
-                          ),
-                        )}
-                      </div>
-
-                      <div className="mt-6 rounded-[24px] border border-fuchsia-400/20 bg-fuchsia-400/10 p-4">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/80">
-                          Plan details
-                        </div>
-                        <div className="mt-3 grid gap-2 text-sm text-white/72">
-                          <div>{monetization.currentPlan.premiumScenePacks} scene packs</div>
-                          <div>{monetization.currentPlan.premiumArchetypes} archetypes</div>
-                          <div>{summary.publicCharacterCount} public characters live right now</div>
-                        </div>
-                      </div>
-                    </div>
+                          : [
+                              "Your current account activity still fits inside the visible plan range.",
+                              "Message and token enforcement are intentionally not live yet.",
+                            ]
+                      }
+                      featuredValues={[
+                        `Chat access: ${monetization.currentPlan.chatLimitLabel}`,
+                        monetization.messageUsageLabel,
+                        `${summary.characterCount} custom characters created`,
+                        `${summary.conversationCount} custom conversations saved`,
+                      ]}
+                      primaryHref="/pricing"
+                      primaryLabel="Open pricing"
+                    />
                   </section>
                 );
               })()}

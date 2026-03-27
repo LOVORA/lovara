@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { IdentityLockedPhotoStudio } from "@/components/characters/identity-locked-photo-studio";
+import { getCustomCharacterVisibility } from "@/lib/character-admin";
 import {
   createSupabaseStorageSigner,
   resolveCharacterGalleryImages,
@@ -39,6 +40,10 @@ export default async function CustomPhotoStudioPage({ params }: PageProps) {
   });
 
   if (!character) {
+    notFound();
+  }
+
+  if (!getCustomCharacterVisibility(character.payload).showInPhotoStudio) {
     notFound();
   }
 

@@ -17,6 +17,15 @@ type Message = {
   content: string;
 };
 
+type MessageUsageState = {
+  currentPlan: string;
+  messagesThisMonth: number;
+  messageLimit: number;
+  remainingMessages: number;
+  messageUsageLabel: string;
+  upgradeReasons: string[];
+};
+
 type RetentionState = "fresh-start" | "warming-up" | "settled-in" | "ongoing";
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -105,6 +114,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isResetting, setIsResetting] = useState(false);
   const [chatStatus, setChatStatus] = useState("");
+  const [messageUsage, setMessageUsage] = useState<MessageUsageState | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     null,
   );
@@ -339,16 +349,6 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
     setJustReset(false);
 
     try {
-      const { error: userMessageError } = await supabase.from("messages").insert({
-        conversation_id: activeConversationId,
-        role: "user",
-        content: trimmedMessage,
-      });
-
-      if (userMessageError) {
-        setChatStatus("Message sent, but the user message could not be saved.");
-      }
-
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -378,6 +378,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
       }
 
       if (!response.ok) {
+        setMessages((prev) => prev.filter((message) => message.id !== newUserMessage.id));
         const errorMessage =
           data &&
           typeof data === "object" &&
@@ -386,6 +387,50 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           data.error
             ? data.error
             : "Could not get a reply right now.";
+
+        if (
+          data &&
+          typeof data === "object" &&
+          "error" in data &&
+          data.error === "MONTHLY_MESSAGE_LIMIT_REACHED" &&
+          "messageUsageLabel" in data &&
+          typeof data.messageUsageLabel === "string"
+        ) {
+          setMessageUsage({
+            currentPlan:
+              "currentPlan" in data && typeof data.currentPlan === "string"
+                ? data.currentPlan
+                : "Free",
+            messagesThisMonth:
+              "messagesThisMonth" in data && typeof data.messagesThisMonth === "number"
+                ? data.messagesThisMonth
+                : 0,
+            messageLimit:
+              "messageLimit" in data && typeof data.messageLimit === "number"
+                ? data.messageLimit
+                : 0,
+            remainingMessages:
+              "remainingMessages" in data && typeof data.remainingMessages === "number"
+                ? data.remainingMessages
+                : 0,
+            messageUsageLabel: data.messageUsageLabel,
+            upgradeReasons:
+              "upgradeReasons" in data && Array.isArray(data.upgradeReasons)
+                ? data.upgradeReasons.filter(
+                    (reason: unknown): reason is string =>
+                      typeof reason === "string" && reason.trim().length > 0,
+                  )
+                : [],
+          });
+          setChatStatus(
+            `You have reached your monthly message limit for the ${
+              "currentPlan" in data && typeof data.currentPlan === "string"
+                ? data.currentPlan
+                : "current"
+            } plan. Open pricing to upgrade when you are ready.`,
+          );
+          return;
+        }
 
         setChatStatus(errorMessage);
         return;
@@ -409,6 +454,37 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         role: "assistant",
         content: reply,
       };
+
+      if (
+        data &&
+        typeof data === "object" &&
+        "usage" in data &&
+        data.usage &&
+        typeof data.usage === "object"
+      ) {
+        const usage = data.usage as Partial<MessageUsageState>;
+        if (
+          typeof usage.currentPlan === "string" &&
+          typeof usage.messagesThisMonth === "number" &&
+          typeof usage.messageLimit === "number" &&
+          typeof usage.remainingMessages === "number" &&
+          typeof usage.messageUsageLabel === "string"
+        ) {
+          setMessageUsage({
+            currentPlan: usage.currentPlan,
+            messagesThisMonth: usage.messagesThisMonth,
+            messageLimit: usage.messageLimit,
+            remainingMessages: usage.remainingMessages,
+            messageUsageLabel: usage.messageUsageLabel,
+            upgradeReasons: Array.isArray(usage.upgradeReasons)
+              ? usage.upgradeReasons.filter(
+                  (reason: unknown): reason is string =>
+                    typeof reason === "string" && reason.trim().length > 0,
+                )
+              : [],
+          });
+        }
+      }
 
       setMessages((prev) => [...prev, assistantReply]);
 
@@ -437,6 +513,7 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
         return;
       }
 
+      setMessages((prev) => prev.filter((message) => message.id !== newUserMessage.id));
       setChatStatus("Could not reach the chat server.");
     } finally {
       if (requestIdRef.current === currentRequestId) {
@@ -506,6 +583,12 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           {chatStatus}
         </div>
       )}
+
+      {messageUsage ? (
+        <div className="border-b border-white/10 bg-fuchsia-500/8 px-4 py-3 text-xs text-white/65 md:px-6">
+          {messageUsage.messageUsageLabel}
+        </div>
+      ) : null}
 
       <div className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.04),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.01),rgba(0,0,0,0.02))] px-4 py-5 md:px-6">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
@@ -614,7 +697,13 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
               placeholder={`Message ${character.name}...`}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              disabled={isTyping || isInitializing || isResetting || !activeConversationId}
+              disabled={
+                isTyping ||
+                isInitializing ||
+                isResetting ||
+                !activeConversationId ||
+                (messageUsage?.remainingMessages ?? 1) <= 0
+              }
               className="h-12 flex-1 bg-transparent px-4 text-sm text-white outline-none placeholder:text-white/30 disabled:opacity-60"
             />
 
@@ -625,7 +714,8 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
                 isInitializing ||
                 isResetting ||
                 !activeConversationId ||
-                !input.trim()
+                !input.trim() ||
+                (messageUsage?.remainingMessages ?? 1) <= 0
               }
               className="inline-flex h-12 items-center justify-center rounded-[18px] bg-white px-5 text-sm font-semibold text-black shadow-[0_18px_40px_rgba(255,255,255,0.1)] transition hover:scale-[1.02] hover:opacity-95 disabled:opacity-60"
             >
@@ -634,7 +724,8 @@ export default function ChatWindow({ characterSlug }: ChatWindowProps) {
           </div>
 
           <p className="mt-3 px-2 text-xs text-white/35">
-            Private conversation • Messages save automatically • {getRetentionHint(retentionState, character.name)}
+            Private conversation • Messages save automatically •{" "}
+            {messageUsage?.messageUsageLabel ?? getRetentionHint(retentionState, character.name)}
           </p>
         </div>
       </form>

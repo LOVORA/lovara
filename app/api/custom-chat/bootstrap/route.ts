@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getCustomCharacterVisibility } from "@/lib/character-admin";
 import {
   createSupabaseStorageSigner,
   resolveCharacterPrimaryImage,
@@ -131,6 +132,13 @@ export async function GET(request: Request) {
     });
 
     if (!characterRow) {
+      return NextResponse.json(
+        { ok: false, error: "CHARACTER_NOT_FOUND" },
+        { status: 404 },
+      );
+    }
+
+    if (!getCustomCharacterVisibility(characterRow.payload).chatEnabled) {
       return NextResponse.json(
         { ok: false, error: "CHARACTER_NOT_FOUND" },
         { status: 404 },

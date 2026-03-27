@@ -1105,6 +1105,7 @@ export default function CreateCharacterPage() {
         conversationCount: profileSummary.conversationCount,
         publicCharacterCount: profileSummary.publicCharacterCount,
         rerollsThisMonth: profileSummary.rerollsThisMonth,
+        messagesThisMonth: profileSummary.messagesThisMonth,
       },
     });
   }, [profileSummary]);

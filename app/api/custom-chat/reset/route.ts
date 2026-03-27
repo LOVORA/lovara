@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getCustomCharacterVisibility } from "@/lib/character-admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   buildRecognitionAwareGreeting,
@@ -93,6 +94,13 @@ export async function POST(request: Request) {
         : null;
 
     if (!characterRow) {
+      return NextResponse.json(
+        { ok: false, error: "Character not found for this conversation." },
+        { status: 404 },
+      );
+    }
+
+    if (!getCustomCharacterVisibility(characterRow.payload).chatEnabled) {
       return NextResponse.json(
         { ok: false, error: "Character not found for this conversation." },
         { status: 404 },

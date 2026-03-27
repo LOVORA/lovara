@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCharacterBySlug } from "@/lib/characters";
+import { getManagedBuiltInCharacterBySlug } from "@/lib/character-admin";
 import {
   buildMemoryPromptBlock,
   type ConversationMemoryState,
@@ -19,6 +20,12 @@ import {
   getOpenRouterRouteConfig,
   requestOpenRouterChat,
 } from "@/lib/chat/openrouter";
+import { buildMonetizationSnapshot } from "@/lib/monetization";
+import {
+  buildMessageLimitPayload,
+  countMonthlyUserMessages,
+  hasReachedMonthlyMessageLimit,
+} from "@/lib/monetization-usage";
 import {
   buildCharacterIntimacyProfileDirectives,
   buildIntimacyGateDecision,
@@ -1314,12 +1321,16 @@ function buildCharacterContext(
   memoryState?: ConversationMemoryState | null,
   messages: MemoryChatMessage[] = [],
   recognitionContract?: UserRecognitionContract,
+  managedCharacter?: Record<string, unknown> | null,
 ) {
-  const character = getCharacterBySlug(slug);
+  const character =
+    managedCharacter ?? ((getCharacterBySlug(slug) as unknown as Record<string, unknown> | null) ?? null);
 
   if (!character) return null;
 
   const characterRecord = character as unknown as Record<string, unknown>;
+  const characterName = getOptionalString(characterRecord, "name") ?? "";
+  const enginePrompt = getOptionalString(characterRecord, "systemPrompt") ?? "";
   const routeConfig = getOpenRouterRouteConfig();
   const rawTagList = formatTags(characterRecord);
   const tagList = rawTagList
@@ -1441,7 +1452,7 @@ function buildCharacterContext(
     getOptionalString(characterRecord, "greeting");
 
   const supplementalContext = buildSharedChatPrompt({
-    characterName: character.name,
+    characterName,
     identityLines: details,
     essenceLines: [
       "Stay fully in character and make the reply feel lived-in rather than optimized.",
@@ -1582,12 +1593,15 @@ function buildCharacterContext(
         ),
       },
     ],
-    enginePrompt: character.systemPrompt,
+    enginePrompt,
     selfCheckLines: buildSelfCheck(messages, intimacyDecision, memoryState),
   });
 
   return {
-    character,
+    character: {
+      name: characterName,
+      systemPrompt: enginePrompt,
+    },
     supplementalContext,
     humanRealismProfile,
   };
@@ -1639,15 +1653,68 @@ export async function POST(req: Request) {
     let memoryBlock = "";
     let memoryState: ConversationMemoryState | null = null;
     let recognitionContract: UserRecognitionContract | undefined;
+    let managedCharacterContext: Record<string, unknown> | null = null;
+    let messageUsagePayload:
+      | {
+          currentPlan: string;
+          messagesThisMonth: number;
+          messageLimit: number;
+          remainingMessages: number;
+          messageUsageLabel: string;
+          upgradeReasons: string[];
+        }
+      | null = null;
+    const latestUserMessage =
+      [...safeMessages].reverse().find((message) => message.role === "user")?.content ?? "";
 
     if (accessToken) {
       try {
+        const { client, user } = await requireRouteUser(accessToken);
+        const managedCharacter = await getManagedBuiltInCharacterBySlug(
+          client as never,
+          slug,
+        );
+
+        if (!managedCharacter || !managedCharacter.adminVisibility.chatEnabled) {
+          return NextResponse.json({ error: "Character not found." }, { status: 404 });
+        }
+        managedCharacterContext = managedCharacter as unknown as Record<string, unknown>;
+
         const conversation =
           persistentConversationId
             ? { id: persistentConversationId }
             : await getOrCreateBuiltInConversation(accessToken, slug, slug);
 
         persistentConversationId = conversation.id;
+        const messagesThisMonth = await countMonthlyUserMessages({
+          client: client as never,
+          userId: user.id,
+        });
+        const limitSnapshot = buildMonetizationSnapshot({
+          user,
+          usage: {
+            characterCount: 0,
+            conversationCount: 0,
+            publicCharacterCount: 0,
+            rerollsThisMonth: 0,
+            messagesThisMonth,
+          },
+        });
+
+        if (hasReachedMonthlyMessageLimit(limitSnapshot)) {
+          return NextResponse.json(buildMessageLimitPayload(limitSnapshot), {
+            status: 403,
+          });
+        }
+
+        if (latestUserMessage) {
+          await insertBuiltInConversationMessage(
+            accessToken,
+            persistentConversationId,
+            "user",
+            latestUserMessage,
+          );
+        }
 
         const dbMessages = await listBuiltInConversationMessages(
           accessToken,
@@ -1666,8 +1733,7 @@ export async function POST(req: Request) {
           memoryBlock = buildMemoryPromptBlock(storedMemory);
         }
 
-        const { client, user } = await requireRouteUser(accessToken);
-        const builtInCharacter = getCharacterBySlug(slug);
+        const builtInCharacter = managedCharacter;
         const relationshipToUser =
           getOptionalString(toRecord(builtInCharacter?.scenario ?? {}), "relationshipToUser") ??
           builtInCharacter?.role ??
@@ -1685,8 +1751,6 @@ export async function POST(req: Request) {
           userRole,
           profileDisplayName,
         });
-        const latestUserMessage =
-          [...safeMessages].reverse().find((message) => message.role === "user")?.content ?? "";
         const introducedName = extractIntroducedUserName(latestUserMessage);
         const effectiveRecognitionMemory = introducedName
           ? await upsertUserRecognitionMemory(client as never, {
@@ -1706,7 +1770,33 @@ export async function POST(req: Request) {
           openingState,
           userRole,
         });
+
+        const postSendSnapshot = buildMonetizationSnapshot({
+          user,
+          usage: {
+            characterCount: 0,
+            conversationCount: 0,
+            publicCharacterCount: 0,
+            rerollsThisMonth: 0,
+            messagesThisMonth: latestUserMessage ? messagesThisMonth + 1 : messagesThisMonth,
+          },
+        });
+
+        messageUsagePayload = {
+          currentPlan: postSendSnapshot.currentPlan.label,
+          messagesThisMonth: postSendSnapshot.usage.messagesThisMonth,
+          messageLimit: postSendSnapshot.messageLimit,
+          remainingMessages: postSendSnapshot.remainingMessages,
+          messageUsageLabel: postSendSnapshot.messageUsageLabel,
+          upgradeReasons: postSendSnapshot.upgradeReasons,
+        };
       } catch (error) {
+        if (
+          error instanceof Response ||
+          (error instanceof Error && error.message === "MONTHLY_MESSAGE_LIMIT_REACHED")
+        ) {
+          throw error;
+        }
         console.error("Built-in persistent chat bootstrap failed:", error);
       }
     }
@@ -1725,6 +1815,7 @@ export async function POST(req: Request) {
       memoryState,
       recentMessages,
       recognitionContract,
+      managedCharacterContext,
     );
 
     if (!characterContext) {
@@ -1837,6 +1928,7 @@ export async function POST(req: Request) {
       memoryActive: Boolean(accessToken && persistentConversationId),
       model: openRouterResult.modelUsed,
       routing: routeConfig,
+      usage: messageUsagePayload,
     });
   } catch (error) {
     console.error("Chat route error:", error);

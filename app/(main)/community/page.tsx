@@ -1,5 +1,6 @@
 import Link from "next/link";
 import CharacterListGrid from "@/components/characters/character-list-grid";
+import { getCustomCharacterVisibility } from "@/lib/character-admin";
 import { mapCharacterListItemsToCardViews } from "@/lib/character-builder/list-item-mappers";
 import { buildCharacterImageMap } from "@/lib/image-storage";
 import { createClient } from "@/lib/supabase/server";
@@ -70,9 +71,10 @@ export default async function CommunityPage() {
     throw new Error(error.message);
   }
 
-  const rows = ((data ?? []) as RawCommunityCharacterRow[]).filter((row) =>
-    isPublicCharacter(row.payload),
-  );
+  const rows = ((data ?? []) as RawCommunityCharacterRow[]).filter((row) => {
+    if (!isPublicCharacter(row.payload)) return false;
+    return getCustomCharacterVisibility(row.payload).showInCommunityList;
+  });
   const imageMap = await loadPrimaryImageMap(
     supabase,
     rows.map((row) => row.id),

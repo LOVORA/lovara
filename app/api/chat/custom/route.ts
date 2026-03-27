@@ -36,7 +36,13 @@ import {
   buildScenarioQuestionDiscipline,
 } from "@/lib/chat/scenario-truth";
 import { buildSharedChatPrompt } from "@/lib/chat/shared-composer";
+import { getCustomCharacterVisibility } from "@/lib/character-admin";
 import { normalizeVisibleHeadline } from "@/lib/custom-character-copy";
+import { buildMonetizationSnapshot } from "@/lib/monetization";
+import {
+  buildMessageLimitPayload,
+  countMonthlyUserMessages,
+} from "@/lib/monetization-usage";
 import {
   buildConversationalGuardrails,
   buildConsentAndPacingDirectives,
@@ -592,6 +598,10 @@ async function loadOwnedCustomConversationContext(conversationId: string) {
     throw new Error("Invalid custom character payload.");
   }
 
+  if (!getCustomCharacterVisibility(character.payload).chatEnabled) {
+    throw new Error("CHAT_DISABLED");
+  }
+
   const { data: messages, error: messagesError } = await supabase
     .from("custom_messages")
     .select("*")
@@ -634,6 +644,7 @@ async function loadOwnedCustomConversationContext(conversationId: string) {
 
   return {
     supabase,
+    user,
     userId: user.id,
     conversation: typedConversation,
     character,
@@ -2344,6 +2355,16 @@ export async function POST(request: Request) {
     let memoryBlock = "";
     let memoryState: ConversationMemoryState | null = null;
     let recognitionContract: UserRecognitionContract | undefined;
+    let messageUsagePayload:
+      | {
+          currentPlan: string;
+          messagesThisMonth: number;
+          messageLimit: number;
+          remainingMessages: number;
+          messageUsageLabel: string;
+          upgradeReasons: string[];
+        }
+      | null = null;
     let serverContext:
       | Awaited<ReturnType<typeof loadOwnedCustomConversationContext>>
       | null = null;
@@ -2362,6 +2383,36 @@ export async function POST(request: Request) {
         serverContext.supabase as never,
         serverContext.userId,
       );
+      const messagesThisMonth = await countMonthlyUserMessages({
+        client: serverContext.supabase as never,
+        userId: serverContext.userId,
+      });
+      const monetization = buildMonetizationSnapshot({
+        user: serverContext.user,
+        usage: {
+          characterCount: 0,
+          conversationCount: 0,
+          publicCharacterCount: 0,
+          rerollsThisMonth: 0,
+          messagesThisMonth,
+        },
+      });
+
+      if (monetization.messageLimit > 0 && monetization.usage.messagesThisMonth > monetization.messageLimit) {
+        return NextResponse.json(buildMessageLimitPayload(monetization), {
+          status: 403,
+        });
+      }
+
+      messageUsagePayload = {
+        currentPlan: monetization.currentPlan.label,
+        messagesThisMonth: monetization.usage.messagesThisMonth,
+        messageLimit: monetization.messageLimit,
+        remainingMessages: monetization.remainingMessages,
+        messageUsageLabel: monetization.messageUsageLabel,
+        upgradeReasons: monetization.upgradeReasons,
+      };
+
       const userRole =
         serverContext.character.payload &&
         isRecord(serverContext.character.payload.customNotes) &&
@@ -2663,10 +2714,14 @@ export async function POST(request: Request) {
       replyCorrection: extractReplyCorrectionSnapshot(finalMemoryState),
       model: openRouterResult.modelUsed,
       routing: getOpenRouterRouteConfig(),
+      usage: messageUsagePayload,
     });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unexpected server error.";
+    if (message === "CHAT_DISABLED") {
+      return NextResponse.json({ error: "Character not found." }, { status: 404 });
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

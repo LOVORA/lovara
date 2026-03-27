@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 
+import { buildMonetizationSnapshot } from "@/lib/monetization";
+import {
+  buildMessageLimitPayload,
+  countMonthlyUserMessages,
+  hasReachedMonthlyMessageLimit,
+} from "@/lib/monetization-usage";
+import { getCustomCharacterVisibility } from "@/lib/character-admin";
 import { createClient } from "@/lib/supabase/server";
 
 function clean(value?: string | null) {
@@ -14,7 +21,7 @@ async function requireOwnedConversation(
 ) {
   const { data, error } = await supabase
     .from("custom_conversations")
-    .select("id, user_id")
+    .select("id, user_id, custom_character_id")
     .eq("id", conversationId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -26,6 +33,8 @@ async function requireOwnedConversation(
   if (!data) {
     throw new Error("Conversation not found for the current account.");
   }
+
+  return data;
 }
 
 export async function GET(request: Request) {
@@ -114,7 +123,52 @@ export async function POST(request: Request) {
       );
     }
 
-    await requireOwnedConversation(conversationId, user.id, supabase);
+    const conversation = await requireOwnedConversation(conversationId, user.id, supabase);
+
+    if (typeof conversation.custom_character_id === "string" && conversation.custom_character_id) {
+      const { data: characterRow, error: characterError } = await supabase
+        .from("custom_characters")
+        .select("payload")
+        .eq("id", conversation.custom_character_id)
+        .maybeSingle();
+
+      if (characterError) {
+        return NextResponse.json(
+          { ok: false, error: characterError.message },
+          { status: 500 },
+        );
+      }
+
+      if (!characterRow || !getCustomCharacterVisibility(characterRow.payload).chatEnabled) {
+        return NextResponse.json(
+          { ok: false, error: "Character not available for chat." },
+          { status: 404 },
+        );
+      }
+    }
+
+    if (role === "user") {
+      const messagesThisMonth = await countMonthlyUserMessages({
+        client: supabase as never,
+        userId: user.id,
+      });
+      const monetization = buildMonetizationSnapshot({
+        user,
+        usage: {
+          characterCount: 0,
+          conversationCount: 0,
+          publicCharacterCount: 0,
+          rerollsThisMonth: 0,
+          messagesThisMonth,
+        },
+      });
+
+      if (hasReachedMonthlyMessageLimit(monetization)) {
+        return NextResponse.json(buildMessageLimitPayload(monetization), {
+          status: 403,
+        });
+      }
+    }
 
     const { data, error } = await supabase
       .from("custom_messages")

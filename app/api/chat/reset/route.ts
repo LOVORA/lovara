@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCharacterBySlug } from "@/lib/characters";
+import { getManagedBuiltInCharacterBySlug } from "@/lib/character-admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   buildRecognitionAwareGreeting,
@@ -28,12 +28,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const character = getCharacterBySlug(slug);
-    if (!character) {
+    const supabase = await createClient();
+    const character = await getManagedBuiltInCharacterBySlug(supabase as never, slug);
+    if (!character || !character.adminVisibility.chatEnabled) {
       return NextResponse.json({ ok: false, error: "Character not found." }, { status: 404 });
     }
-
-    const supabase = await createClient();
     const {
       data: { user },
       error: userError,

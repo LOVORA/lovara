@@ -2,9 +2,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { GenerateCharacterPhotoPanel } from "@/components/characters/generate-character-photo-panel";
+import { getManagedBuiltInCharacterBySlug } from "@/lib/character-admin";
 import { buildPromptInputFromBuiltInCharacter } from "@/lib/character-image-prompt-input";
 import { pickBestCharacterImageUrl } from "@/lib/image-storage";
-import { getCharacterBySlug, type Character } from "@/lib/characters";
+import type { Character } from "@/lib/characters";
 import { createClient } from "@/lib/supabase/server";
 
 type PageProps = {
@@ -31,7 +32,8 @@ function normalizeTraits(input: Character | undefined) {
 
 export default async function ProfessionalCharacterDetailPage({ params }: PageProps) {
   const { slug } = await params;
-  const character = getCharacterBySlug(slug);
+  const supabase = await createClient();
+  const character = await getManagedBuiltInCharacterBySlug(supabase as never, slug);
 
   if (!character) {
     notFound();
@@ -42,7 +44,6 @@ export default async function ProfessionalCharacterDetailPage({ params }: PagePr
   const scenarioHooks = Array.isArray(character.scenarioHooks)
     ? character.scenarioHooks.filter((item): item is string => typeof item === "string")
     : [];
-  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -116,12 +117,18 @@ export default async function ProfessionalCharacterDetailPage({ params }: PagePr
               >
                 Back to Characters
               </Link>
-              <Link
-                href={`/chat/${character.slug}`}
-                className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
-              >
-                Start Chat
-              </Link>
+              {character.adminVisibility.chatEnabled ? (
+                <Link
+                  href={`/chat/${character.slug}`}
+                  className="rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition hover:opacity-90"
+                >
+                  Start Chat
+                </Link>
+              ) : (
+                <span className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/55">
+                  Chat hidden
+                </span>
+              )}
             </div>
           </div>
 
@@ -249,13 +256,15 @@ export default async function ProfessionalCharacterDetailPage({ params }: PagePr
               </div>
             ) : null}
 
-            <GenerateCharacterPhotoPanel
-              characterId={character.slug}
-              characterName={character.name}
-              baseImageUrl={primaryImageUrl}
-              promptInput={buildPromptInputFromBuiltInCharacter(character)}
-              studioHref={`/photo-studio/built-in/${character.slug}`}
-            />
+            {character.adminVisibility.showInPhotoStudio ? (
+              <GenerateCharacterPhotoPanel
+                characterId={character.slug}
+                characterName={character.name}
+                baseImageUrl={primaryImageUrl}
+                promptInput={buildPromptInputFromBuiltInCharacter(character)}
+                studioHref={`/photo-studio/built-in/${character.slug}`}
+              />
+            ) : null}
 
             {scenarioHooks.length > 0 ? (
               <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">

@@ -22,6 +22,7 @@ import {
   formatVisibleArchetypeLabel,
   getIdentitySummary,
 } from "@/lib/custom-character-studio";
+import { getCustomCharacterVisibility } from "@/lib/character-admin";
 import { normalizeVisibleHeadline } from "@/lib/custom-character-copy";
 import {
   buildLegacyRebuildHref,
@@ -46,6 +47,15 @@ type BannerState =
   | { type: "error"; message: string }
   | { type: "success"; message: string }
   | null;
+
+type MessageUsageState = {
+  currentPlan: string;
+  messagesThisMonth: number;
+  messageLimit: number;
+  remainingMessages: number;
+  messageUsageLabel: string;
+  upgradeReasons: string[];
+};
 
 type SessionState = "fresh" | "active";
 type RetentionState = "fresh-start" | "warming-up" | "settled-in" | "ongoing";
@@ -100,6 +110,18 @@ function clean(value?: string | null) {
   if (!trimmed) return undefined;
   const lowered = trimmed.toLowerCase();
   return lowered === "undefined" || lowered === "null" ? undefined : trimmed;
+}
+
+class MessageLimitError extends Error {
+  payload: MessageUsageState;
+
+  constructor(payload: MessageUsageState) {
+    super(
+      `You have reached your monthly message limit for the ${payload.currentPlan} plan.`,
+    );
+    this.name = "MessageLimitError";
+    this.payload = payload;
+  }
 }
 
 function mapDbMessage(message: DbCustomMessage): ChatMessage {
@@ -358,8 +380,41 @@ async function createConversationMessage(args: {
   });
 
   const payload = (await response.json().catch(() => null)) as
-    | { ok?: boolean; error?: string; message?: DbCustomMessage }
+    | {
+        ok?: boolean;
+        error?: string;
+        message?: DbCustomMessage;
+        currentPlan?: string;
+        messagesThisMonth?: number;
+        messageLimit?: number;
+        remainingMessages?: number;
+        messageUsageLabel?: string;
+        upgradeReasons?: string[];
+      }
     | null;
+
+  if (
+    response.status === 403 &&
+    payload?.error === "MONTHLY_MESSAGE_LIMIT_REACHED" &&
+    typeof payload.currentPlan === "string" &&
+    typeof payload.messagesThisMonth === "number" &&
+    typeof payload.messageLimit === "number" &&
+    typeof payload.remainingMessages === "number" &&
+    typeof payload.messageUsageLabel === "string"
+  ) {
+    throw new MessageLimitError({
+      currentPlan: payload.currentPlan,
+      messagesThisMonth: payload.messagesThisMonth,
+      messageLimit: payload.messageLimit,
+      remainingMessages: payload.remainingMessages,
+      messageUsageLabel: payload.messageUsageLabel,
+      upgradeReasons: Array.isArray(payload.upgradeReasons)
+        ? payload.upgradeReasons.filter(
+            (reason): reason is string => typeof reason === "string" && reason.trim().length > 0,
+          )
+        : [],
+    });
+  }
 
   if (!response.ok || !payload?.ok || !payload.message) {
     throw new Error(payload?.error || "Could not save message.");
@@ -429,6 +484,7 @@ export default function CustomCharacterChatPage() {
   const [sending, setSending] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
+  const [messageUsage, setMessageUsage] = useState<MessageUsageState | null>(null);
   const [justReset, setJustReset] = useState(false);
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
   const [sceneSetup, setSceneSetup] = useState("");
@@ -725,6 +781,63 @@ export default function CustomCharacterChatPage() {
 
       const data = await response.json();
 
+      if (
+        data &&
+        typeof data === "object" &&
+        "usage" in data &&
+        data.usage &&
+        typeof data.usage === "object"
+      ) {
+        const usage = data.usage as Partial<MessageUsageState>;
+        if (
+          typeof usage.currentPlan === "string" &&
+          typeof usage.messagesThisMonth === "number" &&
+          typeof usage.messageLimit === "number" &&
+          typeof usage.remainingMessages === "number" &&
+          typeof usage.messageUsageLabel === "string"
+        ) {
+          setMessageUsage({
+            currentPlan: usage.currentPlan,
+            messagesThisMonth: usage.messagesThisMonth,
+            messageLimit: usage.messageLimit,
+            remainingMessages: usage.remainingMessages,
+            messageUsageLabel: usage.messageUsageLabel,
+            upgradeReasons: Array.isArray(usage.upgradeReasons)
+              ? usage.upgradeReasons.filter(
+                  (reason): reason is string =>
+                    typeof reason === "string" && reason.trim().length > 0,
+                )
+              : [],
+          });
+        }
+      }
+
+      if (
+        response.status === 403 &&
+        data &&
+        typeof data === "object" &&
+        data.error === "MONTHLY_MESSAGE_LIMIT_REACHED" &&
+        typeof data.currentPlan === "string" &&
+        typeof data.messagesThisMonth === "number" &&
+        typeof data.messageLimit === "number" &&
+        typeof data.remainingMessages === "number" &&
+        typeof data.messageUsageLabel === "string"
+      ) {
+        throw new MessageLimitError({
+          currentPlan: data.currentPlan,
+          messagesThisMonth: data.messagesThisMonth,
+          messageLimit: data.messageLimit,
+          remainingMessages: data.remainingMessages,
+          messageUsageLabel: data.messageUsageLabel,
+          upgradeReasons: Array.isArray(data.upgradeReasons)
+            ? data.upgradeReasons.filter(
+                (reason: unknown): reason is string =>
+                  typeof reason === "string" && reason.trim().length > 0,
+              )
+            : [],
+        });
+      }
+
       if (!response.ok || !data?.reply) {
         throw new Error(data?.error || "Could not generate reply.");
       }
@@ -744,6 +857,15 @@ export default function CustomCharacterChatPage() {
       setMessages((current) =>
         current.filter((item) => item.id !== optimisticUserMessage.id),
       );
+
+      if (error instanceof MessageLimitError) {
+        setMessageUsage(error.payload);
+        setBanner({
+          type: "error",
+          message: `${error.message} ${error.payload.messageUsageLabel}`,
+        });
+        return;
+      }
 
       const message =
         error instanceof Error ? error.message : "Could not send message.";
@@ -1109,6 +1231,7 @@ export default function CustomCharacterChatPage() {
                           onChange={(event) => setSceneSetup(event.target.value)}
                           rows={3}
                           placeholder="A short note to steer the mood or moment."
+                          disabled={(messageUsage?.remainingMessages ?? 1) <= 0}
                           className="mt-2 w-full resize-none rounded-[18px] border border-white/10 bg-black/25 px-3 py-3 text-sm leading-6 text-white outline-none placeholder:text-white/25"
                         />
                       </div>
@@ -1124,13 +1247,15 @@ export default function CustomCharacterChatPage() {
                         : "Pick up where this thread left off..."
                     }
                     rows={4}
+                    disabled={sending || (messageUsage?.remainingMessages ?? 1) <= 0}
                     className="w-full resize-none bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-white/25"
                   />
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <div className="text-xs text-white/40">
-                      {sessionState === "fresh"
-                        ? "A direct first line usually works best."
-                        : getRetentionHint(retentionState)}
+                      {messageUsage?.messageUsageLabel ??
+                        (sessionState === "fresh"
+                          ? "A direct first line usually works best."
+                          : getRetentionHint(retentionState))}
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <button
@@ -1156,7 +1281,11 @@ export default function CustomCharacterChatPage() {
                       <button
                         type="button"
                         onClick={handleSend}
-                        disabled={sending || !input.trim()}
+                        disabled={
+                          sending ||
+                          !input.trim() ||
+                          (messageUsage?.remainingMessages ?? 1) <= 0
+                        }
                         className="rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black shadow-[0_14px_40px_rgba(255,255,255,0.1)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {sending ? "Sending..." : "Send message"}
@@ -1176,7 +1305,16 @@ export default function CustomCharacterChatPage() {
                 identityChips={panelIdentityChips}
                 storySummary={storySummary}
                 scenarioSummary={scenarioSummary}
-                photoStudioHref={`/photo-studio/custom/${character.slug}`}
+                photoStudioHref={
+                  getCustomCharacterVisibility(character.payload).showInPhotoStudio
+                    ? `/photo-studio/custom/${character.slug}`
+                    : "/photo-studio"
+                }
+                photoStudioLabel={
+                  getCustomCharacterVisibility(character.payload).showInPhotoStudio
+                    ? "Open Photo Studio"
+                    : "Photo Studio hidden"
+                }
               />
             </aside>
           </div>

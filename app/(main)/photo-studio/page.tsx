@@ -5,7 +5,10 @@ import {
   createSupabaseStorageSigner,
   resolveCharacterImageMap,
 } from "@/lib/character-image-assets";
-import { getCharacterBySlug } from "@/lib/characters";
+import {
+  getCustomCharacterVisibility,
+  listManagedBuiltInCharacters,
+} from "@/lib/character-admin";
 import { createClient } from "@/lib/supabase/server";
 
 type CustomCharacterRow = {
@@ -13,6 +16,7 @@ type CustomCharacterRow = {
   slug: string;
   name: string;
   headline: string | null;
+  payload: Record<string, unknown> | null;
   primary_image_url: string | null;
   updated_at: string | null;
   user_id: string | null;
@@ -146,6 +150,10 @@ export default async function PhotoStudioHomePage() {
   }
 
   const signUrl = createSupabaseStorageSigner(supabase as never);
+  const builtInCharacters = await listManagedBuiltInCharacters(supabase as never);
+  const builtInCharacterMap = new Map(
+    builtInCharacters.map((character) => [character.slug, character] as const),
+  );
 
   const { data: customConversationRowsRaw, error: customConversationError } =
     await supabase
@@ -173,7 +181,7 @@ export default async function PhotoStudioHomePage() {
     customIds.length > 0
       ? await supabase
           .from("custom_characters")
-          .select("id, slug, name, headline, primary_image_url, updated_at, user_id")
+          .select("id, slug, name, headline, payload, primary_image_url, updated_at, user_id")
           .in("id", customIds)
       : { data: [], error: null };
 
@@ -196,7 +204,9 @@ export default async function PhotoStudioHomePage() {
   const latestBuiltInBySlug = new Map<string, BuiltInConversationRow>();
   for (const row of (builtInConversationsRaw ?? []) as BuiltInConversationRow[]) {
     if (!row.character_slug || latestBuiltInBySlug.has(row.character_slug)) continue;
-    if (!getCharacterBySlug(row.character_slug)) continue;
+    if (!builtInCharacterMap.get(row.character_slug)?.adminVisibility.showInPhotoStudio) {
+      continue;
+    }
     latestBuiltInBySlug.set(row.character_slug, row);
   }
 
@@ -221,7 +231,9 @@ export default async function PhotoStudioHomePage() {
     signUrl,
     fallbackByCharacterId: new Map([
       ...customRows.map((row) => [row.id, row.primary_image_url ?? null] as const),
-      ...builtInSlugs.map((slug) => [slug, getCharacterBySlug(slug)?.image ?? null] as const),
+      ...builtInSlugs.map(
+        (slug) => [slug, builtInCharacterMap.get(slug)?.image ?? null] as const,
+      ),
     ]),
   });
 
@@ -231,25 +243,32 @@ export default async function PhotoStudioHomePage() {
     return map;
   }, new Map<string, number>());
 
-  const customCards: StudioCard[] = customRows.map((row) => ({
-    id: row.id,
-    slug: row.slug,
-    name: row.name,
-    headline:
-      row.headline?.trim() ||
-      (row.user_id === user.id
-        ? "Your custom character is ready for fresh studio shots."
-        : "A saved community character ready for more photos."),
-    imageUrl: imageMap.get(row.id) ?? null,
-    href: `/photo-studio/custom/${row.slug}`,
-    source: row.user_id === user.id ? "my_character" : "community",
-    updatedAt: latestCustomConversationById.get(row.id) ?? row.updated_at ?? null,
-    photoCount: photoCounts.get(row.id) ?? 0,
-  }));
+  const customCards: StudioCard[] = customRows
+    .map((row) => {
+      const visibility = getCustomCharacterVisibility(row.payload);
+      if (!visibility.showInPhotoStudio) return null;
+
+      return {
+        id: row.id,
+        slug: row.slug,
+        name: row.name,
+        headline:
+          row.headline?.trim() ||
+          (row.user_id === user.id
+            ? "Your custom character is ready for fresh studio shots."
+            : "A saved community character ready for more photos."),
+        imageUrl: imageMap.get(row.id) ?? null,
+        href: `/photo-studio/custom/${row.slug}`,
+        source: row.user_id === user.id ? "my_character" : "community",
+        updatedAt: latestCustomConversationById.get(row.id) ?? row.updated_at ?? null,
+        photoCount: photoCounts.get(row.id) ?? 0,
+      };
+    })
+    .filter((item): item is StudioCard => item !== null);
 
   const builtInCards = builtInSlugs
     .map<StudioCard | null>((slug) => {
-      const character = getCharacterBySlug(slug);
+      const character = builtInCharacterMap.get(slug);
       const conversation = latestBuiltInBySlug.get(slug);
       if (!character || !conversation) return null;
 

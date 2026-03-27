@@ -190,6 +190,52 @@ export type Database = {
         Relationships: [];
       };
 
+      built_in_character_overrides: {
+        Row: {
+          id: string;
+          character_slug: string;
+          role_label: string | null;
+          headline: string | null;
+          description: string | null;
+          is_listed_in_professional: boolean;
+          is_chat_enabled: boolean;
+          is_visible_in_sidebar: boolean;
+          is_visible_in_photo_studio: boolean;
+          sort_order: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          character_slug: string;
+          role_label?: string | null;
+          headline?: string | null;
+          description?: string | null;
+          is_listed_in_professional?: boolean;
+          is_chat_enabled?: boolean;
+          is_visible_in_sidebar?: boolean;
+          is_visible_in_photo_studio?: boolean;
+          sort_order?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          character_slug?: string;
+          role_label?: string | null;
+          headline?: string | null;
+          description?: string | null;
+          is_listed_in_professional?: boolean;
+          is_chat_enabled?: boolean;
+          is_visible_in_sidebar?: boolean;
+          is_visible_in_photo_studio?: boolean;
+          sort_order?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
       custom_conversations: {
         Row: {
           id: string;

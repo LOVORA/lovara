@@ -1,8 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
-import { characters } from "@/lib/characters";
+import { listManagedBuiltInCharacters } from "@/lib/character-admin";
+import { createClient } from "@/lib/supabase/server";
 
-export default function CharactersPage() {
+export default async function CharactersPage() {
+  const supabase = await createClient();
+  const characters = (await listManagedBuiltInCharacters(supabase as never)).filter(
+    (character) => character.adminVisibility.showInProfessionalList,
+  );
   const featured = characters[0];
   const rest = characters.slice(1);
 

@@ -4,6 +4,7 @@ import {
   createSupabaseStorageSigner,
   resolveCharacterImageMap,
 } from "@/lib/character-image-assets";
+import { getCustomCharacterVisibility } from "@/lib/character-admin";
 import { createClient } from "@/lib/supabase/server";
 
 function truncate(value: string | undefined, max = 88) {
@@ -53,7 +54,7 @@ export async function GET() {
         characterIds.length > 0
           ? supabase
               .from("custom_characters")
-              .select("id, slug, name, primary_image_url")
+              .select("id, slug, name, primary_image_url, payload")
               .eq("user_id", user.id)
               .in("id", characterIds)
           : Promise.resolve({ data: [], error: null }),
@@ -120,14 +121,19 @@ export async function GET() {
     });
 
     const characterMap = new Map(
-      (characters ?? []).map((item) => [
-        item.id,
-        {
-          slug: typeof item.slug === "string" ? item.slug : "",
-          name: typeof item.name === "string" ? item.name : "Character",
-          imageUrl: imageMap.get(item.id) ?? null,
-        },
-      ]),
+      (characters ?? [])
+        .filter((item) => {
+          const visibility = getCustomCharacterVisibility(item.payload);
+          return visibility.chatEnabled && visibility.showInChatsSidebar;
+        })
+        .map((item) => [
+          item.id,
+          {
+            slug: typeof item.slug === "string" ? item.slug : "",
+            name: typeof item.name === "string" ? item.name : "Character",
+            imageUrl: imageMap.get(item.id) ?? null,
+          },
+        ]),
     );
 
     const lastMessageMap = new Map<string, { content: string; createdAt: string }>();
@@ -157,18 +163,23 @@ export async function GET() {
           imageUrl: match?.imageUrl ?? null,
         };
       }),
-      publicSamples: (publicSamples ?? []).map((item) => ({
-        id: item.id,
-        slug: typeof item.slug === "string" ? item.slug : "",
-        name: typeof item.name === "string" ? item.name : "Character",
-        summary: truncate(
-          (typeof item.headline === "string" && item.headline) ||
-            (typeof item.description === "string" && item.description) ||
-            "Open the public card to see the full vibe.",
-          82,
-        ),
-        imageUrl: imageMap.get(item.id) ?? null,
-      })),
+      publicSamples: (publicSamples ?? [])
+        .filter((item) => {
+          const visibility = getCustomCharacterVisibility(item.payload);
+          return visibility.showInCommunityList && visibility.showInChatsSidebar;
+        })
+        .map((item) => ({
+          id: item.id,
+          slug: typeof item.slug === "string" ? item.slug : "",
+          name: typeof item.name === "string" ? item.name : "Character",
+          summary: truncate(
+            (typeof item.headline === "string" && item.headline) ||
+              (typeof item.description === "string" && item.description) ||
+              "Open the public card to see the full vibe.",
+            82,
+          ),
+          imageUrl: imageMap.get(item.id) ?? null,
+        })),
     });
   } catch (error) {
     return NextResponse.json(

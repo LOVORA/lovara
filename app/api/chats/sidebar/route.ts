@@ -4,7 +4,7 @@ import {
   createSupabaseStorageSigner,
   resolveCharacterImageMap,
 } from "@/lib/character-image-assets";
-import { getCharacterBySlug } from "@/lib/characters";
+import { listManagedBuiltInCharacters } from "@/lib/character-admin";
 import { createClient } from "@/lib/supabase/server";
 
 type CustomConversationRow = {
@@ -24,6 +24,7 @@ type CustomCharacterRow = {
   slug: string;
   name: string;
   primary_image_url: string | null;
+  payload?: Record<string, unknown> | null;
 };
 
 type CharacterImageRow = {
@@ -83,6 +84,10 @@ export async function GET() {
 
     const builtInConversationRows = (builtInRows ?? []) as BuiltInConversationRow[];
     const customConversationRows = (customRows ?? []) as CustomConversationRow[];
+    const builtInCharacters = await listManagedBuiltInCharacters(supabase as never);
+    const builtInCharacterMap = new Map(
+      builtInCharacters.map((character) => [character.slug, character] as const),
+    );
 
     const customCharacterIds = Array.from(
       new Set(customConversationRows.map((row) => row.custom_character_id).filter(Boolean)),
@@ -92,7 +97,7 @@ export async function GET() {
       customCharacterIds.length > 0
         ? await supabase
             .from("custom_characters")
-            .select("id, slug, name, primary_image_url")
+            .select("id, slug, name, primary_image_url, payload")
             .in("id", customCharacterIds)
         : { data: [], error: null };
 
@@ -110,7 +115,14 @@ export async function GET() {
       new Set(
         builtInConversationRows
           .map((row) => row.character_slug)
-          .filter((slug): slug is string => Boolean(slug) && Boolean(getCharacterBySlug(slug))),
+          .filter(
+            (slug): slug is string =>
+              Boolean(slug) &&
+              Boolean(
+                builtInCharacterMap.get(slug)?.adminVisibility.chatEnabled &&
+                  builtInCharacterMap.get(slug)?.adminVisibility.showInChatsSidebar,
+              ),
+          ),
       ),
     );
 
@@ -132,7 +144,9 @@ export async function GET() {
       signUrl: createSupabaseStorageSigner(supabase as never),
       fallbackByCharacterId: new Map([
         ...customCharacterRows.map((row) => [row.id, row.primary_image_url ?? null] as const),
-        ...builtInSlugs.map((slug) => [slug, getCharacterBySlug(slug)?.image ?? null] as const),
+        ...builtInSlugs.map(
+          (slug) => [slug, builtInCharacterMap.get(slug)?.image ?? null] as const,
+        ),
       ]),
     });
 
@@ -140,7 +154,7 @@ export async function GET() {
       .filter((row) => typeof row.character_slug === "string" && row.character_slug)
       .map((row) => {
         const slug = row.character_slug;
-        const character = getCharacterBySlug(slug);
+        const character = builtInCharacterMap.get(slug);
         if (!character) return null;
 
         return {
